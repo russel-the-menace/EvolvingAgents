@@ -108,6 +108,10 @@ body { background: var(--mc-bg); color: var(--mc-ink); }
 .session-delete { color: #aaa; }
 .session-delete:hover { color: var(--mc-sidebar-ink); background: var(--mc-sidebar-active); }
 .daily-history-top { padding-bottom: 10px; font-size: 16px; font-weight: 500; }
+.recents-toggle { display: flex; align-items: center; gap: 3px; width: max-content; border: 0; padding: 0 8px 10px; color: var(--mc-sidebar-ink); background: transparent; }
+.recents-toggle svg { opacity: 0; transform: rotate(0deg); transition: opacity .16s ease .5s, transform .16s ease; }
+.recents-toggle:hover svg, .recents-toggle:focus-visible svg { opacity: .8; }
+.recents-toggle.collapsed svg { transform: rotate(-90deg); opacity: .8; }
 .session-list { gap: 1px; }
 .session-item { position: relative; grid-template-columns: minmax(0, 1fr) auto; min-height: 38px; border-radius: 8px; }
 .session-item > button:first-child { padding: 9px 10px; border-radius: 8px; font-size: 14px; }
