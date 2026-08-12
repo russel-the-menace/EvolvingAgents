@@ -1,0 +1,15 @@
+node_modules/
+dist/
+.vite/
+out/
+.DS_Store
+tmp/
+
+# JD2Resume is a separately cloned, read-only reference cache.
+reference-project/
+
+# Future local-only data: raw memories, API keys, recordings, and model caches.
+data/
+.env
+.env.local
+models/
