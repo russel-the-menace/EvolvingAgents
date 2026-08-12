@@ -97,7 +97,8 @@ body { background: var(--mc-bg); color: var(--mc-ink); }
 .session-list { min-height: 0; overflow: auto; }
 .daily-composer { min-height: 62px; padding: 8px 46px; margin-bottom: 18px; border-color: var(--mc-border); border-radius: 18px; background: var(--mc-panel); box-shadow: 0 5px 18px rgba(0, 0, 0, .06); transition: padding .18s ease; }
 .daily-composer > textarea { min-height: 24px; max-height: 144px; padding: 2px 0; overflow-y: auto; line-height: 20px; color: var(--mc-ink); background: transparent; }
-.daily-composer.expanded { padding-top: 12px; padding-bottom: 46px; }
+.daily-composer.expanded { padding: 12px 14px 46px; }
+.daily-composer.expanded > textarea { width: 100%; }
 .plus-button { left: 10px; width: 28px; height: 28px; color: #666; border-color: #c9c9c9; background: var(--mc-panel); transition: top .18s ease; }
 .plus-button.open { color: #fff; border-color: #555; background: #333; }
 .send-icon { right: 10px; width: 28px; height: 28px; color: #fff; background: var(--mc-action); border-color: var(--mc-action); transition: top .18s ease, background .18s ease; }
