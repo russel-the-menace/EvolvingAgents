@@ -35,6 +35,8 @@ button:disabled { cursor: not-allowed; opacity: .45; }
   --mc-sidebar-muted: #6c6c6c;
   --mc-sidebar-active: #dedede;
   --mc-action: #2b2b2b;
+  --mc-user-bubble: #e6e6e6;
+  --mc-user-bubble-border: #d2d2d2;
 }
 :root[data-theme="dark"] {
   --mc-bg: #101010;
@@ -48,12 +50,15 @@ button:disabled { cursor: not-allowed; opacity: .45; }
   --mc-sidebar-muted: #a0a0a0;
   --mc-sidebar-active: #353535;
   --mc-action: #eeeeee;
+  --mc-user-bubble: #303030;
+  --mc-user-bubble-border: #454545;
 }
 @media (prefers-color-scheme: dark) {
   :root[data-theme="system"] {
     --mc-bg: #101010; --mc-panel: #1b1b1b; --mc-panel-muted: #252525; --mc-border: #3a3a3a;
     --mc-ink: #f1f1f1; --mc-muted: #a5a5a5; --mc-sidebar: #171717; --mc-sidebar-ink: #eeeeee;
     --mc-sidebar-muted: #a0a0a0; --mc-sidebar-active: #353535; --mc-action: #eeeeee;
+    --mc-user-bubble: #303030; --mc-user-bubble-border: #454545;
   }
 }
 body { background: var(--mc-bg); color: var(--mc-ink); }
@@ -79,9 +84,9 @@ body { background: var(--mc-bg); color: var(--mc-ink); }
 .daily-empty svg, .brief-top svg, .conversation-empty svg, .card-heading > svg, .composer-bar > span svg { color: #777; }
 .daily-empty h2, .conversation-empty h2 { color: var(--mc-ink); }
 .daily-message p, .message p { color: var(--mc-ink); background: var(--mc-panel-muted); }
-.daily-message.user p, .message.interviewer p { background: #dedede; border-color: #cfcfcf; }
+.daily-message.user p, .message.interviewer p { background: var(--mc-user-bubble); border-color: var(--mc-user-bubble-border); }
 .daily-message .message-body, .message .message-body { white-space: normal; color: var(--mc-ink); background: var(--mc-panel-muted); border: 1px solid transparent; border-radius: 8px; padding: 14px 16px; font-size: 15px; line-height: 1.72; }
-.daily-message.user .message-body, .message.interviewer .message-body { background: #dedede; border-color: #cfcfcf; }
+.daily-message.user .message-body, .message.interviewer .message-body { background: var(--mc-user-bubble); border-color: var(--mc-user-bubble-border); }
 .rich-text > p { margin: 0; }
 .rich-text > p + p { margin-top: 1em; }
 .rich-text strong { font-weight: 750; }
@@ -106,6 +111,10 @@ body { background: var(--mc-bg); color: var(--mc-ink); }
 .daily-sidebar-footer { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: auto; padding: 18px 8px 2px; border-top: 1px solid var(--mc-border); }
 .daily-history { display: flex; flex-direction: column; }
 .session-list { min-height: 0; overflow: auto; }
+.daily-transcript, .transcript { scrollbar-width: none; -ms-overflow-style: none; }
+.daily-transcript::-webkit-scrollbar, .transcript::-webkit-scrollbar { display: none; }
+.daily-message { position: relative; }
+.daily-message > .message-delete { position: absolute; top: -3px; right: 2px; z-index: 1; }
 .daily-composer { min-height: 62px; padding: 8px 46px; margin-bottom: 18px; border-color: var(--mc-border); border-radius: 18px; background: var(--mc-panel); box-shadow: 0 5px 18px rgba(0, 0, 0, .06); transition: padding .18s ease; }
 .daily-composer:not(.expanded) { display: flex; align-items: center; }
 .daily-composer:not(.expanded) > textarea { width: 100%; height: 24px; min-height: 24px; padding: 2px 0; overflow: hidden; line-height: 20px; color: var(--mc-ink); background: transparent; transition: height .18s ease, width .18s ease; }
@@ -164,6 +173,4 @@ body { background: var(--mc-bg); color: var(--mc-ink); }
 .conversation { background: var(--mc-panel); border-color: var(--mc-border); }
 .context-rail { border-color: var(--mc-border); }
 .message .message-body { background: var(--mc-panel-muted); color: var(--mc-ink); border-color: var(--mc-border); }
-.message.interviewer .message-body { background: color-mix(in srgb, var(--mc-panel-muted) 82%, var(--mc-ink)); border-color: var(--mc-border); }
-:root[data-theme="dark"] .daily-message.user .message-body, :root[data-theme="dark"] .message.interviewer .message-body { background: #303030; border-color: #454545; }
-:root[data-theme="dark"] .daily-message .message-body, :root[data-theme="dark"] .message .message-body { background: #242424; border-color: #353535; }
+.message.interviewer .message-body { background: var(--mc-user-bubble); border-color: var(--mc-user-bubble-border); }
