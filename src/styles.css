@@ -190,7 +190,7 @@ body { background: var(--mc-bg); color: var(--mc-ink); }
 .daily-message.user .inline-message-editor { margin-left: auto; }
 .inline-message-editor textarea { display: block; width: 100%; min-height: 24px; max-height: 180px; padding: 0; resize: none; border: 0; outline: 0; color: var(--mc-ink); background: transparent; font-size: 14px; font-weight: 400; line-height: 1.72; }
 .inline-message-editor > div { position: absolute; right: 13px; bottom: 7px; display: flex; align-items: center; justify-content: flex-end; gap: 8px; margin-bottom: 0; font-size: inherit; font-weight: inherit; }
-.edit-cancel-button, .edit-send-button { border-radius: 999px; padding: 5px 10px; font-size: 12px; line-height: 1.72; font-weight: 400; white-space: nowrap; }
+.edit-cancel-button, .edit-send-button { border-radius: 999px; padding: 4px 10px; font-size: 12px; line-height: 1.72; font-weight: 400; white-space: nowrap; }
 .edit-cancel-button { border: 1px solid var(--mc-border); color: var(--mc-ink); background: transparent; }
 .edit-send-button { border: 1px solid var(--mc-action); color: var(--mc-bg); background: var(--mc-action); }
 .edit-send-button:disabled { opacity: .45; }
