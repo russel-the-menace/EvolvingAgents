@@ -22,6 +22,8 @@ export const memoryApi = {
     request<{ memory: MemoryCandidate }>(`/memory/candidates/${id}`, { method: 'PATCH', body: JSON.stringify({ status }) }),
   listSessions: () => request<{ sessions: DailySession[] }>('/chat/sessions'),
   createSession: () => request<{ session: DailySession }>('/chat/sessions', { method: 'POST' }),
+  deleteSession: (sessionId: string) => request<void>(`/chat/sessions/${sessionId}`, { method: 'DELETE' }),
+  deleteMessage: (sessionId: string, messageId: string) => request<void>(`/chat/sessions/${sessionId}/messages/${messageId}`, { method: 'DELETE' }),
   streamChat: async (sessionId: string, content: string, onDelta: (delta: string) => void, signal: AbortSignal) => {
     const response = await fetch(`/api/chat/sessions/${sessionId}/stream`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, signal, body: JSON.stringify({ content }),

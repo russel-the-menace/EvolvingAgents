@@ -39,6 +39,7 @@ export type MemoryCandidate = {
   content: string;
   tags: string[];
   sourceQuote: string;
+  sourceMessageIds?: string[];
   status: 'pending' | 'approved' | 'rejected';
   createdAt: string;
 };

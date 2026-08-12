@@ -13,7 +13,7 @@ async function loadStore() {
   try {
     return JSON.parse(await readFile(storePath, 'utf8'));
   } catch (error) {
-    if (error.code === 'ENOENT') return { documents: [], memories: [], sessions: [] };
+    if (error.code === 'ENOENT') return { documents: [], memories: [], sessions: [], deletedMessageIds: [] };
     throw error;
   }
 }
@@ -25,7 +25,7 @@ async function saveStore(store) {
   await rename(temporary, storePath);
 }
 
-function cleanCandidate(candidate, documentId) {
+function cleanCandidate(candidate, documentId, sourceMessageIds = []) {
   const kinds = new Set(['experience', 'skill', 'preference', 'viewpoint', 'language_sample']);
   return {
     id: randomUUID(),
@@ -35,6 +35,7 @@ function cleanCandidate(candidate, documentId) {
     content: String(candidate.content || '').slice(0, 800),
     tags: Array.isArray(candidate.tags) ? candidate.tags.map(String).slice(0, 8) : [],
     sourceQuote: String(candidate.sourceQuote || '').slice(0, 500),
+    sourceMessageIds,
     status: 'pending',
     createdAt: new Date().toISOString(),
   };
@@ -98,6 +99,20 @@ async function streamDailyChat(session, store, response) {
     }
   }
   return answer;
+}
+
+function removeMessageLinkedData(store, messageIds) {
+  const ids = new Set(messageIds);
+  store.deletedMessageIds = [...new Set([...(store.deletedMessageIds || []), ...messageIds])].slice(-10_000);
+  const removedDocumentIds = new Set();
+  store.documents = store.documents.filter((document) => {
+    const linked = (document.sourceMessageIds || []).some((id) => ids.has(id));
+    if (linked) removedDocumentIds.add(document.id);
+    return !linked;
+  });
+  store.memories = store.memories.filter((memory) =>
+    !removedDocumentIds.has(memory.documentId) && !(memory.sourceMessageIds || []).some((id) => ids.has(id)),
+  );
 }
 
 app.get('/api/health', (_, response) => response.json({ status: 'ok' }));
@@ -173,13 +188,17 @@ app.post('/api/chat/sessions/:id/stream', async (request, response, next) => {
     const answer = await streamDailyChat(session, store, response);
     if (answer) session.messages.push({ id: randomUUID(), role: 'assistant', content: answer, createdAt: new Date().toISOString() });
     session.updatedAt = new Date().toISOString();
-    const turnCount = session.messages.filter((message) => message.role === 'user').length;
-    if (turnCount > 0 && turnCount % 4 === 0) {
-      const document = { id: randomUUID(), title: `日常对话：${session.title}`, sourceType: 'conversation', content: session.messages.slice(-8).map((message) => `${message.role === 'user' ? '我' : 'MindClone'}：${message.content}`).join('\n\n'), createdAt: new Date().toISOString() };
+    const recentMessages = session.messages.slice(-2);
+    const shouldExtract = recentMessages[0]?.content.length >= 60 || /经历|项目|工作|创业|喜欢|不喜欢|价值观|擅长|学习|决定|目标/.test(recentMessages[0]?.content || '');
+    if (shouldExtract) {
+      const document = { id: randomUUID(), title: `日常对话：${session.title}`, sourceType: 'conversation', content: recentMessages.map((message) => `${message.role === 'user' ? '我' : 'MindClone'}：${message.content}`).join('\n\n'), sourceMessageIds: recentMessages.map((message) => message.id), createdAt: new Date().toISOString() };
       store.documents.unshift(document);
       proposeWithDeepSeek(document).then(async (proposed) => {
         const latest = await loadStore();
-        latest.memories.unshift(...proposed.map((candidate) => cleanCandidate(candidate, document.id)).filter((candidate) => candidate.content));
+        const deletedIds = new Set(latest.deletedMessageIds || []);
+        if (document.sourceMessageIds.some((id) => deletedIds.has(id))) return;
+        if (!latest.documents.some((item) => item.id === document.id)) return;
+        latest.memories.unshift(...proposed.map((candidate) => cleanCandidate(candidate, document.id, document.sourceMessageIds)).filter((candidate) => candidate.content));
         const latestDocument = latest.documents.find((item) => item.id === document.id);
         if (latestDocument) latestDocument.extractedAt = new Date().toISOString();
         await saveStore(latest);
@@ -188,6 +207,34 @@ app.post('/api/chat/sessions/:id/stream', async (request, response, next) => {
     await saveStore(store);
     response.write('data: [DONE]\n\n');
     response.end();
+  } catch (error) { next(error); }
+});
+app.delete('/api/chat/sessions/:id', async (request, response, next) => {
+  try {
+    const store = await loadStore();
+    const session = (store.sessions || []).find((item) => item.id === request.params.id);
+    if (!session) return response.status(404).json({ error: '未找到对话。' });
+    removeMessageLinkedData(store, session.messages.map((message) => message.id));
+    store.sessions = store.sessions.filter((item) => item.id !== session.id);
+    await saveStore(store);
+    response.status(204).end();
+  } catch (error) { next(error); }
+});
+app.delete('/api/chat/sessions/:sessionId/messages/:messageId', async (request, response, next) => {
+  try {
+    const store = await loadStore();
+    const session = (store.sessions || []).find((item) => item.id === request.params.sessionId);
+    if (!session) return response.status(404).json({ error: '未找到对话。' });
+    const position = session.messages.findIndex((message) => message.id === request.params.messageId);
+    if (position < 0) return response.status(404).json({ error: '未找到消息。' });
+    const removedIds = [session.messages[position].id];
+    // Assistant response only belongs to the immediately preceding user turn.
+    if (session.messages[position + 1]?.role === 'assistant') removedIds.push(session.messages[position + 1].id);
+    session.messages = session.messages.filter((message) => !removedIds.includes(message.id));
+    removeMessageLinkedData(store, removedIds);
+    session.updatedAt = new Date().toISOString();
+    await saveStore(store);
+    response.status(204).end();
   } catch (error) { next(error); }
 });
 app.use((error, _, response, __) => {

@@ -2,7 +2,8 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ArrowRight, BotMessageSquare, CheckCircle2, CircleStop, FileText,
   FileUp, ListChecks, MessageCircle, MessageSquarePlus, Mic, Paperclip, Play,
-  Plus, SendHorizontal, Settings2, Sparkles, Upload, Volume2, X,
+  PanelLeftClose, PanelLeftOpen, Plus, Search, SendHorizontal, Settings2,
+  Sparkles, Trash2, Upload, Volume2, X,
 } from 'lucide-react';
 import { preparePacket, streamCandidateAnswer } from './interview';
 import { memoryApi } from './memory-api';
@@ -37,6 +38,7 @@ export function App() {
   const [dailyInput, setDailyInput] = useState('');
   const [dailyStreaming, setDailyStreaming] = useState(false);
   const [dailyError, setDailyError] = useState('');
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
   const generationRef = useRef(0);
   const transcriptRef = useRef<HTMLDivElement>(null);
@@ -179,7 +181,7 @@ export function App() {
   }
 
   return (
-    <main className="app-shell">
+    <main className={`app-shell ${sidebarCollapsed ? 'sidebar-collapsed' : ''} ${mode === 'daily' ? 'daily-mode' : ''}`}>
       <aside className="sidebar">
         <div className="brand"><Sparkles size={20} /><span>MindClone</span></div>
         <nav>
@@ -212,7 +214,8 @@ export function App() {
         ) : mode === 'daily' ? (
           <DailyChatView sessions={dailySessions} activeSessionId={dailySessionId} input={dailyInput} streaming={dailyStreaming} error={dailyError}
             onInputChange={setDailyInput} onSelectSession={setDailySessionId} onNewSession={newDailySession} onRefresh={() => void refreshSessions()}
-            onError={setDailyError} onStreamChange={setDailyStreaming} onImport={importChatGPTToInbox} />
+            onError={setDailyError} onStreamChange={setDailyStreaming} onImport={importChatGPTToInbox} sidebarCollapsed={sidebarCollapsed}
+            onToggleSidebar={() => setSidebarCollapsed((current) => !current)} mode={mode} hasPacket={Boolean(packet)} onModeChange={setMode} />
         ) : mode === 'memory' ? (
           <MemoryView documents={memoryDocuments} candidates={memoryCandidates} error={memoryError} onRefresh={refreshMemory} />
         ) : packet ? (
@@ -247,19 +250,23 @@ function extractChatGPTConversations(value: unknown) {
   });
 }
 
-function DailyChatView({ sessions, activeSessionId, input, streaming, error, onInputChange, onSelectSession, onNewSession, onRefresh, onError, onStreamChange, onImport }: {
+function DailyChatView({ sessions, activeSessionId, input, streaming, error, onInputChange, onSelectSession, onNewSession, onRefresh, onError, onStreamChange, onImport, sidebarCollapsed, onToggleSidebar, mode, hasPacket, onModeChange }: {
   sessions: DailySession[]; activeSessionId: string | null; input: string; streaming: boolean; error: string;
   onInputChange: (value: string) => void; onSelectSession: (id: string) => void; onNewSession: () => Promise<string | null>; onRefresh: () => void;
   onError: (value: string) => void; onStreamChange: (value: boolean) => void; onImport: (file: File) => Promise<void>;
+  sidebarCollapsed: boolean; onToggleSidebar: () => void;
+  mode: Mode; hasPacket: boolean; onModeChange: (mode: Mode) => void;
 }) {
   const [attachmentOpen, setAttachmentOpen] = useState(false);
   const [attachmentNote, setAttachmentNote] = useState('');
   const [attachmentBusy, setAttachmentBusy] = useState(false);
   const [attachmentStatus, setAttachmentStatus] = useState('');
   const [draftMessages, setDraftMessages] = useState<DailyMessage[]>([]);
+  const [query, setQuery] = useState('');
   const listRef = useRef<HTMLDivElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const activeSession = sessions.find((session) => session.id === activeSessionId) ?? null;
+  const filteredSessions = sessions.filter((session) => `${session.title}\n${session.messages.map((message) => message.content).join('\n')}`.toLowerCase().includes(query.trim().toLowerCase()));
   const messages = draftMessages.length ? draftMessages : activeSession?.messages ?? [];
 
   useEffect(() => { setDraftMessages([]); }, [activeSessionId]);
@@ -300,9 +307,23 @@ function DailyChatView({ sessions, activeSessionId, input, streaming, error, onI
     try { await onImport(file); setAttachmentStatus('ChatGPT 历史已导入本地收件箱。'); } catch (caught) { setAttachmentStatus((caught as Error).message); } finally { setAttachmentBusy(false); }
   }
 
+  async function deleteSession(session: DailySession) {
+    if (!window.confirm(`删除“${session.title}”及其中所有消息？相关候选记忆也会被删除。`)) return;
+    try {
+      await memoryApi.deleteSession(session.id);
+      if (session.id === activeSessionId) onSelectSession('');
+      onRefresh();
+    } catch (caught) { onError((caught as Error).message); }
+  }
+
+  async function deleteMessage(message: DailyMessage) {
+    if (!activeSessionId || !window.confirm('删除这条消息及其直接回复？相关候选记忆也会被删除。')) return;
+    try { await memoryApi.deleteMessage(activeSessionId, message.id); setDraftMessages([]); onRefresh(); } catch (caught) { onError((caught as Error).message); }
+  }
+
   return <div className="daily-layout">
-    <aside className="daily-history"><div className="daily-history-top"><span>对话</span><button className="icon-button light" title="新建对话" onClick={onNewSession}><Plus size={18} /></button></div><div className="session-list">{sessions.length === 0 ? <p>开始一次对话，MindClone 会在本机保留你的记录。</p> : sessions.map((session) => <button key={session.id} className={session.id === activeSessionId ? 'session-item active' : 'session-item'} onClick={() => onSelectSession(session.id)}><span>{session.title}</span><small>{new Date(session.updatedAt).toLocaleDateString('zh-CN')}</small></button>)}</div></aside>
-    <section className="daily-conversation"><header className="daily-header"><div><p className="eyebrow">DAILY MINDCLONE</p><h1>{activeSession?.title || '和 MindClone 聊聊'}</h1></div><span className="provider-pill"><span /> DeepSeek 对话 · 本地记忆</span></header><div className="daily-transcript" ref={listRef}>{messages.length === 0 ? <div className="daily-empty"><Sparkles size={32} /><h2>从最近在想的事开始</h2><p>日常聊天是最主要的投喂方式。重要内容会异步形成待审核记忆，不打断这次对话。</p></div> : messages.map((message) => <article className={`daily-message ${message.role}`} key={message.id}><div>{message.role === 'user' ? '你' : 'MindClone'}</div><p>{message.content || (streaming ? '正在思考...' : '')}</p></article>)}{error && <div className="error-note">{error}</div>}</div>
+    <aside className="daily-history"><div className="daily-brand"><Sparkles size={21} /><span>MindClone</span></div><nav className="daily-nav"><button className={mode === 'daily' ? 'active' : ''} onClick={() => onModeChange('daily')}><MessageCircle size={17} /> 日常对话</button><button onClick={() => onModeChange('prepare')}><FileText size={17} /> 面试准备</button><button onClick={() => onModeChange('memory')}><MessageSquarePlus size={17} /> 记忆投喂</button><button disabled={!hasPacket} onClick={() => hasPacket && onModeChange('formal')}><BotMessageSquare size={17} /> 正式面试</button></nav><div className="daily-history-top"><span>对话</span><button className="icon-button light" title="新建对话" onClick={() => void onNewSession()}><Plus size={18} /></button></div><label className="chat-search"><Search size={15} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索对话" /></label><div className="session-list">{filteredSessions.length === 0 ? <p>{query ? '没有匹配的对话。' : '开始一次对话，MindClone 会在本机保留你的记录。'}</p> : filteredSessions.map((session) => <div key={session.id} className={session.id === activeSessionId ? 'session-item active' : 'session-item'}><button onClick={() => onSelectSession(session.id)}><span>{session.title}</span><small>{new Date(session.updatedAt).toLocaleDateString('zh-CN')}</small></button><button className="session-delete" title="删除对话" onClick={() => void deleteSession(session)}><Trash2 size={14} /></button></div>)}</div></aside>
+    <section className="daily-conversation"><header className="daily-header"><button className="sidebar-toggle" title={sidebarCollapsed ? '展开侧栏' : '收起侧栏'} onClick={onToggleSidebar}>{sidebarCollapsed ? <PanelLeftOpen size={19} /> : <PanelLeftClose size={19} />}</button><div className="daily-title"><p className="eyebrow">DAILY MINDCLONE</p><h1>{activeSession?.title || '和 MindClone 聊聊'}</h1></div><span className="provider-pill"><span /> DeepSeek 对话 · 本地记忆</span></header><div className="daily-transcript" ref={listRef}>{messages.length === 0 ? <div className="daily-empty"><Sparkles size={32} /><h2>从最近在想的事开始</h2><p>所有对话默认保存在本机。重要内容会异步进入候选记忆，等待你审核。</p></div> : messages.map((message) => <article className={`daily-message ${message.role}`} key={message.id}><div>{message.role === 'user' ? '你' : 'MindClone'}<button className="message-delete" title="删除消息" onClick={() => void deleteMessage(message)}><Trash2 size={13} /></button></div><p>{message.content || (streaming ? '正在思考...' : '')}</p></article>)}{error && <div className="error-note">{error}</div>}</div>
       <div className="daily-composer"><div className="attachment-area">{attachmentOpen && <div className="attachment-menu"><div className="attachment-menu-title">补充投喂</div><button onClick={() => fileRef.current?.click()}><FileUp size={17} /> 导入 ChatGPT 历史</button><button onClick={() => setAttachmentStatus('在下方粘贴 Markdown 或随手记。')}><Paperclip size={17} /> 添加文本 / Markdown</button><textarea value={attachmentNote} onChange={(event) => setAttachmentNote(event.target.value)} placeholder="粘贴补充材料..." /><button className="primary-button compact" disabled={attachmentBusy} onClick={() => void saveAttachmentNote()}>{attachmentBusy ? '处理中...' : '保存到收件箱'}</button>{attachmentStatus && <p>{attachmentStatus}</p>}</div>}<input ref={fileRef} className="hidden-input" type="file" accept="application/json,.json" onChange={(event) => { const file = event.target.files?.[0]; if (file) void importFile(file); event.currentTarget.value = ''; }} /><button className={attachmentOpen ? 'plus-button open' : 'plus-button'} title="添加材料" onClick={() => setAttachmentOpen((current) => !current)}><Plus size={21} /></button></div><textarea value={input} onChange={(event) => onInputChange(event.target.value)} onKeyDown={(event) => { if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') void send(); }} placeholder="和 MindClone 聊聊..." /><button className="send-icon" disabled={!input.trim() || streaming} title="发送" onClick={() => void send()}><SendHorizontal size={19} /></button></div>
     </section>
   </div>;

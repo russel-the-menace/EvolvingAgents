@@ -12,14 +12,18 @@ The local store owns the relationship: it keeps each full conversation, the appr
 
 ## Learning behavior
 
-1. Each user and assistant turn is saved locally as part of a daily session.
+1. Each user and assistant turn is saved locally as part of a daily session by default.
 2. The conversation continues immediately after the assistant response.
-3. Every fourth user turn, the latest segment is copied to a local source document.
-4. DeepSeek asynchronously proposes memories from that segment.
+3. After each completed turn, a lightweight local rule decides whether the user's message contains enough experience, preference, viewpoint, or other durable context to extract.
+4. When it does, the current turn is copied to a local source document and DeepSeek asynchronously proposes memories from it.
 5. The proposal is placed in the same pending-review queue as file imports.
 6. Only an explicit user approval makes a memory available to later preparation and conversation context.
 
 Extraction is intentionally asynchronous. The user never waits for memory indexing before continuing a thought.
+
+## Conversation control
+
+The sidebar follows a single-column ChatGPT-style layout: navigation, search, and conversation history share one collapsible sidebar. Search is local and matches saved conversation titles and text. The user can delete an entire conversation or a single message; deleting a user message also deletes its immediate assistant reply and any source documents or candidate memories that were derived from those deleted messages.
 
 ## Composer attachments
 
