@@ -123,12 +123,18 @@ body { background: var(--mc-bg); color: var(--mc-ink); }
 .plus-button { left: 10px; width: 28px; height: 28px; color: #666; border-color: #c9c9c9; background: var(--mc-panel); transition: top .18s ease; }
 .plus-button.open { color: #fff; border-color: #555; background: #333; }
 .send-icon { right: 10px; width: 28px; height: 28px; color: #fff; background: var(--mc-action); border-color: var(--mc-action); transition: top .18s ease, background .18s ease; }
-.daily-model-picker { position: absolute; right: 48px; top: 50%; transform: translateY(-50%); display: inline-flex; align-items: center; color: var(--mc-muted); }
-.daily-model-picker select { appearance: none; border: 0; outline: 0; background: transparent; color: inherit; cursor: pointer; font: inherit; font-size: 12px; padding: 4px 16px 4px 5px; }
-.daily-model-picker option { color: #222; background: #fff; }
-.daily-model-picker span { position: absolute; right: 3px; pointer-events: none; font-size: 16px; line-height: 1; }
+.daily-model-picker { position: absolute; right: 48px; top: 50%; transform: translateY(-50%); color: var(--mc-muted); }
+.daily-model-picker > button { display: inline-flex; align-items: center; gap: 3px; border: 0; border-radius: 7px; padding: 5px 7px; color: inherit; background: transparent; font-size: 12px; line-height: 1; white-space: nowrap; }
+.daily-model-picker > button:hover, .daily-model-picker.open > button { color: var(--mc-ink); background: var(--mc-panel-muted); }
+.daily-model-picker > button svg { transition: transform .16s ease; }
+.daily-model-picker.open > button svg { transform: rotate(180deg); }
+.daily-model-menu { position: absolute; right: 0; bottom: calc(100% + 8px); z-index: 6; width: 208px; padding: 5px; border: 1px solid var(--mc-border); border-radius: 10px; background: var(--mc-panel); box-shadow: 0 12px 30px rgba(0, 0, 0, .14); transform-origin: bottom right; animation: model-menu-in .14s ease both; }
+.daily-model-menu button { display: grid; width: 100%; gap: 2px; border: 0; border-radius: 7px; padding: 9px 10px; color: var(--mc-muted); background: transparent; text-align: left; }
+.daily-model-menu button:hover, .daily-model-menu button.selected { color: var(--mc-ink); background: var(--mc-panel-muted); }
+.daily-model-menu strong { font-size: 12px; font-weight: 600; }
+.daily-model-menu span { font-size: 11px; line-height: 1.35; }
+@keyframes model-menu-in { from { opacity: 0; transform: translateY(4px) scale(.98); } to { opacity: 1; transform: translateY(0) scale(1); } }
 .daily-composer.expanded .daily-model-picker { top: calc(100% - 23px); }
-:root[data-theme="dark"] .daily-model-picker option { color: #eee; background: #272727; }
 .daily-composer.expanded .plus-button, .daily-composer.expanded .send-icon { top: calc(100% - 23px); }
 :root[data-theme="dark"] .send-icon { color: #1c1c1c; }
 .send-icon:disabled { color: #fff; background: #c4c4c4; border-color: #c4c4c4; }
