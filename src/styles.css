@@ -108,7 +108,7 @@ body { background: var(--mc-bg); color: var(--mc-ink); }
 .session-delete { color: #aaa; }
 .session-delete:hover { color: var(--mc-sidebar-ink); background: var(--mc-sidebar-active); }
 .daily-history-top { padding-bottom: 10px; font-size: 16px; font-weight: 500; }
-.recents-toggle { display: inline-flex; align-items: center; gap: 3px; height: 27px; width: max-content; border: 0; padding: 0 8px; color: var(--mc-sidebar-ink); background: transparent; vertical-align: middle; }
+.recents-toggle { display: inline-flex; align-items: center; gap: 3px; height: 27px; width: max-content; border: 0; margin-top: -2px; margin-bottom: 3px; padding: 0 8px; color: var(--mc-sidebar-ink); background: transparent; vertical-align: middle; }
 .recents-toggle > span { display: block; line-height: 1; }
 .recents-toggle > svg { display: block; flex: 0 0 auto; }
 .recents-toggle svg { opacity: 0; transform: rotate(0deg); transition: opacity .16s ease .5s, transform .16s ease; }
@@ -116,8 +116,8 @@ body { background: var(--mc-bg); color: var(--mc-ink); }
 .recents-toggle.collapsed svg { transform: rotate(-90deg); opacity: .8; }
 .session-list { gap: 1px; }
 .session-item { position: relative; grid-template-columns: minmax(0, 1fr) auto; min-height: 34px; border-radius: 8px; }
-.session-item > button:first-child { padding: 4px 10px; border-radius: 8px; font-size: 14px; }
-.session-item > button:first-child span { display: flex; min-width: 0; align-items: center; gap: 5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.session-item > button:first-child { padding: 3px 10px; border-radius: 8px; font-size: 14px; }
+.session-item > button:first-child span { display: flex; min-width: 0; align-items: center; gap: 5px; transform: translateY(-2px); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .session-item > button:first-child span svg { flex: 0 0 auto; opacity: .75; }
 .session-more { position: relative; display: flex; align-items: center; padding-right: 4px; }
 .session-more-trigger { display: grid; visibility: hidden; place-items: center; width: 28px; height: 28px; padding: 0; border: 0; border-radius: 6px; color: var(--mc-sidebar-muted); background: transparent; }
