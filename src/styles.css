@@ -181,10 +181,14 @@ body { background: var(--mc-bg); color: var(--mc-ink); }
 .daily-message .rich-text, .daily-message .rich-text > p, .message .rich-text, .message .rich-text > p { font-weight: 400; }
 .daily-message .rich-text strong, .message .rich-text strong { font-weight: 650; }
 .daily-transcript, .daily-composer { width: min(680px, calc(100% - 56px)); }
-.message-actions { display: flex; justify-content: flex-end; gap: 5px; height: 30px; padding-top: 6px; opacity: 0; transform: translateY(-3px); transition: opacity .16s ease .85s, transform .16s ease .85s; pointer-events: none; }
+.message-actions { position: absolute; right: 0; bottom: -34px; z-index: 2; display: flex; justify-content: flex-end; gap: 5px; height: 30px; opacity: 0; transform: translateY(-3px); transition: opacity .16s ease .85s, transform .16s ease .85s; pointer-events: none; }
 .daily-message:hover .message-actions, .daily-message:focus-within .message-actions { opacity: 1; transform: translateY(0); pointer-events: auto; transition-delay: .85s; }
 .message-actions button { display: grid; place-items: center; width: 28px; height: 28px; padding: 0; border: 0; border-radius: 6px; color: var(--mc-muted); background: transparent; }
 .message-actions button:hover { color: var(--mc-ink); background: var(--mc-panel-muted); }
+.inline-message-editor { width: min(100%, 680px); border: 1px solid var(--mc-border); border-radius: 12px; padding: 10px; background: var(--mc-panel); }
+.daily-message.user .inline-message-editor { margin-left: auto; }
+.inline-message-editor textarea { display: block; width: 100%; min-height: 88px; resize: vertical; border: 0; outline: 0; color: var(--mc-ink); background: transparent; line-height: 1.6; }
+.inline-message-editor > div { display: flex; justify-content: flex-end; gap: 8px; margin-top: 9px; }
 .message { max-width: 100%; margin-bottom: 25px; }
 .message.interviewer { margin-left: 0; }
 .message .message-body { background: transparent; }

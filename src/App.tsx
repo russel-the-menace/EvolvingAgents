@@ -292,7 +292,7 @@ function DailyChatView({ sessions, activeSessionId, input, streaming, error, onI
   const [attachmentBusy, setAttachmentBusy] = useState(false);
   const [attachmentStatus, setAttachmentStatus] = useState('');
   const [thinkingVisible, setThinkingVisible] = useState(false);
-  const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
+  const [editingMessage, setEditingMessage] = useState<{ id: string; content: string } | null>(null);
   const [draftMessages, setDraftMessages] = useState<DailyMessage[]>([]);
   const [query, setQuery] = useState('');
   const [composerExpanded, setComposerExpanded] = useState(false);
@@ -351,8 +351,8 @@ function DailyChatView({ sessions, activeSessionId, input, streaming, error, onI
     onInputChange(value);
   }
 
-  async function send() {
-    const content = input.trim();
+  async function send(contentOverride?: string, replaceFromMessageId?: string) {
+    const content = (contentOverride ?? input).trim();
     if (!content || streaming) return;
     let sessionId = activeSessionId;
     if (!sessionId) {
@@ -361,7 +361,7 @@ function DailyChatView({ sessions, activeSessionId, input, streaming, error, onI
     }
     const userMessage: DailyMessage = { id: crypto.randomUUID(), role: 'user', content, createdAt: new Date().toISOString() };
     const answerMessage: DailyMessage = { id: crypto.randomUUID(), role: 'assistant', content: '', createdAt: new Date().toISOString() };
-    const branchIndex = editingMessageId ? activeSession?.messages.findIndex((message) => message.id === editingMessageId) ?? -1 : -1;
+    const branchIndex = replaceFromMessageId ? activeSession?.messages.findIndex((message) => message.id === replaceFromMessageId) ?? -1 : -1;
     const branchMessages = branchIndex >= 0 ? activeSession?.messages.slice(0, branchIndex) ?? [] : activeSession?.messages ?? [];
     const next = [...branchMessages, userMessage, answerMessage];
     setDraftMessages(next);
@@ -378,9 +378,9 @@ function DailyChatView({ sessions, activeSessionId, input, streaming, error, onI
           thinkingTimerRef.current = window.setTimeout(() => setThinkingVisible(false), 320);
         }
         setDraftMessages((current) => current.map((message) => message.id === answerMessage.id ? { ...message, content: message.content + delta } : message));
-      }, controller.signal, editingMessageId ?? undefined);
+      }, controller.signal, replaceFromMessageId);
       setDraftMessages([]);
-      setEditingMessageId(null);
+      setEditingMessage(null);
       onRefresh();
     } catch (caught) {
       setDraftMessages((current) => current.filter((message) => message.id !== answerMessage.id || message.content));
@@ -414,13 +414,7 @@ function DailyChatView({ sessions, activeSessionId, input, streaming, error, onI
   }
 
   function editMessage(message: DailyMessage) {
-    if (!activeSession) return;
-    const position = activeSession.messages.findIndex((item) => item.id === message.id);
-    if (position < 0) return;
-    setEditingMessageId(message.id);
-    setDraftMessages(activeSession.messages.slice(0, position));
-    updateDailyInput(message.content);
-    requestAnimationFrame(() => dailyInputRef.current?.focus());
+    setEditingMessage({ id: message.id, content: message.content });
   }
 
   async function copyMessage(message: DailyMessage) {
@@ -429,7 +423,7 @@ function DailyChatView({ sessions, activeSessionId, input, streaming, error, onI
 
   return <div className="daily-layout" style={{ '--daily-sidebar-width': `${sidebarWidth}px` } as CSSProperties}>
     <aside className="daily-history"><div className="daily-brand"><Sparkles size={21} /><span>MindClone</span><button className="icon-button sidebar-close" title="收起侧栏" onClick={onToggleSidebar}><PanelLeftClose size={19} /></button></div><nav className="daily-nav"><button className={mode === 'daily' ? 'active' : ''} onClick={() => onModeChange('daily')}><MessageCircle size={17} /> 日常对话</button><button onClick={() => onModeChange('prepare')}><FileText size={17} /> 面试准备</button><button onClick={() => onModeChange('memory')}><MessageSquarePlus size={17} /> 记忆投喂</button><button disabled={!hasPacket} onClick={() => hasPacket && onModeChange('formal')}><BotMessageSquare size={17} /> 正式面试</button></nav><div className="daily-history-top"><span>对话</span><button className="icon-button light" title="新建对话" onClick={() => void onNewSession()}><Plus size={18} /></button></div><label className="chat-search"><Search size={15} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索对话" /></label><div className="session-list">{filteredSessions.length === 0 ? <p>{query ? '没有匹配的对话。' : '开始一次对话，MindClone 会在本机保留你的记录。'}</p> : filteredSessions.map((session) => <div key={session.id} className={session.id === activeSessionId ? 'session-item active' : 'session-item'}><button onClick={() => onSelectSession(session.id)}><span>{session.title}</span><small>{new Date(session.updatedAt).toLocaleDateString('zh-CN')}</small></button><button className="session-delete" title="删除对话" onClick={() => void deleteSession(session)}><Trash2 size={14} /></button></div>)}</div><div className="daily-sidebar-footer"><div className="local-status"><span /> 本地引擎</div><button className="icon-button light" title="设置" onClick={onOpenSettings}><Settings2 size={18} /></button></div><div className="sidebar-resize-handle" role="separator" aria-orientation="vertical" aria-label="调整侧栏宽度" onPointerDown={startSidebarResize} onPointerMove={resizeSidebar} onPointerUp={endSidebarResize} onPointerCancel={endSidebarResize} /></aside>{sidebarCollapsed && <button className="sidebar-reopen" title="展开侧栏" onClick={onToggleSidebar}><PanelLeftOpen size={19} /></button>}
-    <section className="daily-conversation"><div className="daily-transcript" ref={listRef}>{messages.length === 0 ? <div className="daily-empty"><Sparkles size={32} /><h2>从最近在想的事开始</h2><p>所有对话默认保存在本机。重要内容会异步进入候选记忆，等待你审核。</p></div> : messages.map((message) => <article className={`daily-message ${message.role}`} key={message.id}><div className="message-body">{message.content ? <MarkdownText content={message.content} /> : streaming && message.role === 'assistant' ? <ThinkingIndicator /> : null}{thinkingVisible && message.id === messages.at(-1)?.id && message.role === 'assistant' && message.content && <ThinkingIndicator />}</div>{message.content && <div className="message-actions"><button title="复制消息" aria-label="复制消息" onClick={() => void copyMessage(message)}><Copy size={16} /></button>{message.role === 'user' && <button title="编辑消息" aria-label="编辑消息" onClick={() => editMessage(message)}><Pencil size={16} /></button>}</div>}</article>)}{error && <div className="error-note">{error}</div>}</div>
+    <section className="daily-conversation"><div className="daily-transcript" ref={listRef}>{messages.length === 0 ? <div className="daily-empty"><Sparkles size={32} /><h2>从最近在想的事开始</h2><p>所有对话默认保存在本机。重要内容会异步进入候选记忆，等待你审核。</p></div> : messages.map((message) => <article className={`daily-message ${message.role}`} key={message.id}>{editingMessage?.id === message.id ? <div className="inline-message-editor"><textarea autoFocus value={editingMessage.content} onChange={(event) => setEditingMessage({ ...editingMessage, content: event.target.value })} onKeyDown={(event) => { if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') void send(editingMessage.content, message.id); if (event.key === 'Escape') setEditingMessage(null); }} /><div><button className="ghost-button" onClick={() => setEditingMessage(null)}>取消</button><button className="primary-button compact" disabled={!editingMessage.content.trim() || streaming} onClick={() => void send(editingMessage.content, message.id)}>保存并重新生成</button></div></div> : <><div className="message-body">{message.content ? <MarkdownText content={message.content} /> : streaming && message.role === 'assistant' ? <ThinkingIndicator /> : null}{thinkingVisible && message.id === messages.at(-1)?.id && message.role === 'assistant' && message.content && <ThinkingIndicator />}</div>{message.content && <div className="message-actions"><button title="复制消息" aria-label="复制消息" onClick={() => void copyMessage(message)}><Copy size={16} /></button>{message.role === 'user' && <button title="编辑消息" aria-label="编辑消息" onClick={() => editMessage(message)}><Pencil size={16} /></button>}</div>}</>}</article>)}{error && <div className="error-note">{error}</div>}</div>
       <div className={composerExpanded ? 'daily-composer expanded' : 'daily-composer'}><div className="attachment-area">{attachmentOpen && <div className="attachment-menu"><div className="attachment-menu-title">补充投喂</div><button onClick={() => fileRef.current?.click()}><FileUp size={17} /> 导入 ChatGPT 历史</button><button onClick={() => setAttachmentStatus('在下方粘贴 Markdown 或随手记。')}><Paperclip size={17} /> 添加文本 / Markdown</button><textarea value={attachmentNote} onChange={(event) => setAttachmentNote(event.target.value)} placeholder="粘贴补充材料..." /><button className="primary-button compact" disabled={attachmentBusy} onClick={() => void saveAttachmentNote()}>{attachmentBusy ? '处理中...' : '保存到收件箱'}</button>{attachmentStatus && <p>{attachmentStatus}</p>}</div>}<input ref={fileRef} className="hidden-input" type="file" accept="application/json,.json" onChange={(event) => { const file = event.target.files?.[0]; if (file) void importFile(file); event.currentTarget.value = ''; }} /><button className={attachmentOpen ? 'plus-button open' : 'plus-button'} title="添加材料" onClick={() => setAttachmentOpen((current) => !current)}><Plus size={21} /></button></div><textarea ref={dailyInputRef} rows={1} value={input} onChange={(event) => updateDailyInput(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); void send(); } }} placeholder="和 MindClone 聊聊..." /><button className="send-icon" disabled={!input.trim() || streaming} title="发送" onClick={() => void send()}><SendHorizontal size={19} /></button></div>
     </section>
   </div>;
