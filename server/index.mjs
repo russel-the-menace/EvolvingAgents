@@ -244,6 +244,23 @@ app.post('/api/chat/sessions', async (_, response, next) => {
     response.status(201).json({ session });
   } catch (error) { next(error); }
 });
+app.patch('/api/chat/sessions/:id', async (request, response, next) => {
+  try {
+    const store = await loadStore();
+    const session = (store.sessions || []).find((item) => item.id === request.params.id);
+    if (!session) return response.status(404).json({ error: 'Conversation was not found.' });
+    if (typeof request.body.title === 'string') {
+      const title = request.body.title.trim();
+      if (!title) return response.status(400).json({ error: 'A conversation title is required.' });
+      session.title = title.slice(0, 120);
+    }
+    if (typeof request.body.pinned === 'boolean') session.pinned = request.body.pinned;
+    session.updatedAt = new Date().toISOString();
+    store.sessions.sort((left, right) => Number(Boolean(right.pinned)) - Number(Boolean(left.pinned)) || new Date(right.updatedAt).getTime() - new Date(left.updatedAt).getTime());
+    await saveStore(store);
+    response.json({ session });
+  } catch (error) { next(error); }
+});
 app.post('/api/chat/sessions/:id/stream', async (request, response, next) => {
   try {
     const content = String(request.body.content || '').trim();

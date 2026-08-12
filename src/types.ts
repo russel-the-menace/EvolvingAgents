@@ -58,6 +58,7 @@ export type DailyMessage = {
 export type DailySession = {
   id: string;
   title: string;
+  pinned?: boolean;
   createdAt: string;
   updatedAt: string;
   messages: DailyMessage[];

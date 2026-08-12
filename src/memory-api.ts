@@ -22,6 +22,8 @@ export const memoryApi = {
     request<{ memory: MemoryCandidate }>(`/memory/candidates/${id}`, { method: 'PATCH', body: JSON.stringify({ status }) }),
   listSessions: () => request<{ sessions: DailySession[] }>('/chat/sessions'),
   createSession: () => request<{ session: DailySession }>('/chat/sessions', { method: 'POST' }),
+  updateSession: (sessionId: string, payload: Partial<Pick<DailySession, 'title' | 'pinned'>>) =>
+    request<{ session: DailySession }>(`/chat/sessions/${sessionId}`, { method: 'PATCH', body: JSON.stringify(payload) }),
   deleteSession: (sessionId: string) => request<void>(`/chat/sessions/${sessionId}`, { method: 'DELETE' }),
   streamChat: async (sessionId: string, content: string, onDelta: (delta: string) => void, signal: AbortSignal, replaceFromMessageId?: string, model: DailyModel = 'deepseek-light') => {
     const response = await fetch(`/api/chat/sessions/${sessionId}/stream`, {

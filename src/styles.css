@@ -107,6 +107,20 @@ body { background: var(--mc-bg); color: var(--mc-ink); }
 .session-item.active { color: var(--mc-sidebar-ink); }
 .session-delete { color: #aaa; }
 .session-delete:hover { color: var(--mc-sidebar-ink); background: var(--mc-sidebar-active); }
+.daily-history-top { padding-bottom: 10px; font-size: 16px; font-weight: 500; }
+.session-list { gap: 1px; }
+.session-item { position: relative; grid-template-columns: minmax(0, 1fr) auto; min-height: 38px; border-radius: 8px; }
+.session-item > button:first-child { padding: 9px 10px; border-radius: 8px; font-size: 14px; }
+.session-item > button:first-child span { display: flex; min-width: 0; align-items: center; gap: 5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.session-item > button:first-child span svg { flex: 0 0 auto; opacity: .75; }
+.session-more { position: relative; display: flex; align-items: center; padding-right: 4px; }
+.session-more-trigger { display: grid; visibility: hidden; place-items: center; width: 28px; height: 28px; padding: 0; border: 0; border-radius: 6px; color: var(--mc-sidebar-muted); background: transparent; }
+.session-item:hover .session-more-trigger, .session-more:focus-within .session-more-trigger { visibility: visible; }
+.session-more-trigger:hover, .session-more-trigger:focus-visible { color: var(--mc-sidebar-ink); background: var(--mc-sidebar-active); }
+.session-context-menu { position: absolute; top: calc(100% + 3px); right: 2px; z-index: 7; display: grid; width: 150px; padding: 5px; border: 1px solid var(--mc-border); border-radius: 9px; background: var(--mc-panel); box-shadow: 0 10px 24px rgba(0, 0, 0, .16); }
+.session-context-menu button { display: flex; align-items: center; gap: 8px; width: 100%; border: 0; border-radius: 6px; padding: 8px; color: var(--mc-ink); background: transparent; text-align: left; font-size: 12px; }
+.session-context-menu button:hover { background: var(--mc-panel-muted); }
+.session-context-menu button.danger { color: #c85252; }
 .sidebar-toggle { color: #777; }
 .sidebar-toggle:hover { background: var(--mc-panel-muted); }
 .daily-sidebar-footer { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: auto; padding: 18px 8px 2px; border-top: 1px solid var(--mc-border); }
