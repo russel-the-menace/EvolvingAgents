@@ -115,7 +115,7 @@ body { background: var(--mc-bg); color: var(--mc-ink); }
 .daily-transcript::-webkit-scrollbar, .transcript::-webkit-scrollbar { display: none; }
 .daily-message { position: relative; }
 .daily-message > .message-delete { position: absolute; top: -3px; right: 2px; z-index: 1; }
-.daily-composer { min-height: 62px; padding: 8px 46px; margin-bottom: 18px; border-color: var(--mc-border); border-radius: 18px; background: var(--mc-panel); box-shadow: 0 5px 18px rgba(0, 0, 0, .06); transition: padding .18s ease; }
+.daily-composer { min-height: 52px; padding: 6px 46px; margin-bottom: 18px; border-color: var(--mc-border); border-radius: 18px; background: var(--mc-panel); box-shadow: 0 5px 18px rgba(0, 0, 0, .06); transition: padding .18s ease; }
 .daily-composer:not(.expanded) { display: flex; align-items: center; }
 .daily-composer:not(.expanded) > textarea { width: 100%; height: 24px; min-height: 24px; padding: 2px 0; overflow: hidden; line-height: 20px; color: var(--mc-ink); background: transparent; transition: height .18s ease, width .18s ease; }
 .daily-composer.expanded > textarea { width: 100%; min-height: 24px; max-height: 144px; padding: 2px 0; overflow-y: auto; line-height: 20px; color: var(--mc-ink); background: transparent; transition: height .18s ease, width .18s ease; }
@@ -177,7 +177,7 @@ body { background: var(--mc-bg); color: var(--mc-ink); }
 .daily-message.user .message-body { max-width: min(80%, 720px); }
 .daily-message.assistant .message-body, .daily-message.assistant .rich-text { width: min(680px, 100%); }
 .daily-message .message-body, .message .message-body { background: transparent; border: 0; border-radius: 0; padding: 0; color: var(--mc-ink); font-size: 14px; font-weight: 400; line-height: 1.72; }
-.daily-message.user .message-body { background: var(--mc-user-bubble); border: 1px solid var(--mc-user-bubble-border); border-radius: 18px; padding: 10px 15px; }
+.daily-message.user .message-body { background: var(--mc-user-bubble); border: 1px solid var(--mc-user-bubble-border); border-radius: 16px; padding: 7px 13px; }
 .daily-message .rich-text > p, .message .rich-text > p { background: transparent; border: 0; border-radius: 0; padding: 0; color: inherit; }
 .daily-message .rich-text, .daily-message .rich-text > p, .message .rich-text, .message .rich-text > p { font-weight: 400; }
 .daily-message .rich-text strong, .message .rich-text strong { font-weight: 650; }
