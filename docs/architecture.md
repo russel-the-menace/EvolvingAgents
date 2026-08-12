@@ -8,7 +8,7 @@ MindClone helps prepare and rehearse candidate answers. It does not replace the 
 
 | Path | Purpose | Latency rule | Model policy |
 | --- | --- | --- | --- |
-| Write path | Import notes, chat exports, resumes, interview debriefs, and guided conversations | Asynchronous; may be slow | GPT/Gemini may extract and propose memories. Nothing becomes formal memory without review. |
+| Write path | Import notes, chat exports, resumes, interview debriefs, and guided conversations | Asynchronous; may be slow | DeepSeek is the initial cloud extractor. Nothing becomes formal memory without review. |
 | Read path | Answer an interviewer's current question | First token in seconds; generation must be cancellable | Local, already-running model only. No cloud call, long extraction, or re-indexing. |
 
 ## Interview packet
@@ -28,4 +28,4 @@ This prevents a JD change or late cloud analysis from changing the meaning of an
 
 The starting runtime is a quantized Qwen 7B instruction model served locally by Ollama or MLX-LM. The model is chosen for Chinese and mixed Chinese-English capability within M1 Pro 16GB constraints. The exact model is configurable because the latency and answer quality benchmark, rather than a model name, decides the production choice.
 
-Cloud Gemini/GPT is reserved for write-path extraction, contradiction detection, and interview-debrief coaching. It is intentionally absent from the formal answer path.
+DeepSeek is the initial cloud model for write-path extraction, contradiction detection, and interview-debrief coaching. Gemini/GPT remain optional future providers. All cloud providers are intentionally absent from the formal answer path.

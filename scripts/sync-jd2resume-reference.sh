@@ -4,18 +4,26 @@ set -eu
 repo_url="https://github.com/russel-the-menace/JD2Resume.git"
 branch="master"
 target="reference-project/JD2Resume"
+cache_root="${XDG_CACHE_HOME:-$HOME/.cache}/mindclone"
+cache_repo="$cache_root/jd2resume.git"
 
-if [ -d "$target/.git" ]; then
-  if ! git -C "$target" diff --quiet || ! git -C "$target" diff --cached --quiet; then
-    echo "Reference cache has local changes. Commit, stash, or discard them before syncing." >&2
-    exit 1
-  fi
-  git -C "$target" fetch --prune origin "$branch"
-  git -C "$target" switch "$branch"
-  git -C "$target" pull --ff-only origin "$branch"
-else
-  mkdir -p reference-project
-  git clone --branch "$branch" --single-branch "$repo_url" "$target"
+mkdir -p "$cache_root" "$target"
+
+if [ ! -d "$cache_repo" ]; then
+  git clone --bare "$repo_url" "$cache_repo"
 fi
 
-echo "JD2Resume reference is current at $(git -C "$target" rev-parse --short HEAD)."
+git --git-dir="$cache_repo" fetch --prune origin \
+  "+refs/heads/$branch:refs/remotes/origin/$branch"
+commit="$(git --git-dir="$cache_repo" rev-parse "refs/remotes/origin/$branch")"
+
+# The reference is deliberately a source-only mirror, not a nested repository.
+# This keeps VS Code Source Control focused on MindClone and drops checked-in
+# dependency/build directories from the reference workspace.
+find "$target" -mindepth 1 -depth -delete
+git --git-dir="$cache_repo" archive "$commit" -- . \
+  ':(exclude,glob)**/node_modules/**' \
+  ':(exclude,glob)**/dist/**' \
+  ':(exclude,glob)**/build/**' | tar -xf - -C "$target"
+
+echo "JD2Resume reference is current at ${commit%${commit#????????}}."

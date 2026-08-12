@@ -2,7 +2,7 @@
 
 MindClone uses `JD2Resume` as an external design and implementation reference, particularly for JD parsing, resume data modeling, Gemini-assisted preparation, and experience-oriented prompts.
 
-The directory `reference-project/JD2Resume` is ignored by MindClone Git. It is a local cache of the GitHub repository, not a vendored dependency and not a source of production imports.
+The directory `reference-project/JD2Resume` is ignored by MindClone Git. It is a source-only local mirror, not a vendored dependency and not a source of production imports. Its Git metadata lives outside the workspace in the local cache, so VS Code Source Control sees only the MindClone repository.
 
 Run this before work that depends on its latest design:
 
@@ -10,6 +10,6 @@ Run this before work that depends on its latest design:
 npm run sync:reference
 ```
 
-The script fetches `russel-the-menace/JD2Resume`, checks out `master`, and only performs a fast-forward update. If the cache has local edits, it stops rather than overwriting them. Do any JD2Resume development and commits in its own repository, then push there; MindClone will receive the published update on the next sync.
+The script fetches `russel-the-menace/JD2Resume` from `master`, rebuilds the source mirror, and excludes `node_modules`, `dist`, and `build`. Do any JD2Resume development and commits in its own repository, then push there; MindClone will receive the published update on the next sync.
 
 Do not install or commit its `node_modules` or `dist` output in MindClone. Its source remains available locally for inspection after synchronization.

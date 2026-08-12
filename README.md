@@ -33,3 +33,4 @@ npm run sync:reference
 - [桌面工作台](docs/modules/desktop-workbench.md)
 - [面试引擎](docs/modules/interview-engine.md)
 - [记忆投喂与审核](docs/modules/memory-ingestion.md)
+- [云端整理提供方](docs/modules/cloud-preparation.md)
