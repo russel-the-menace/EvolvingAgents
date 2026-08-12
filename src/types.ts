@@ -5,6 +5,8 @@ export type Settings = {
   model: string;
 };
 
+export type DailyModel = 'deepseek-chat' | 'deepseek-reasoner';
+
 export type ThemeMode = 'light' | 'dark' | 'system';
 
 export type InterviewPacket = {

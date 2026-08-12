@@ -1,4 +1,4 @@
-import type { DailySession, MemoryCandidate, MemoryDocument } from './types';
+import type { DailyModel, DailySession, MemoryCandidate, MemoryDocument } from './types';
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`/api${path}`, {
@@ -23,9 +23,9 @@ export const memoryApi = {
   listSessions: () => request<{ sessions: DailySession[] }>('/chat/sessions'),
   createSession: () => request<{ session: DailySession }>('/chat/sessions', { method: 'POST' }),
   deleteSession: (sessionId: string) => request<void>(`/chat/sessions/${sessionId}`, { method: 'DELETE' }),
-  streamChat: async (sessionId: string, content: string, onDelta: (delta: string) => void, signal: AbortSignal, replaceFromMessageId?: string) => {
+  streamChat: async (sessionId: string, content: string, onDelta: (delta: string) => void, signal: AbortSignal, replaceFromMessageId?: string, model: DailyModel = 'deepseek-chat') => {
     const response = await fetch(`/api/chat/sessions/${sessionId}/stream`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' }, signal, body: JSON.stringify({ content, replaceFromMessageId }),
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, signal, body: JSON.stringify({ content, replaceFromMessageId, model }),
     });
     if (!response.ok || !response.body) {
       const payload = await response.json().catch(() => null);

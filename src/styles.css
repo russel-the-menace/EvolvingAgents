@@ -123,6 +123,12 @@ body { background: var(--mc-bg); color: var(--mc-ink); }
 .plus-button { left: 10px; width: 28px; height: 28px; color: #666; border-color: #c9c9c9; background: var(--mc-panel); transition: top .18s ease; }
 .plus-button.open { color: #fff; border-color: #555; background: #333; }
 .send-icon { right: 10px; width: 28px; height: 28px; color: #fff; background: var(--mc-action); border-color: var(--mc-action); transition: top .18s ease, background .18s ease; }
+.daily-model-picker { position: absolute; right: 48px; top: 50%; transform: translateY(-50%); display: inline-flex; align-items: center; color: var(--mc-muted); }
+.daily-model-picker select { appearance: none; border: 0; outline: 0; background: transparent; color: inherit; cursor: pointer; font: inherit; font-size: 12px; padding: 4px 16px 4px 5px; }
+.daily-model-picker option { color: #222; background: #fff; }
+.daily-model-picker span { position: absolute; right: 3px; pointer-events: none; font-size: 16px; line-height: 1; }
+.daily-composer.expanded .daily-model-picker { top: calc(100% - 23px); }
+:root[data-theme="dark"] .daily-model-picker option { color: #eee; background: #272727; }
 .daily-composer.expanded .plus-button, .daily-composer.expanded .send-icon { top: calc(100% - 23px); }
 :root[data-theme="dark"] .send-icon { color: #1c1c1c; }
 .send-icon:disabled { color: #fff; background: #c4c4c4; border-color: #c4c4c4; }

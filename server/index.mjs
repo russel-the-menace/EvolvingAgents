@@ -134,15 +134,16 @@ function relevantMemoryContext(store, currentSession, query) {
   return sections.join('\n\n');
 }
 
-async function streamDailyChat(session, store, response, query) {
+async function streamDailyChat(session, store, response, query, model) {
   const apiKey = process.env.DEEPSEEK_API_KEY;
   if (!apiKey) throw new Error('DEEPSEEK_API_KEY is not configured. Set it in the local .env file and restart the service.');
   const memoryContext = relevantMemoryContext(store, session, query);
   const system = `You are MindClone, a long-term conversational partner who helps the user think, organize experiences, and express themselves. Be natural, direct, and willing to make a judgment. Do not mechanically summarize or repeatedly say that you remembered something. When the user discusses experiences, preferences, viewpoints, or important changes, ask useful follow-up questions when appropriate. Treat reliable memories as known context, but never turn unverified material or speculation into the user's experience. Reply in clear, natural English by default, and match the user's language when they write in another language.\n\n${memoryContext || 'No relevant long-term context has been retrieved yet.'}`;
+  const selectedModel = model === 'deepseek-reasoner' ? 'deepseek-reasoner' : 'deepseek-chat';
   const upstream = await fetch(`${(process.env.DEEPSEEK_BASE_URL || 'https://api.deepseek.com').replace(/\/$/, '')}/chat/completions`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ model: process.env.DEEPSEEK_MODEL || 'deepseek-chat', temperature: 0.7, stream: true, messages: [{ role: 'system', content: system }, ...session.messages.slice(-24).map((message) => ({ role: message.role, content: message.content }))] }),
+    body: JSON.stringify({ model: selectedModel, temperature: selectedModel === 'deepseek-reasoner' ? 0.4 : 0.7, stream: true, messages: [{ role: 'system', content: system }, ...session.messages.slice(-24).map((message) => ({ role: message.role, content: message.content }))] }),
   });
   if (!upstream.ok || !upstream.body) throw new Error(`DeepSeek daily chat request failed (${upstream.status}).`);
   const reader = upstream.body.getReader();
@@ -260,7 +261,7 @@ app.post('/api/chat/sessions/:id/stream', async (request, response, next) => {
     response.setHeader('Cache-Control', 'no-cache');
     response.setHeader('Connection', 'keep-alive');
     response.flushHeaders();
-    const answer = await streamDailyChat(session, store, response, content);
+    const answer = await streamDailyChat(session, store, response, content, request.body.model);
     if (answer) session.messages.push({ id: randomUUID(), role: 'assistant', content: answer, createdAt: new Date().toISOString() });
     session.updatedAt = new Date().toISOString();
     const recentMessages = session.messages.slice(-2);
