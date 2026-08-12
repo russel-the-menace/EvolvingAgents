@@ -92,9 +92,10 @@ body { background: var(--mc-bg); color: var(--mc-ink); }
 .rich-text strong { font-weight: 750; }
 .thinking-indicator { display: inline-flex; align-items: center; gap: 5px; min-height: 24px; color: var(--mc-muted); }
 .thinking-label { margin-right: 3px; font-size: 13px; }
-.thinking-indicator span { width: 6px; height: 6px; border-radius: 50%; background: currentColor; opacity: .35; animation: thinking-pulse 1.05s ease-in-out infinite; }
-.thinking-indicator span:nth-child(2) { animation-delay: .15s; }
-.thinking-indicator span:nth-child(3) { animation-delay: .3s; }
+.thinking-indicator .thinking-label { width: auto; height: auto; margin-right: 3px; border-radius: 0; background: transparent; opacity: 1; animation: none; }
+.thinking-indicator span:not(.thinking-label) { width: 6px; height: 6px; border-radius: 50%; background: currentColor; opacity: .35; animation: thinking-pulse 1.05s ease-in-out infinite; }
+.thinking-indicator span:not(.thinking-label):nth-child(2) { animation-delay: .15s; }
+.thinking-indicator span:not(.thinking-label):nth-child(3) { animation-delay: .3s; }
 @keyframes thinking-pulse { 0%, 60%, 100% { transform: translateY(0); opacity: .28; } 30% { transform: translateY(-3px); opacity: .9; } }
 .daily-history-top { color: var(--mc-sidebar-ink); }
 .chat-search { color: var(--mc-sidebar-muted); border-color: var(--mc-border); }
@@ -183,6 +184,7 @@ body { background: var(--mc-bg); color: var(--mc-ink); }
 .daily-transcript, .daily-composer { width: min(680px, calc(100% - 56px)); }
 .message-actions { position: absolute; right: 0; bottom: -37px; z-index: 2; display: flex; justify-content: flex-end; gap: 5px; height: 30px; opacity: 0; transform: translateY(-3px); transition: opacity .16s ease .5s, transform .16s ease .5s; pointer-events: none; }
 .daily-message.assistant .message-actions { right: auto; left: 0; }
+.daily-message.assistant .message-actions { bottom: -38px; }
 .daily-message:hover .message-actions, .daily-message:focus-within .message-actions { opacity: 1; transform: translateY(0); pointer-events: auto; transition-delay: .5s; }
 .message-actions button { display: grid; place-items: center; width: 28px; height: 28px; padding: 0; border: 0; border-radius: 6px; color: var(--mc-muted); background: transparent; }
 .message-actions button:hover { color: var(--mc-ink); background: var(--mc-panel-muted); }
