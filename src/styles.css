@@ -178,6 +178,7 @@ body { background: var(--mc-bg); color: var(--mc-ink); }
 .daily-message.assistant .message-body, .daily-message.assistant .rich-text { width: 100%; }
 .daily-message .message-body, .message .message-body { background: transparent; border: 0; border-radius: 0; padding: 0; color: var(--mc-ink); font-size: 15px; line-height: 1.72; }
 .daily-message.user .message-body { background: var(--mc-user-bubble); border: 1px solid var(--mc-user-bubble-border); border-radius: 18px; padding: 10px 15px; }
+.daily-message .rich-text > p, .message .rich-text > p { background: transparent; border: 0; border-radius: 0; padding: 0; color: inherit; }
 .message { max-width: 100%; margin-bottom: 25px; }
 .message.interviewer { margin-left: 0; }
 .message .message-body { background: transparent; }
