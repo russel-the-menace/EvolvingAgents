@@ -181,7 +181,7 @@ body { background: var(--mc-bg); color: var(--mc-ink); }
 .daily-message .rich-text, .daily-message .rich-text > p, .message .rich-text, .message .rich-text > p { font-weight: 400; }
 .daily-message .rich-text strong, .message .rich-text strong { font-weight: 650; }
 .daily-transcript, .daily-composer { width: min(680px, calc(100% - 56px)); }
-.message-actions { position: absolute; right: 0; bottom: -34px; z-index: 2; display: flex; justify-content: flex-end; gap: 5px; height: 30px; opacity: 0; transform: translateY(-3px); transition: opacity .16s ease 1s, transform .16s ease 1s; pointer-events: none; }
+.message-actions { position: absolute; right: 0; bottom: -40px; z-index: 2; display: flex; justify-content: flex-end; gap: 5px; height: 30px; opacity: 0; transform: translateY(-3px); transition: opacity .16s ease 1s, transform .16s ease 1s; pointer-events: none; }
 .daily-message.assistant .message-actions { right: auto; left: 0; }
 .daily-message:hover .message-actions, .daily-message:focus-within .message-actions { opacity: 1; transform: translateY(0); pointer-events: auto; transition-delay: 1s; }
 .message-actions button { display: grid; place-items: center; width: 28px; height: 28px; padding: 0; border: 0; border-radius: 6px; color: var(--mc-muted); background: transparent; }
@@ -189,7 +189,7 @@ body { background: var(--mc-bg); color: var(--mc-ink); }
 .daily-message > .inline-message-editor { position: relative; display: block; width: min(80%, 544px); min-height: 104px; margin-bottom: 0; border: 1px solid var(--mc-user-bubble-border); border-radius: 16px; padding: 7px 13px 51px; color: var(--mc-ink); background: var(--mc-user-bubble); font-size: 14px; font-weight: 400; line-height: 1.72; }
 .daily-message.user .inline-message-editor { margin-left: auto; }
 .inline-message-editor textarea { display: block; width: 100%; min-height: 24px; max-height: 180px; padding: 0; resize: none; border: 0; outline: 0; color: var(--mc-ink); background: transparent; font-size: 14px; font-weight: 400; line-height: 1.72; }
-.inline-message-editor > div { position: absolute; right: 13px; bottom: 9px; display: flex; align-items: center; justify-content: flex-end; gap: 8px; margin-bottom: 0; font-size: inherit; font-weight: inherit; }
+.inline-message-editor > div { position: absolute; right: 13px; bottom: 7px; display: flex; align-items: center; justify-content: flex-end; gap: 8px; margin-bottom: 0; font-size: inherit; font-weight: inherit; }
 .edit-cancel-button, .edit-send-button { border-radius: 999px; padding: 8px 16px; font-size: 14px; font-weight: 600; white-space: nowrap; }
 .edit-cancel-button { border: 1px solid var(--mc-border); color: var(--mc-ink); background: transparent; }
 .edit-send-button { border: 1px solid var(--mc-action); color: var(--mc-bg); background: var(--mc-action); }
