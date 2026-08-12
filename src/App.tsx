@@ -10,13 +10,13 @@ import { memoryApi } from './memory-api';
 import { loadPacket, loadSettings, savePacket, saveSettings } from './storage';
 import type { DailyMessage, DailySession, InterviewPacket, MemoryCandidate, MemoryDocument, Message, Mode, Settings, ThemeMode } from './types';
 
-const exampleJD = `远程后端工程师
-负责服务端 API、数据库设计、性能优化与线上稳定性。熟悉任一主流后端语言，具备 SQL、Redis、Docker 和分布式系统基础；能独立沟通需求并推进交付。`;
+const exampleJD = `Remote Backend Engineer
+Own server-side APIs, database design, performance tuning, and production reliability. Comfortable with a mainstream backend language, SQL, Redis, Docker, and distributed systems fundamentals; able to clarify requirements and deliver independently.`;
 
-const exampleResume = `毕业后从 Android 开发起步，随后创业并长期远程协作。创业过程中承担过产品、用户运营、客服、销售和招聘等工作；持续学习后端工程，具备跨语言学习和独立交付能力。`;
+const exampleResume = `Started in Android development after graduation, then built a startup and worked remotely for an extended period. During the startup journey, took on product, user operations, customer support, sales, and recruiting work; continued building backend engineering skills with a demonstrated ability to learn across languages and deliver independently.`;
 
 function formatPreparedAt(value: string) {
-  return new Intl.DateTimeFormat('zh-CN', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(value));
+  return new Intl.DateTimeFormat('en-US', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(value));
 }
 
 function InlineMarkdown({ text }: { text: string }) {
@@ -36,7 +36,7 @@ function MarkdownText({ content }: { content: string }) {
 }
 
 function ThinkingIndicator() {
-  return <span className="thinking-indicator" role="status" aria-live="polite"><span className="thinking-label">正在思考</span><span /><span /><span /></span>;
+  return <span className="thinking-indicator" role="status" aria-live="polite"><span className="thinking-label">Thinking</span><span /><span /><span /></span>;
 }
 
 export function App() {
@@ -170,7 +170,7 @@ export function App() {
         const message = (caught as Error).message;
         setError(
           message === 'Failed to fetch'
-            ? `无法连接本地模型服务 ${settings.baseUrl}。请启动 Ollama/MLX 服务，或在模型设置中修改地址。`
+            ? `Unable to connect to the local model service at ${settings.baseUrl}. Start Ollama or MLX, or update the address in Settings.`
             : message,
         );
       }
@@ -204,7 +204,7 @@ export function App() {
 
   async function importChatGPTToInbox(file: File) {
     const contents = extractChatGPTConversations(JSON.parse(await file.text()));
-    if (!contents.length) throw new Error('未从该导出中找到可读取的用户/助手对话。');
+    if (!contents.length) throw new Error('No readable user/assistant conversations were found in this export.');
     for (const item of contents) await memoryApi.importDocument({ ...item, sourceType: 'chatgpt_export' });
     await refreshMemory();
   }
@@ -215,21 +215,21 @@ export function App() {
         <div className="brand"><Sparkles size={20} /><span>MindClone</span></div>
         <nav>
           <button className={mode === 'daily' ? 'nav-item active' : 'nav-item'} onClick={() => setMode('daily')}>
-            <MessageCircle size={18} /> 日常对话
+            <MessageCircle size={18} /> Daily chat
           </button>
           <button className={mode === 'prepare' ? 'nav-item active' : 'nav-item'} onClick={() => setMode('prepare')}>
-            <FileText size={18} /> 面试准备
+            <FileText size={18} /> Interview prep
           </button>
           <button className={mode === 'memory' ? 'nav-item active' : 'nav-item'} onClick={() => { setMode('memory'); void refreshMemory(); }}>
-            <MessageSquarePlus size={18} /> 记忆投喂
+            <MessageSquarePlus size={18} /> Memory inbox
           </button>
           <button className={mode === 'formal' ? 'nav-item active' : 'nav-item'} onClick={() => packet && setMode('formal')} disabled={!packet}>
-            <BotMessageSquare size={18} /> 正式面试
+            <BotMessageSquare size={18} /> Live interview
           </button>
         </nav>
         <div className="sidebar-foot">
-          <div className="local-status"><span /> 本地引擎</div>
-          <button className="icon-button" title="模型设置" onClick={() => setShowSettings(true)}><Settings2 size={18} /></button>
+          <div className="local-status"><span /> Local engine</div>
+          <button className="icon-button" title="Model settings" onClick={() => setShowSettings(true)}><Settings2 size={18} /></button>
         </div>
       </aside>
 
@@ -273,10 +273,10 @@ function extractChatGPTConversations(value: unknown) {
       const parts = node?.message?.content?.parts;
       if (!['user', 'assistant'].includes(role) || !Array.isArray(parts)) return [];
       const text = parts.filter((part: unknown) => typeof part === 'string').join('\n').trim();
-      return text ? [`${role === 'user' ? '我' : 'ChatGPT'}：${text}`] : [];
+      return text ? [`${role === 'user' ? 'User' : 'ChatGPT'}: ${text}`] : [];
     });
     if (!messages.length) return [];
-    return [{ title: conversation.title || 'ChatGPT 对话', content: messages.join('\n\n') }];
+    return [{ title: conversation.title || 'ChatGPT conversation', content: messages.join('\n\n') }];
   });
 }
 
@@ -394,18 +394,18 @@ function DailyChatView({ sessions, activeSessionId, input, streaming, error, onI
   }
 
   async function saveAttachmentNote() {
-    if (attachmentNote.trim().length < 10) { setAttachmentStatus('请至少输入一段完整材料。'); return; }
+    if (attachmentNote.trim().length < 10) { setAttachmentStatus('Please enter at least one complete piece of source material.'); return; }
     setAttachmentBusy(true);
-    try { await memoryApi.importDocument({ title: '对话外补充材料', sourceType: 'note', content: attachmentNote.trim() }); setAttachmentNote(''); setAttachmentStatus('已保存在本地记忆收件箱。'); } catch (caught) { setAttachmentStatus((caught as Error).message); } finally { setAttachmentBusy(false); }
+    try { await memoryApi.importDocument({ title: 'Conversation supplement', sourceType: 'note', content: attachmentNote.trim() }); setAttachmentNote(''); setAttachmentStatus('Saved to the local memory inbox.'); } catch (caught) { setAttachmentStatus((caught as Error).message); } finally { setAttachmentBusy(false); }
   }
 
   async function importFile(file: File) {
     setAttachmentBusy(true);
-    try { await onImport(file); setAttachmentStatus('ChatGPT 历史已导入本地收件箱。'); } catch (caught) { setAttachmentStatus((caught as Error).message); } finally { setAttachmentBusy(false); }
+    try { await onImport(file); setAttachmentStatus('ChatGPT history imported to the local inbox.'); } catch (caught) { setAttachmentStatus((caught as Error).message); } finally { setAttachmentBusy(false); }
   }
 
   async function deleteSession(session: DailySession) {
-    if (!window.confirm(`删除“${session.title}”及其中所有消息？相关候选记忆也会被删除。`)) return;
+    if (!window.confirm(`Delete “${session.title}” and all messages in it? Linked candidate memories will also be removed.`)) return;
     try {
       await memoryApi.deleteSession(session.id);
       if (session.id === activeSessionId) onSelectSession('');
@@ -418,13 +418,13 @@ function DailyChatView({ sessions, activeSessionId, input, streaming, error, onI
   }
 
   async function copyMessage(message: DailyMessage) {
-    try { await navigator.clipboard.writeText(message.content); } catch { onError('无法访问系统剪贴板。'); }
+    try { await navigator.clipboard.writeText(message.content); } catch { onError('Unable to access the system clipboard.'); }
   }
 
   return <div className="daily-layout" style={{ '--daily-sidebar-width': `${sidebarWidth}px` } as CSSProperties}>
-    <aside className="daily-history"><div className="daily-brand"><Sparkles size={21} /><span>MindClone</span><button className="icon-button sidebar-close" title="收起侧栏" onClick={onToggleSidebar}><PanelLeftClose size={19} /></button></div><nav className="daily-nav"><button className={mode === 'daily' ? 'active' : ''} onClick={() => onModeChange('daily')}><MessageCircle size={17} /> 日常对话</button><button onClick={() => onModeChange('prepare')}><FileText size={17} /> 面试准备</button><button onClick={() => onModeChange('memory')}><MessageSquarePlus size={17} /> 记忆投喂</button><button disabled={!hasPacket} onClick={() => hasPacket && onModeChange('formal')}><BotMessageSquare size={17} /> 正式面试</button></nav><div className="daily-history-top"><span>对话</span><button className="icon-button light" title="新建对话" onClick={() => void onNewSession()}><Plus size={18} /></button></div><label className="chat-search"><Search size={15} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索对话" /></label><div className="session-list">{filteredSessions.length === 0 ? <p>{query ? '没有匹配的对话。' : '开始一次对话，MindClone 会在本机保留你的记录。'}</p> : filteredSessions.map((session) => <div key={session.id} className={session.id === activeSessionId ? 'session-item active' : 'session-item'}><button onClick={() => onSelectSession(session.id)}><span>{session.title}</span><small>{new Date(session.updatedAt).toLocaleDateString('zh-CN')}</small></button><button className="session-delete" title="删除对话" onClick={() => void deleteSession(session)}><Trash2 size={14} /></button></div>)}</div><div className="daily-sidebar-footer"><div className="local-status"><span /> 本地引擎</div><button className="icon-button light" title="设置" onClick={onOpenSettings}><Settings2 size={18} /></button></div><div className="sidebar-resize-handle" role="separator" aria-orientation="vertical" aria-label="调整侧栏宽度" onPointerDown={startSidebarResize} onPointerMove={resizeSidebar} onPointerUp={endSidebarResize} onPointerCancel={endSidebarResize} /></aside>{sidebarCollapsed && <button className="sidebar-reopen" title="展开侧栏" onClick={onToggleSidebar}><PanelLeftOpen size={19} /></button>}
-    <section className="daily-conversation"><div className="daily-transcript" ref={listRef}>{messages.length === 0 ? <div className="daily-empty"><Sparkles size={32} /><h2>从最近在想的事开始</h2><p>所有对话默认保存在本机。重要内容会异步进入候选记忆，等待你审核。</p></div> : messages.map((message) => <article className={`daily-message ${message.role}`} key={message.id}>{editingMessage?.id === message.id ? <div className="inline-message-editor"><textarea autoFocus value={editingMessage.content} onChange={(event) => setEditingMessage({ ...editingMessage, content: event.target.value })} onKeyDown={(event) => { if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') void send(editingMessage.content, message.id); if (event.key === 'Escape') setEditingMessage(null); }} /><div><button className="edit-cancel-button" onClick={() => setEditingMessage(null)}>Cancel</button><button className="edit-send-button" disabled={!editingMessage.content.trim() || streaming} onClick={() => void send(editingMessage.content, message.id)}>Send</button></div></div> : <><div className="message-body">{message.content ? <MarkdownText content={message.content} /> : streaming && message.role === 'assistant' ? <ThinkingIndicator /> : null}{thinkingVisible && message.id === messages.at(-1)?.id && message.role === 'assistant' && message.content && <ThinkingIndicator />}</div>{message.content && <div className="message-actions"><button title="复制消息" aria-label="复制消息" onClick={() => void copyMessage(message)}><Copy size={16} /></button>{message.role === 'user' && <button title="编辑消息" aria-label="编辑消息" onClick={() => editMessage(message)}><Pencil size={16} /></button>}</div>}</>}</article>)}{error && <div className="error-note">{error}</div>}</div>
-      <div className={composerExpanded ? 'daily-composer expanded' : 'daily-composer'}><div className="attachment-area">{attachmentOpen && <div className="attachment-menu"><div className="attachment-menu-title">补充投喂</div><button onClick={() => fileRef.current?.click()}><FileUp size={17} /> 导入 ChatGPT 历史</button><button onClick={() => setAttachmentStatus('在下方粘贴 Markdown 或随手记。')}><Paperclip size={17} /> 添加文本 / Markdown</button><textarea value={attachmentNote} onChange={(event) => setAttachmentNote(event.target.value)} placeholder="粘贴补充材料..." /><button className="primary-button compact" disabled={attachmentBusy} onClick={() => void saveAttachmentNote()}>{attachmentBusy ? '处理中...' : '保存到收件箱'}</button>{attachmentStatus && <p>{attachmentStatus}</p>}</div>}<input ref={fileRef} className="hidden-input" type="file" accept="application/json,.json" onChange={(event) => { const file = event.target.files?.[0]; if (file) void importFile(file); event.currentTarget.value = ''; }} /><button className={attachmentOpen ? 'plus-button open' : 'plus-button'} title="添加材料" onClick={() => setAttachmentOpen((current) => !current)}><Plus size={21} /></button></div><textarea ref={dailyInputRef} rows={1} value={input} onChange={(event) => updateDailyInput(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); void send(); } }} placeholder="和 MindClone 聊聊..." /><button className="send-icon" disabled={!input.trim() || streaming} title="发送" onClick={() => void send()}><SendHorizontal size={19} /></button></div>
+    <aside className="daily-history"><div className="daily-brand"><Sparkles size={21} /><span>MindClone</span><button className="icon-button sidebar-close" title="Collapse sidebar" onClick={onToggleSidebar}><PanelLeftClose size={19} /></button></div><nav className="daily-nav"><button className={mode === 'daily' ? 'active' : ''} onClick={() => onModeChange('daily')}><MessageCircle size={17} /> Daily chat</button><button onClick={() => onModeChange('prepare')}><FileText size={17} /> Interview prep</button><button onClick={() => onModeChange('memory')}><MessageSquarePlus size={17} /> Memory inbox</button><button disabled={!hasPacket} onClick={() => hasPacket && onModeChange('formal')}><BotMessageSquare size={17} /> Live interview</button></nav><div className="daily-history-top"><span>Conversations</span><button className="icon-button light" title="New conversation" onClick={() => void onNewSession()}><Plus size={18} /></button></div><label className="chat-search"><Search size={15} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search conversations" /></label><div className="session-list">{filteredSessions.length === 0 ? <p>{query ? 'No matching conversations.' : 'Start a conversation. MindClone keeps your record on this device.'}</p> : filteredSessions.map((session) => <div key={session.id} className={session.id === activeSessionId ? 'session-item active' : 'session-item'}><button onClick={() => onSelectSession(session.id)}><span>{session.title}</span><small>{new Date(session.updatedAt).toLocaleDateString('en-US')}</small></button><button className="session-delete" title="Delete conversation" onClick={() => void deleteSession(session)}><Trash2 size={14} /></button></div>)}</div><div className="daily-sidebar-footer"><div className="local-status"><span /> Local engine</div><button className="icon-button light" title="Settings" onClick={onOpenSettings}><Settings2 size={18} /></button></div><div className="sidebar-resize-handle" role="separator" aria-orientation="vertical" aria-label="Resize sidebar" onPointerDown={startSidebarResize} onPointerMove={resizeSidebar} onPointerUp={endSidebarResize} onPointerCancel={endSidebarResize} /></aside>{sidebarCollapsed && <button className="sidebar-reopen" title="Expand sidebar" onClick={onToggleSidebar}><PanelLeftOpen size={19} /></button>}
+    <section className="daily-conversation"><div className="daily-transcript" ref={listRef}>{messages.length === 0 ? <div className="daily-empty"><Sparkles size={32} /><h2>Start with what is on your mind</h2><p>Every conversation is saved locally. Important material is added to candidate memories asynchronously for your review.</p></div> : messages.map((message) => <article className={`daily-message ${message.role}`} key={message.id}>{editingMessage?.id === message.id ? <div className="inline-message-editor"><textarea autoFocus value={editingMessage.content} onChange={(event) => setEditingMessage({ ...editingMessage, content: event.target.value })} onKeyDown={(event) => { if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') void send(editingMessage.content, message.id); if (event.key === 'Escape') setEditingMessage(null); }} /><div><button className="edit-cancel-button" onClick={() => setEditingMessage(null)}>Cancel</button><button className="edit-send-button" disabled={!editingMessage.content.trim() || streaming} onClick={() => void send(editingMessage.content, message.id)}>Send</button></div></div> : <><div className="message-body">{message.content ? <MarkdownText content={message.content} /> : streaming && message.role === 'assistant' ? <ThinkingIndicator /> : null}{thinkingVisible && message.id === messages.at(-1)?.id && message.role === 'assistant' && message.content && <ThinkingIndicator />}</div>{message.content && <div className="message-actions"><button title="Copy message" aria-label="Copy message" onClick={() => void copyMessage(message)}><Copy size={16} /></button>{message.role === 'user' && <button title="Edit message" aria-label="Edit message" onClick={() => editMessage(message)}><Pencil size={16} /></button>}</div>}</>}</article>)}{error && <div className="error-note">{error}</div>}</div>
+      <div className={composerExpanded ? 'daily-composer expanded' : 'daily-composer'}><div className="attachment-area">{attachmentOpen && <div className="attachment-menu"><div className="attachment-menu-title">Add context</div><button onClick={() => fileRef.current?.click()}><FileUp size={17} /> Import ChatGPT history</button><button onClick={() => setAttachmentStatus('Paste Markdown or notes below.')}><Paperclip size={17} /> Add text / Markdown</button><textarea value={attachmentNote} onChange={(event) => setAttachmentNote(event.target.value)} placeholder="Paste supplementary material..." /><button className="primary-button compact" disabled={attachmentBusy} onClick={() => void saveAttachmentNote()}>{attachmentBusy ? 'Processing...' : 'Save to inbox'}</button>{attachmentStatus && <p>{attachmentStatus}</p>}</div>}<input ref={fileRef} className="hidden-input" type="file" accept="application/json,.json" onChange={(event) => { const file = event.target.files?.[0]; if (file) void importFile(file); event.currentTarget.value = ''; }} /><button className={attachmentOpen ? 'plus-button open' : 'plus-button'} title="Add material" onClick={() => setAttachmentOpen((current) => !current)}><Plus size={21} /></button></div><textarea ref={dailyInputRef} rows={1} value={input} onChange={(event) => updateDailyInput(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); void send(); } }} placeholder="Message MindClone..." /><button className="send-icon" disabled={!input.trim() || streaming} title="Send" onClick={() => void send()}><SendHorizontal size={19} /></button></div>
     </section>
   </div>;
 }
@@ -433,7 +433,7 @@ function MemoryView({ documents, candidates, error, onRefresh }: {
   documents: MemoryDocument[]; candidates: MemoryCandidate[]; error: string; onRefresh: () => Promise<void>;
 }) {
   const [note, setNote] = useState('');
-  const [title, setTitle] = useState('随手记录');
+  const [title, setTitle] = useState('Quick note');
   const [interviewNote, setInterviewNote] = useState('');
   const [busyDocument, setBusyDocument] = useState<string | null>(null);
   const [localError, setLocalError] = useState('');
@@ -442,10 +442,10 @@ function MemoryView({ documents, candidates, error, onRefresh }: {
   const approved = candidates.filter((item) => item.status === 'approved');
 
   async function saveText(sourceType: 'note' | 'conversation', value: string, nextTitle: string) {
-    if (value.trim().length < 10) { setLocalError('请至少输入一段完整材料。'); return; }
+    if (value.trim().length < 10) { setLocalError('Please enter at least one complete piece of source material.'); return; }
     setBusyDocument('new');
     try {
-      await memoryApi.importDocument({ title: nextTitle.trim() || '未命名材料', sourceType, content: value.trim() });
+      await memoryApi.importDocument({ title: nextTitle.trim() || 'Untitled material', sourceType, content: value.trim() });
       if (sourceType === 'note') setNote(''); else setInterviewNote('');
       setLocalError('');
       await onRefresh();
@@ -456,7 +456,7 @@ function MemoryView({ documents, candidates, error, onRefresh }: {
     setBusyDocument('file');
     try {
       const contents = extractChatGPTConversations(JSON.parse(await file.text()));
-      if (!contents.length) throw new Error('未从该导出中找到可读取的用户/助手对话。');
+      if (!contents.length) throw new Error('No readable user/assistant conversations were found in this export.');
       for (const item of contents) await memoryApi.importDocument({ ...item, sourceType: 'chatgpt_export' });
       setLocalError('');
       await onRefresh();
@@ -473,18 +473,18 @@ function MemoryView({ documents, candidates, error, onRefresh }: {
   }
 
   return <div className="memory-layout">
-    <header className="page-header"><div><p className="eyebrow">ASYNC MEMORY INBOX</p><h1>记忆投喂</h1><p className="subtle">原始材料先留在本机。整理结果需要你确认，才会成为正式可检索记忆。</p></div><button className="ghost-button" onClick={() => void onRefresh()}>刷新资料</button></header>
+    <header className="page-header"><div><p className="eyebrow">ASYNC MEMORY INBOX</p><h1>Memory inbox</h1><p className="subtle">Source material stays on this device. Review extracted candidates before they become searchable memories.</p></div><button className="ghost-button" onClick={() => void onRefresh()}>Refresh</button></header>
     <div className="memory-grid">
       <section className="memory-imports">
-        <article className="memory-card"><div className="card-heading"><FileUp size={19} /><div><h2>ChatGPT 历史</h2><p>导入官方导出包中的 <code>conversations.json</code></p></div></div><input ref={fileInputRef} className="hidden-input" type="file" accept="application/json,.json" onChange={(event) => { const file = event.target.files?.[0]; if (file) void importChatGPT(file); event.currentTarget.value = ''; }} /><button className="ghost-button full-width" disabled={busyDocument === 'file'} onClick={() => fileInputRef.current?.click()}><Upload size={16} /> {busyDocument === 'file' ? '正在导入...' : '选择 conversations.json'}</button></article>
-        <article className="memory-card"><div className="card-heading"><FileText size={19} /><div><h2>随手记 / Markdown</h2><p>观点、经历、学习笔记或聊天片段</p></div></div><input className="memory-title" value={title} onChange={(event) => setTitle(event.target.value)} placeholder="材料标题" /><textarea className="memory-textarea" value={note} onChange={(event) => setNote(event.target.value)} placeholder="直接粘贴任意文本或 Markdown..." /><button className="primary-button full-width" disabled={busyDocument === 'new'} onClick={() => void saveText('note', note, title)}><Upload size={16} /> 保存原始材料</button></article>
-        <article className="memory-card"><div className="card-heading"><BotMessageSquare size={19} /><div><h2>访谈式投喂</h2><p>先将这轮对话原文存档，后续再接入提问引导</p></div></div><textarea className="memory-textarea short" value={interviewNote} onChange={(event) => setInterviewNote(event.target.value)} placeholder="我最近做了什么、怎么想、遇到了什么问题..." /><button className="ghost-button full-width" disabled={busyDocument === 'new'} onClick={() => void saveText('conversation', interviewNote, '访谈记录')}>保存本轮记录</button></article>
+        <article className="memory-card"><div className="card-heading"><FileUp size={19} /><div><h2>ChatGPT history</h2><p>Import <code>conversations.json</code> from an official export.</p></div></div><input ref={fileInputRef} className="hidden-input" type="file" accept="application/json,.json" onChange={(event) => { const file = event.target.files?.[0]; if (file) void importChatGPT(file); event.currentTarget.value = ''; }} /><button className="ghost-button full-width" disabled={busyDocument === 'file'} onClick={() => fileInputRef.current?.click()}><Upload size={16} /> {busyDocument === 'file' ? 'Importing...' : 'Choose conversations.json'}</button></article>
+        <article className="memory-card"><div className="card-heading"><FileText size={19} /><div><h2>Notes / Markdown</h2><p>Views, experience, learning notes, or chat excerpts.</p></div></div><input className="memory-title" value={title} onChange={(event) => setTitle(event.target.value)} placeholder="Material title" /><textarea className="memory-textarea" value={note} onChange={(event) => setNote(event.target.value)} placeholder="Paste any text or Markdown..." /><button className="primary-button full-width" disabled={busyDocument === 'new'} onClick={() => void saveText('note', note, title)}><Upload size={16} /> Save source material</button></article>
+        <article className="memory-card"><div className="card-heading"><BotMessageSquare size={19} /><div><h2>Conversation intake</h2><p>Archive this conversation first; guided intake can be added later.</p></div></div><textarea className="memory-textarea short" value={interviewNote} onChange={(event) => setInterviewNote(event.target.value)} placeholder="What have you done lately? What changed? What are you working through?" /><button className="ghost-button full-width" disabled={busyDocument === 'new'} onClick={() => void saveText('conversation', interviewNote, 'Conversation intake')}>Save this conversation</button></article>
       </section>
       <section className="memory-review">
-        <div className="memory-summary"><div><p className="eyebrow">LOCAL MATERIALS</p><h2>{documents.length} <span>份原始材料</span></h2></div><div><p className="eyebrow">APPROVED</p><h2>{approved.length} <span>条已确认记忆</span></h2></div></div>
+        <div className="memory-summary"><div><p className="eyebrow">LOCAL MATERIALS</p><h2>{documents.length} <span>source items</span></h2></div><div><p className="eyebrow">APPROVED</p><h2>{approved.length} <span>approved memories</span></h2></div></div>
         {(error || localError) && <div className="error-note">{error || localError}</div>}
-        <div className="document-list"><h3>等待整理</h3>{documents.length === 0 ? <p className="empty-inline">导入后的原始材料会在此处等待整理。</p> : documents.map((document) => <article className="document-row" key={document.id}><div><strong>{document.title}</strong><span>{document.sourceType === 'chatgpt_export' ? 'ChatGPT 历史' : document.sourceType === 'note' ? '文本记录' : '访谈记录'} · {new Date(document.createdAt).toLocaleDateString('zh-CN')}</span></div><button className="ghost-button" disabled={busyDocument === document.id} onClick={() => void extract(document.id)}>{busyDocument === document.id ? 'DeepSeek 整理中...' : document.extractedAt ? '再次整理' : '提取候选记忆'}</button></article>)}</div>
-        <div className="candidate-list"><h3>候选记忆 <span>{pending.length}</span></h3>{pending.length === 0 ? <p className="empty-inline">没有待审核条目。整理材料后，候选记忆会在此处出现。</p> : pending.map((candidate) => <article className="candidate-card" key={candidate.id}><div className="candidate-kind">{candidate.kind}</div><h4>{candidate.title}</h4><p>{candidate.content}</p>{candidate.tags.length > 0 && <div className="chip-row">{candidate.tags.map((tag) => <span className="chip" key={tag}>{tag}</span>)}</div>}<blockquote>{candidate.sourceQuote}</blockquote><div className="candidate-actions"><button className="reject-button" onClick={() => void review(candidate.id, 'rejected')}><X size={15} /> 忽略</button><button className="primary-button compact" onClick={() => void review(candidate.id, 'approved')}><CheckCircle2 size={15} /> 确认记忆</button></div></article>)}</div>
+        <div className="document-list"><h3>Ready to extract</h3>{documents.length === 0 ? <p className="empty-inline">Imported source material will wait here for extraction.</p> : documents.map((document) => <article className="document-row" key={document.id}><div><strong>{document.title}</strong><span>{document.sourceType === 'chatgpt_export' ? 'ChatGPT history' : document.sourceType === 'note' ? 'Text note' : 'Conversation intake'} · {new Date(document.createdAt).toLocaleDateString('en-US')}</span></div><button className="ghost-button" disabled={busyDocument === document.id} onClick={() => void extract(document.id)}>{busyDocument === document.id ? 'DeepSeek is extracting...' : document.extractedAt ? 'Extract again' : 'Extract candidate memories'}</button></article>)}</div>
+        <div className="candidate-list"><h3>Candidate memories <span>{pending.length}</span></h3>{pending.length === 0 ? <p className="empty-inline">No items are waiting for review. Extract a source item to see candidate memories here.</p> : pending.map((candidate) => <article className="candidate-card" key={candidate.id}><div className="candidate-kind">{candidate.kind}</div><h4>{candidate.title}</h4><p>{candidate.content}</p>{candidate.tags.length > 0 && <div className="chip-row">{candidate.tags.map((tag) => <span className="chip" key={tag}>{tag}</span>)}</div>}<blockquote>{candidate.sourceQuote}</blockquote><div className="candidate-actions"><button className="reject-button" onClick={() => void review(candidate.id, 'rejected')}><X size={15} /> Ignore</button><button className="primary-button compact" onClick={() => void review(candidate.id, 'approved')}><CheckCircle2 size={15} /> Approve memory</button></div></article>)}</div>
       </section>
     </div>
   </div>;

@@ -3,7 +3,7 @@ import type { InterviewPacket, Message, Settings } from './types';
 const keywords = [
   'Java', 'Kotlin', 'Android', 'iOS', 'Python', 'JavaScript', 'TypeScript', 'Go', 'Golang',
   '.NET', 'C#', 'Node', 'SQL', 'MySQL', 'PostgreSQL', 'Redis', 'Docker', 'Kubernetes',
-  '微服务', '分布式', '客服', '客户成功', '运营', '销售', '招聘', 'HR', '远程', '英语',
+  'microservices', 'distributed systems', 'customer support', 'customer success', 'operations', 'sales', 'recruiting', 'HR', 'remote', 'English',
 ];
 
 function matchingKeywords(text: string) {
@@ -17,7 +17,7 @@ export function preparePacket(jd: string, resume: string): InterviewPacket {
   const matching = jdKeywords.filter((item) => resumeKeywords.some((resumeItem) => resumeItem.toLowerCase() === item.toLowerCase()));
   const gaps = jdKeywords.filter((item) => !matching.includes(item));
   const focusAreas = [...matching, ...gaps].slice(0, 6);
-  const questionTypes = ['自我介绍与岗位匹配', '具体项目或经历深挖', '技术/业务判断', '跨职能协作', '动机与远程协作'];
+  const questionTypes = ['Introduction and role fit', 'Project and experience deep dives', 'Technical or business judgment', 'Cross-functional collaboration', 'Motivation and remote collaboration'];
 
   return {
     id: crypto.randomUUID(),
@@ -27,25 +27,25 @@ export function preparePacket(jd: string, resume: string): InterviewPacket {
     focusAreas,
     questionTypes,
     brief: matching.length
-      ? `本次优先调用与 ${matching.join('、')} 相关的经历。对 ${gaps.join('、') || '岗位要求'}，先说明可迁移能力与具体学习/实践，再给出解决问题的方法。`
-      : '尚未识别到明确重合技能。正式问答将以简历中的真实经历为优先证据，并将岗位要求映射为可迁移能力。',
+      ? `Prioritize experience related to ${matching.join(', ')}. For ${gaps.join(', ') || 'the role requirements'}, first explain transferable strengths and concrete learning or practice, then describe the problem-solving approach.`
+      : 'No clear overlap was identified. Prioritize evidence from the submitted resume and map the role requirements to transferable strengths.',
   };
 }
 
 function systemPrompt(packet: InterviewPacket) {
-  return `你是 MindClone 的正式面试回答引擎。你的输出给候选人阅读后自行作答。
+  return `You are MindClone's interview-answer engine. Your response is a candidate answer to read and deliver aloud.
 
-规则：
-1. 直接回答问题，先给清晰结论，再给一到两个具体支撑点；不要寒暄，不要说“作为 AI”。
-2. 只使用本次简历和已给面试上下文中能支持的经历。若问题超出材料，坦率说明可迁移能力和学习/验证方案，不捏造数字、公司、项目、年限或职责。
-3. 面试官追问、质疑或打断时，以本轮已说内容为事实约束，不能自相矛盾。
-4. 回答自然口语化，适合候选人朗读；默认中文，问题为英文时用英文回答。控制在 120 到 220 个汉字或相近英文长度，除非面试官明确要求深入。
-5. 本次面试准备摘要：${packet.brief}
+Rules:
+1. Answer directly: lead with a clear conclusion, then give one or two concrete supporting points. Do not add greetings or say "as an AI."
+2. Use only experience supported by this resume and the supplied interview context. When a question reaches beyond the material, explain transferable strengths plus a concrete learning or validation plan. Never invent metrics, companies, projects, tenure, or responsibilities.
+3. For follow-up questions, challenges, or interruptions, treat what has already been said in this interview as binding context and remain consistent.
+4. Write naturally for spoken delivery. Match the interviewer's language. Keep answers to roughly 90-170 English words unless the interviewer explicitly asks for more depth.
+5. Interview preparation brief: ${packet.brief}
 
-目标 JD：
+Target job description:
 ${packet.jd}
 
-本次投递简历：
+Submitted resume:
 ${packet.resume}`;
 }
 
@@ -77,7 +77,7 @@ export async function streamCandidateAnswer(
   });
 
   if (!response.ok || !response.body) {
-    throw new Error(`本地模型未响应（${response.status}）。请检查模型服务和设置。`);
+    throw new Error(`The local model did not respond (${response.status}). Check the model service and settings.`);
   }
 
   const reader = response.body.getReader();

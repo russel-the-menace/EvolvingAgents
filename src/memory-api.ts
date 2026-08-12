@@ -7,7 +7,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   });
   if (!response.ok) {
     const payload = await response.json().catch(() => null);
-    throw new Error(payload?.error || `本地记忆服务异常（${response.status}）`);
+    throw new Error(payload?.error || `Local memory service error (${response.status})`);
   }
   return response.json() as Promise<T>;
 }
@@ -29,7 +29,7 @@ export const memoryApi = {
     });
     if (!response.ok || !response.body) {
       const payload = await response.json().catch(() => null);
-      throw new Error(payload?.error || `日常对话服务异常（${response.status}）`);
+      throw new Error(payload?.error || `Daily chat service error (${response.status})`);
     }
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
