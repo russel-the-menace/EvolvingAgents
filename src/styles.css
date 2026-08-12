@@ -185,10 +185,13 @@ body { background: var(--mc-bg); color: var(--mc-ink); }
 .daily-message:hover .message-actions, .daily-message:focus-within .message-actions { opacity: 1; transform: translateY(0); pointer-events: auto; transition-delay: .85s; }
 .message-actions button { display: grid; place-items: center; width: 28px; height: 28px; padding: 0; border: 0; border-radius: 6px; color: var(--mc-muted); background: transparent; }
 .message-actions button:hover { color: var(--mc-ink); background: var(--mc-panel-muted); }
-.inline-message-editor { width: min(100%, 680px); border: 1px solid var(--mc-border); border-radius: 12px; padding: 10px; background: var(--mc-panel); }
+.inline-message-editor { width: min(460px, 100%); border: 1px solid var(--mc-border); border-radius: 12px; padding: 10px; background: var(--mc-panel); }
 .daily-message.user .inline-message-editor { margin-left: auto; }
-.inline-message-editor textarea { display: block; width: 100%; min-height: 88px; resize: vertical; border: 0; outline: 0; color: var(--mc-ink); background: transparent; line-height: 1.6; }
-.inline-message-editor > div { display: flex; justify-content: flex-end; gap: 8px; margin-top: 9px; }
+.inline-message-editor textarea { display: block; width: 100%; min-height: 52px; max-height: 180px; resize: vertical; border: 0; outline: 0; color: var(--mc-ink); background: transparent; line-height: 1.6; }
+.inline-message-editor > div { display: flex; align-items: center; justify-content: flex-end; gap: 8px; margin-top: 8px; }
+.inline-message-editor > div > button { min-width: auto; white-space: nowrap; }
+.inline-message-editor .ghost-button { padding: 8px 11px; }
+.inline-message-editor .primary-button.compact { padding: 8px 11px; }
 .message { max-width: 100%; margin-bottom: 25px; }
 .message.interviewer { margin-left: 0; }
 .message .message-body { background: transparent; }
