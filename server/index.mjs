@@ -177,6 +177,14 @@ app.post('/api/chat/sessions/:id/stream', async (request, response, next) => {
     const store = await loadStore();
     const session = (store.sessions || []).find((item) => item.id === request.params.id);
     if (!session) return response.status(404).json({ error: '未找到对话。' });
+    const replaceFromMessageId = request.body.replaceFromMessageId;
+    if (replaceFromMessageId) {
+      const position = session.messages.findIndex((message) => message.id === replaceFromMessageId);
+      if (position < 0) return response.status(404).json({ error: '未找到要编辑的消息。' });
+      const removedIds = session.messages.slice(position).map((message) => message.id);
+      session.messages = session.messages.slice(0, position);
+      removeMessageLinkedData(store, removedIds);
+    }
     const now = new Date().toISOString();
     session.messages.push({ id: randomUUID(), role: 'user', content, createdAt: now });
     if (session.messages.filter((message) => message.role === 'user').length === 1) session.title = content.slice(0, 28);
@@ -216,23 +224,6 @@ app.delete('/api/chat/sessions/:id', async (request, response, next) => {
     if (!session) return response.status(404).json({ error: '未找到对话。' });
     removeMessageLinkedData(store, session.messages.map((message) => message.id));
     store.sessions = store.sessions.filter((item) => item.id !== session.id);
-    await saveStore(store);
-    response.status(204).end();
-  } catch (error) { next(error); }
-});
-app.delete('/api/chat/sessions/:sessionId/messages/:messageId', async (request, response, next) => {
-  try {
-    const store = await loadStore();
-    const session = (store.sessions || []).find((item) => item.id === request.params.sessionId);
-    if (!session) return response.status(404).json({ error: '未找到对话。' });
-    const position = session.messages.findIndex((message) => message.id === request.params.messageId);
-    if (position < 0) return response.status(404).json({ error: '未找到消息。' });
-    const removedIds = [session.messages[position].id];
-    // Assistant response only belongs to the immediately preceding user turn.
-    if (session.messages[position + 1]?.role === 'assistant') removedIds.push(session.messages[position + 1].id);
-    session.messages = session.messages.filter((message) => !removedIds.includes(message.id));
-    removeMessageLinkedData(store, removedIds);
-    session.updatedAt = new Date().toISOString();
     await saveStore(store);
     response.status(204).end();
   } catch (error) { next(error); }
