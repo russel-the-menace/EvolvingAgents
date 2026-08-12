@@ -8,7 +8,7 @@ import {
 import { preparePacket, streamCandidateAnswer } from './interview';
 import { memoryApi } from './memory-api';
 import { loadPacket, loadSettings, savePacket, saveSettings } from './storage';
-import type { DailyMessage, DailySession, InterviewPacket, MemoryCandidate, MemoryDocument, Message, Mode, Settings } from './types';
+import type { DailyMessage, DailySession, InterviewPacket, MemoryCandidate, MemoryDocument, Message, Mode, Settings, ThemeMode } from './types';
 
 const exampleJD = `远程后端工程师
 负责服务端 API、数据库设计、性能优化与线上稳定性。熟悉任一主流后端语言，具备 SQL、Redis、Docker 和分布式系统基础；能独立沟通需求并推进交付。`;
@@ -25,6 +25,10 @@ export function App() {
   const [resume, setResume] = useState('');
   const [packet, setPacket] = useState<InterviewPacket | null>(null);
   const [settings, setSettings] = useState<Settings>(loadSettings);
+  const [theme, setTheme] = useState<ThemeMode>(() => {
+    const stored = window.localStorage.getItem('mindclone-theme');
+    return stored === 'dark' || stored === 'system' ? stored : 'light';
+  });
   const [showSettings, setShowSettings] = useState(false);
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
@@ -52,6 +56,11 @@ export function App() {
       setResume(stored.resume);
     }
   }, []);
+
+  useEffect(() => {
+    document.documentElement.dataset.theme = theme;
+    window.localStorage.setItem('mindclone-theme', theme);
+  }, [theme]);
 
   async function refreshMemory() {
     try {
@@ -215,7 +224,8 @@ export function App() {
           <DailyChatView sessions={dailySessions} activeSessionId={dailySessionId} input={dailyInput} streaming={dailyStreaming} error={dailyError}
             onInputChange={setDailyInput} onSelectSession={setDailySessionId} onNewSession={newDailySession} onRefresh={() => void refreshSessions()}
             onError={setDailyError} onStreamChange={setDailyStreaming} onImport={importChatGPTToInbox} sidebarCollapsed={sidebarCollapsed}
-            onToggleSidebar={() => setSidebarCollapsed((current) => !current)} mode={mode} hasPacket={Boolean(packet)} onModeChange={setMode} />
+            onToggleSidebar={() => setSidebarCollapsed((current) => !current)} mode={mode} hasPacket={Boolean(packet)} onModeChange={setMode}
+            onOpenSettings={() => setShowSettings(true)} />
         ) : mode === 'memory' ? (
           <MemoryView documents={memoryDocuments} candidates={memoryCandidates} error={memoryError} onRefresh={refreshMemory} />
         ) : packet ? (
@@ -228,7 +238,7 @@ export function App() {
         ) : null}
       </section>
 
-      {showSettings && <SettingsDialog settings={settings} onClose={() => setShowSettings(false)} onChange={updateSettings} />}
+      {showSettings && <SettingsDialog settings={settings} theme={theme} onThemeChange={setTheme} onClose={() => setShowSettings(false)} onChange={updateSettings} />}
     </main>
   );
 }
@@ -250,12 +260,12 @@ function extractChatGPTConversations(value: unknown) {
   });
 }
 
-function DailyChatView({ sessions, activeSessionId, input, streaming, error, onInputChange, onSelectSession, onNewSession, onRefresh, onError, onStreamChange, onImport, sidebarCollapsed, onToggleSidebar, mode, hasPacket, onModeChange }: {
+function DailyChatView({ sessions, activeSessionId, input, streaming, error, onInputChange, onSelectSession, onNewSession, onRefresh, onError, onStreamChange, onImport, sidebarCollapsed, onToggleSidebar, mode, hasPacket, onModeChange, onOpenSettings }: {
   sessions: DailySession[]; activeSessionId: string | null; input: string; streaming: boolean; error: string;
   onInputChange: (value: string) => void; onSelectSession: (id: string) => void; onNewSession: () => Promise<string | null>; onRefresh: () => void;
   onError: (value: string) => void; onStreamChange: (value: boolean) => void; onImport: (file: File) => Promise<void>;
   sidebarCollapsed: boolean; onToggleSidebar: () => void;
-  mode: Mode; hasPacket: boolean; onModeChange: (mode: Mode) => void;
+  mode: Mode; hasPacket: boolean; onModeChange: (mode: Mode) => void; onOpenSettings: () => void;
 }) {
   const [attachmentOpen, setAttachmentOpen] = useState(false);
   const [attachmentNote, setAttachmentNote] = useState('');
@@ -322,7 +332,7 @@ function DailyChatView({ sessions, activeSessionId, input, streaming, error, onI
   }
 
   return <div className="daily-layout">
-    <aside className="daily-history"><div className="daily-brand"><Sparkles size={21} /><span>MindClone</span></div><nav className="daily-nav"><button className={mode === 'daily' ? 'active' : ''} onClick={() => onModeChange('daily')}><MessageCircle size={17} /> 日常对话</button><button onClick={() => onModeChange('prepare')}><FileText size={17} /> 面试准备</button><button onClick={() => onModeChange('memory')}><MessageSquarePlus size={17} /> 记忆投喂</button><button disabled={!hasPacket} onClick={() => hasPacket && onModeChange('formal')}><BotMessageSquare size={17} /> 正式面试</button></nav><div className="daily-history-top"><span>对话</span><button className="icon-button light" title="新建对话" onClick={() => void onNewSession()}><Plus size={18} /></button></div><label className="chat-search"><Search size={15} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索对话" /></label><div className="session-list">{filteredSessions.length === 0 ? <p>{query ? '没有匹配的对话。' : '开始一次对话，MindClone 会在本机保留你的记录。'}</p> : filteredSessions.map((session) => <div key={session.id} className={session.id === activeSessionId ? 'session-item active' : 'session-item'}><button onClick={() => onSelectSession(session.id)}><span>{session.title}</span><small>{new Date(session.updatedAt).toLocaleDateString('zh-CN')}</small></button><button className="session-delete" title="删除对话" onClick={() => void deleteSession(session)}><Trash2 size={14} /></button></div>)}</div></aside>
+    <aside className="daily-history"><div className="daily-brand"><Sparkles size={21} /><span>MindClone</span></div><nav className="daily-nav"><button className={mode === 'daily' ? 'active' : ''} onClick={() => onModeChange('daily')}><MessageCircle size={17} /> 日常对话</button><button onClick={() => onModeChange('prepare')}><FileText size={17} /> 面试准备</button><button onClick={() => onModeChange('memory')}><MessageSquarePlus size={17} /> 记忆投喂</button><button disabled={!hasPacket} onClick={() => hasPacket && onModeChange('formal')}><BotMessageSquare size={17} /> 正式面试</button></nav><div className="daily-history-top"><span>对话</span><button className="icon-button light" title="新建对话" onClick={() => void onNewSession()}><Plus size={18} /></button></div><label className="chat-search"><Search size={15} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索对话" /></label><div className="session-list">{filteredSessions.length === 0 ? <p>{query ? '没有匹配的对话。' : '开始一次对话，MindClone 会在本机保留你的记录。'}</p> : filteredSessions.map((session) => <div key={session.id} className={session.id === activeSessionId ? 'session-item active' : 'session-item'}><button onClick={() => onSelectSession(session.id)}><span>{session.title}</span><small>{new Date(session.updatedAt).toLocaleDateString('zh-CN')}</small></button><button className="session-delete" title="删除对话" onClick={() => void deleteSession(session)}><Trash2 size={14} /></button></div>)}</div><div className="daily-sidebar-footer"><div className="local-status"><span /> 本地引擎</div><button className="icon-button light" title="设置" onClick={onOpenSettings}><Settings2 size={18} /></button></div></aside>
     <section className="daily-conversation"><header className="daily-header"><button className="sidebar-toggle" title={sidebarCollapsed ? '展开侧栏' : '收起侧栏'} onClick={onToggleSidebar}>{sidebarCollapsed ? <PanelLeftOpen size={19} /> : <PanelLeftClose size={19} />}</button><div className="daily-title"><p className="eyebrow">DAILY MINDCLONE</p><h1>{activeSession?.title || '和 MindClone 聊聊'}</h1></div><span className="provider-pill"><span /> DeepSeek 对话 · 本地记忆</span></header><div className="daily-transcript" ref={listRef}>{messages.length === 0 ? <div className="daily-empty"><Sparkles size={32} /><h2>从最近在想的事开始</h2><p>所有对话默认保存在本机。重要内容会异步进入候选记忆，等待你审核。</p></div> : messages.map((message) => <article className={`daily-message ${message.role}`} key={message.id}><div>{message.role === 'user' ? '你' : 'MindClone'}<button className="message-delete" title="删除消息" onClick={() => void deleteMessage(message)}><Trash2 size={13} /></button></div><p>{message.content || (streaming ? '正在思考...' : '')}</p></article>)}{error && <div className="error-note">{error}</div>}</div>
       <div className="daily-composer"><div className="attachment-area">{attachmentOpen && <div className="attachment-menu"><div className="attachment-menu-title">补充投喂</div><button onClick={() => fileRef.current?.click()}><FileUp size={17} /> 导入 ChatGPT 历史</button><button onClick={() => setAttachmentStatus('在下方粘贴 Markdown 或随手记。')}><Paperclip size={17} /> 添加文本 / Markdown</button><textarea value={attachmentNote} onChange={(event) => setAttachmentNote(event.target.value)} placeholder="粘贴补充材料..." /><button className="primary-button compact" disabled={attachmentBusy} onClick={() => void saveAttachmentNote()}>{attachmentBusy ? '处理中...' : '保存到收件箱'}</button>{attachmentStatus && <p>{attachmentStatus}</p>}</div>}<input ref={fileRef} className="hidden-input" type="file" accept="application/json,.json" onChange={(event) => { const file = event.target.files?.[0]; if (file) void importFile(file); event.currentTarget.value = ''; }} /><button className={attachmentOpen ? 'plus-button open' : 'plus-button'} title="添加材料" onClick={() => setAttachmentOpen((current) => !current)}><Plus size={21} /></button></div><textarea value={input} onChange={(event) => onInputChange(event.target.value)} onKeyDown={(event) => { if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') void send(); }} placeholder="和 MindClone 聊聊..." /><button className="send-icon" disabled={!input.trim() || streaming} title="发送" onClick={() => void send()}><SendHorizontal size={19} /></button></div>
     </section>
@@ -444,7 +454,7 @@ function FormalView(props: {
   </div>;
 }
 
-function SettingsDialog({ settings, onClose, onChange }: { settings: Settings; onClose: () => void; onChange: (settings: Settings) => void }) {
+function SettingsDialog({ settings, theme, onThemeChange, onClose, onChange }: { settings: Settings; theme: ThemeMode; onThemeChange: (theme: ThemeMode) => void; onClose: () => void; onChange: (settings: Settings) => void }) {
   const [draft, setDraft] = useState(settings);
-  return <div className="dialog-backdrop" role="presentation" onMouseDown={onClose}><div className="settings-dialog" role="dialog" aria-modal="true" onMouseDown={(event) => event.stopPropagation()}><div><p className="eyebrow">LOCAL INFERENCE</p><h2>模型连接</h2><p>正式面试只走本地兼容 OpenAI 的流式接口。</p></div><label>服务地址<input value={draft.baseUrl} onChange={(event) => setDraft({ ...draft, baseUrl: event.target.value })} /></label><label>模型名称<input value={draft.model} onChange={(event) => setDraft({ ...draft, model: event.target.value })} /></label><div className="dialog-actions"><button className="ghost-button" onClick={onClose}>取消</button><button className="primary-button compact" onClick={() => { onChange(draft); onClose(); }}>保存</button></div></div></div>;
+  return <div className="dialog-backdrop" role="presentation" onMouseDown={onClose}><div className="settings-dialog" role="dialog" aria-modal="true" onMouseDown={(event) => event.stopPropagation()}><div><p className="eyebrow">MINDCLONE SETTINGS</p><h2>设置</h2><p>调整界面主题和本地模型连接。</p></div><label className="theme-field">主题<div className="theme-options">{(['light', 'dark', 'system'] as ThemeMode[]).map((option) => <button key={option} type="button" className={theme === option ? 'selected' : ''} onClick={() => onThemeChange(option)}>{option === 'light' ? '浅色' : option === 'dark' ? '深色' : '跟随系统'}</button>)}</div></label><label>服务地址<input value={draft.baseUrl} onChange={(event) => setDraft({ ...draft, baseUrl: event.target.value })} /></label><label>模型名称<input value={draft.model} onChange={(event) => setDraft({ ...draft, model: event.target.value })} /></label><div className="dialog-actions"><button className="ghost-button" onClick={onClose}>取消</button><button className="primary-button compact" onClick={() => { onChange(draft); onClose(); }}>保存</button></div></div></div>;
 }

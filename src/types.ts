@@ -5,6 +5,8 @@ export type Settings = {
   model: string;
 };
 
+export type ThemeMode = 'light' | 'dark' | 'system';
+
 export type InterviewPacket = {
   id: string;
   preparedAt: string;
