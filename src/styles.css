@@ -116,8 +116,8 @@ body { background: var(--mc-bg); color: var(--mc-ink); }
 .recents-toggle.collapsed svg { transform: rotate(-90deg); opacity: .8; }
 .session-list { gap: 1px; }
 .session-item { position: relative; grid-template-columns: minmax(0, 1fr) auto; min-height: 34px; border-radius: 8px; }
-.session-item > button:first-child { padding: 3px 10px; border-radius: 8px; font-size: 14px; }
-.session-item > button:first-child span { display: flex; min-width: 0; align-items: center; gap: 5px; transform: translateY(-2px); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.session-item > button:first-child { padding: 3px 10px; border-radius: 8px; font-size: 12px; }
+.session-item > button:first-child span { display: flex; min-width: 0; align-items: center; gap: 5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .session-item > button:first-child span svg { flex: 0 0 auto; opacity: .75; }
 .session-more { position: relative; display: flex; align-items: center; padding-right: 4px; }
 .session-more-trigger { display: grid; visibility: hidden; place-items: center; width: 28px; height: 28px; padding: 0; border: 0; border-radius: 6px; color: var(--mc-sidebar-muted); background: transparent; }
