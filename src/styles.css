@@ -184,6 +184,7 @@ body { background: var(--mc-bg); color: var(--mc-ink); }
 .daily-transcript, .daily-composer { width: min(680px, calc(100% - 56px)); }
 .message-actions { position: absolute; right: 0; bottom: 0; z-index: 2; display: flex; justify-content: flex-end; gap: 5px; height: 30px; opacity: 0; transform: translateY(-3px); transition: opacity .16s ease .5s, transform .16s ease .5s; pointer-events: none; }
 .daily-message.assistant .message-actions { right: auto; left: 0; }
+.daily-message.user .message-actions { bottom: 1px; }
 .daily-message:hover .message-actions, .daily-message:focus-within .message-actions { opacity: 1; transform: translateY(0); pointer-events: auto; transition-delay: .5s; }
 .message-actions button { display: grid; place-items: center; width: 28px; height: 28px; padding: 0; border: 0; border-radius: 6px; color: var(--mc-muted); background: transparent; }
 .message-actions button:hover { color: var(--mc-ink); background: var(--mc-panel-muted); }
