@@ -70,6 +70,8 @@ body { background: var(--mc-bg); color: var(--mc-ink); }
 .nav-item.active, .daily-nav button.active { background: var(--mc-sidebar-active); color: var(--mc-sidebar-ink); }
 .daily-nav { border-color: var(--mc-border); }
 .daily-nav button:disabled { color: var(--mc-sidebar-muted); }
+.daily-nav { gap: 1px; padding-bottom: 12px; margin-bottom: 12px; }
+.daily-nav button { gap: 7px; min-height: 0; padding: 3px 10px; border-radius: 8px; font-size: 10px; }
 .sidebar-foot, .daily-sidebar-footer { color: var(--mc-sidebar-muted); }
 .local-status { color: var(--mc-sidebar-muted); }
 .local-status span, .ready-pill span, .stream-indicator span { background: #bdbdbd; box-shadow: 0 0 0 3px rgba(189, 189, 189, .14); }
