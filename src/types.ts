@@ -5,7 +5,7 @@ export type Settings = {
   model: string;
 };
 
-export type DailyModel = 'deepseek-chat' | 'deepseek-reasoner';
+export type DailyModel = 'deepseek-light' | 'deepseek-medium' | 'deepseek-high' | 'deepseek-ultra';
 
 export type ThemeMode = 'light' | 'dark' | 'system';
 

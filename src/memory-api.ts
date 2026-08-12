@@ -23,7 +23,7 @@ export const memoryApi = {
   listSessions: () => request<{ sessions: DailySession[] }>('/chat/sessions'),
   createSession: () => request<{ session: DailySession }>('/chat/sessions', { method: 'POST' }),
   deleteSession: (sessionId: string) => request<void>(`/chat/sessions/${sessionId}`, { method: 'DELETE' }),
-  streamChat: async (sessionId: string, content: string, onDelta: (delta: string) => void, signal: AbortSignal, replaceFromMessageId?: string, model: DailyModel = 'deepseek-chat') => {
+  streamChat: async (sessionId: string, content: string, onDelta: (delta: string) => void, signal: AbortSignal, replaceFromMessageId?: string, model: DailyModel = 'deepseek-light') => {
     const response = await fetch(`/api/chat/sessions/${sessionId}/stream`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, signal, body: JSON.stringify({ content, replaceFromMessageId, model }),
     });

@@ -139,11 +139,17 @@ async function streamDailyChat(session, store, response, query, model) {
   if (!apiKey) throw new Error('DEEPSEEK_API_KEY is not configured. Set it in the local .env file and restart the service.');
   const memoryContext = relevantMemoryContext(store, session, query);
   const system = `You are MindClone, a long-term conversational partner who helps the user think, organize experiences, and express themselves. Be natural, direct, and willing to make a judgment. Do not mechanically summarize or repeatedly say that you remembered something. When the user discusses experiences, preferences, viewpoints, or important changes, ask useful follow-up questions when appropriate. Treat reliable memories as known context, but never turn unverified material or speculation into the user's experience. Reply in clear, natural English by default, and match the user's language when they write in another language.\n\n${memoryContext || 'No relevant long-term context has been retrieved yet.'}`;
-  const selectedModel = model === 'deepseek-reasoner' ? 'deepseek-reasoner' : 'deepseek-chat';
+  const modelOptions = {
+    'deepseek-light': { model: 'deepseek-v4-flash', thinking: false },
+    'deepseek-medium': { model: 'deepseek-v4-flash', thinking: true },
+    'deepseek-high': { model: 'deepseek-v4-pro', thinking: false },
+    'deepseek-ultra': { model: 'deepseek-v4-pro', thinking: true },
+  };
+  const selectedModel = modelOptions[model] || modelOptions['deepseek-light'];
   const upstream = await fetch(`${(process.env.DEEPSEEK_BASE_URL || 'https://api.deepseek.com').replace(/\/$/, '')}/chat/completions`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ model: selectedModel, temperature: selectedModel === 'deepseek-reasoner' ? 0.4 : 0.7, stream: true, messages: [{ role: 'system', content: system }, ...session.messages.slice(-24).map((message) => ({ role: message.role, content: message.content }))] }),
+    body: JSON.stringify({ model: selectedModel.model, stream: true, thinking: { type: selectedModel.thinking ? 'enabled' : 'disabled' }, ...(selectedModel.thinking ? { reasoning_effort: 'high' } : { temperature: 0.7 }), messages: [{ role: 'system', content: system }, ...session.messages.slice(-24).map((message) => ({ role: message.role, content: message.content }))] }),
   });
   if (!upstream.ok || !upstream.body) throw new Error(`DeepSeek daily chat request failed (${upstream.status}).`);
   const reader = upstream.body.getReader();
