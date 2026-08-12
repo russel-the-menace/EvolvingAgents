@@ -181,6 +181,7 @@ body { background: var(--mc-bg); color: var(--mc-ink); }
 .daily-message .rich-text > p, .message .rich-text > p { background: transparent; border: 0; border-radius: 0; padding: 0; color: inherit; }
 .daily-message .rich-text, .daily-message .rich-text > p, .message .rich-text, .message .rich-text > p { font-weight: 400; }
 .daily-message .rich-text strong, .message .rich-text strong { font-weight: 650; }
+.daily-transcript, .daily-composer { width: min(680px, calc(100% - 56px)); }
 .message { max-width: 100%; margin-bottom: 25px; }
 .message.interviewer { margin-left: 0; }
 .message .message-body { background: transparent; }
