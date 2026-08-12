@@ -80,6 +80,17 @@ body { background: var(--mc-bg); color: var(--mc-ink); }
 .daily-empty h2, .conversation-empty h2 { color: var(--mc-ink); }
 .daily-message p, .message p { color: var(--mc-ink); background: var(--mc-panel-muted); }
 .daily-message.user p, .message.interviewer p { background: #dedede; border-color: #cfcfcf; }
+.daily-message .message-body, .message .message-body { white-space: normal; color: var(--mc-ink); background: var(--mc-panel-muted); border: 1px solid transparent; border-radius: 8px; padding: 14px 16px; font-size: 15px; line-height: 1.72; }
+.daily-message.user .message-body, .message.interviewer .message-body { background: #dedede; border-color: #cfcfcf; }
+.rich-text > p { margin: 0; }
+.rich-text > p + p { margin-top: 1em; }
+.rich-text strong { font-weight: 750; }
+.thinking-indicator { display: inline-flex; align-items: center; gap: 5px; min-height: 24px; color: var(--mc-muted); }
+.thinking-label { margin-right: 3px; font-size: 13px; }
+.thinking-indicator span { width: 6px; height: 6px; border-radius: 50%; background: currentColor; opacity: .35; animation: thinking-pulse 1.05s ease-in-out infinite; }
+.thinking-indicator span:nth-child(2) { animation-delay: .15s; }
+.thinking-indicator span:nth-child(3) { animation-delay: .3s; }
+@keyframes thinking-pulse { 0%, 60%, 100% { transform: translateY(0); opacity: .28; } 30% { transform: translateY(-3px); opacity: .9; } }
 .daily-history-top { color: var(--mc-sidebar-ink); }
 .chat-search { color: var(--mc-sidebar-muted); border-color: var(--mc-border); }
 .chat-search input { color: var(--mc-sidebar-ink); }
@@ -97,8 +108,8 @@ body { background: var(--mc-bg); color: var(--mc-ink); }
 .session-list { min-height: 0; overflow: auto; }
 .daily-composer { min-height: 62px; padding: 8px 46px; margin-bottom: 18px; border-color: var(--mc-border); border-radius: 18px; background: var(--mc-panel); box-shadow: 0 5px 18px rgba(0, 0, 0, .06); transition: padding .18s ease; }
 .daily-composer:not(.expanded) { display: flex; align-items: center; }
-.daily-composer:not(.expanded) > textarea { width: 100%; height: 24px; min-height: 24px; padding: 2px 0; overflow: hidden; line-height: 20px; color: var(--mc-ink); background: transparent; transition: width .18s ease; }
-.daily-composer.expanded > textarea { width: 100%; min-height: 24px; max-height: 144px; padding: 2px 0; overflow-y: auto; line-height: 20px; color: var(--mc-ink); background: transparent; transition: width .18s ease; }
+.daily-composer:not(.expanded) > textarea { width: 100%; height: 24px; min-height: 24px; padding: 2px 0; overflow: hidden; line-height: 20px; color: var(--mc-ink); background: transparent; transition: height .18s ease, width .18s ease; }
+.daily-composer.expanded > textarea { width: 100%; min-height: 24px; max-height: 144px; padding: 2px 0; overflow-y: auto; line-height: 20px; color: var(--mc-ink); background: transparent; transition: height .18s ease, width .18s ease; }
 .daily-composer.expanded { padding: 12px 14px 46px; }
 .plus-button { left: 10px; width: 28px; height: 28px; color: #666; border-color: #c9c9c9; background: var(--mc-panel); transition: top .18s ease; }
 .plus-button.open { color: #fff; border-color: #555; background: #333; }
@@ -147,3 +158,12 @@ body { background: var(--mc-bg); color: var(--mc-ink); }
 .app-shell.sidebar-collapsed .daily-conversation { grid-column: 1 / -1; }
 .app-shell.sidebar-collapsed .daily-layout { grid-template-columns: minmax(0, 1fr); }
 .app-shell.sidebar-collapsed .daily-history { display: none; }
+
+/* Formal interview conversation uses the same neutral theme in both modes. */
+.formal-layout, .formal-body { background: var(--mc-bg); color: var(--mc-ink); }
+.conversation { background: var(--mc-panel); border-color: var(--mc-border); }
+.context-rail { border-color: var(--mc-border); }
+.message .message-body { background: var(--mc-panel-muted); color: var(--mc-ink); border-color: var(--mc-border); }
+.message.interviewer .message-body { background: color-mix(in srgb, var(--mc-panel-muted) 82%, var(--mc-ink)); border-color: var(--mc-border); }
+:root[data-theme="dark"] .daily-message.user .message-body, :root[data-theme="dark"] .message.interviewer .message-body { background: #303030; border-color: #454545; }
+:root[data-theme="dark"] .daily-message .message-body, :root[data-theme="dark"] .message .message-body { background: #242424; border-color: #353535; }
