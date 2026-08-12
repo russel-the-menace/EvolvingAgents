@@ -2,7 +2,7 @@
 
 ## Status
 
-Planned. This module is documented before implementation because it determines the long-term quality of MindClone.
+Initial local vertical slice implemented. The current UI supports ChatGPT `conversations.json`, pasted text/Markdown, and manually recorded interview notes. Imported raw content and candidate-review state are saved locally in `data/memory-store.json`.
 
 ## Responsibility
 
@@ -12,7 +12,7 @@ Accept Markdown notes, resumes, chat exports, interview debriefs, and guided con
 
 1. Store the original local document with source and timestamp.
 2. Chunk and extract candidate memories asynchronously.
-3. Optionally use DeepSeek to label, summarize, find contradictions, and suggest interview-ready stories.
+3. Explicitly request DeepSeek to label, summarize, find contradictions, and suggest interview-ready stories.
 4. Present candidate memories for user approval, correction, merge, or rejection.
 5. Index approved memories locally for retrieval by interview preparation.
 
@@ -22,7 +22,7 @@ Accept Markdown notes, resumes, chat exports, interview debriefs, and guided con
 - Provenance is mandatory: every formal memory must cite its source fragment or user confirmation. This makes later correction possible.
 - Retrieval changes emphasis, not history: a JD changes which stories are selected and in what order they are explained; it does not rewrite the underlying record.
 - Cloud models are allowed only before approval: DeepSeek initially helps organize material but cannot silently become the source of truth.
-- Start with Markdown and SQLite-backed metadata/indexing: plain source files remain portable and inspectable. Add a vector index only once semantic retrieval measurably improves over keyword and tag retrieval.
+- The prototype uses an atomic JSON store to validate product flow. Replace it with Markdown originals plus SQLite metadata before adding retrieval to formal interview packets.
 
 ## Interface with formal mode
 

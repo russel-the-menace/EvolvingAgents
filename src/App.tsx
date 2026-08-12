@@ -1,11 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ArrowRight, BotMessageSquare, CheckCircle2, CircleStop, FileText,
-  ListChecks, Mic, Play, SendHorizontal, Settings2, Sparkles, Volume2,
+  FileUp, ListChecks, MessageSquarePlus, Mic, Play, SendHorizontal, Settings2,
+  Sparkles, Upload, Volume2, X,
 } from 'lucide-react';
 import { preparePacket, streamCandidateAnswer } from './interview';
+import { memoryApi } from './memory-api';
 import { loadPacket, loadSettings, savePacket, saveSettings } from './storage';
-import type { InterviewPacket, Message, Mode, Settings } from './types';
+import type { InterviewPacket, MemoryCandidate, MemoryDocument, Message, Mode, Settings } from './types';
 
 const exampleJD = `远程后端工程师
 负责服务端 API、数据库设计、性能优化与线上稳定性。熟悉任一主流后端语言，具备 SQL、Redis、Docker 和分布式系统基础；能独立沟通需求并推进交付。`;
@@ -27,6 +29,9 @@ export function App() {
   const [input, setInput] = useState('');
   const [streaming, setStreaming] = useState(false);
   const [error, setError] = useState('');
+  const [memoryDocuments, setMemoryDocuments] = useState<MemoryDocument[]>([]);
+  const [memoryCandidates, setMemoryCandidates] = useState<MemoryCandidate[]>([]);
+  const [memoryError, setMemoryError] = useState('');
   const abortRef = useRef<AbortController | null>(null);
   const generationRef = useRef(0);
   const transcriptRef = useRef<HTMLDivElement>(null);
@@ -39,6 +44,19 @@ export function App() {
       setResume(stored.resume);
     }
   }, []);
+
+  async function refreshMemory() {
+    try {
+      const store = await memoryApi.list();
+      setMemoryDocuments(store.documents);
+      setMemoryCandidates(store.memories);
+      setMemoryError('');
+    } catch (caught) {
+      setMemoryError((caught as Error).message);
+    }
+  }
+
+  useEffect(() => { void refreshMemory(); }, []);
 
   useEffect(() => {
     transcriptRef.current?.scrollTo({ top: transcriptRef.current.scrollHeight, behavior: 'smooth' });
@@ -135,6 +153,9 @@ export function App() {
           <button className={mode === 'prepare' ? 'nav-item active' : 'nav-item'} onClick={() => setMode('prepare')}>
             <FileText size={18} /> 面试准备
           </button>
+          <button className={mode === 'memory' ? 'nav-item active' : 'nav-item'} onClick={() => { setMode('memory'); void refreshMemory(); }}>
+            <MessageSquarePlus size={18} /> 记忆投喂
+          </button>
           <button className={mode === 'formal' ? 'nav-item active' : 'nav-item'} onClick={() => packet && setMode('formal')} disabled={!packet}>
             <BotMessageSquare size={18} /> 正式面试
           </button>
@@ -152,6 +173,8 @@ export function App() {
             onJdChange={setJd} onResumeChange={setResume} onPrepare={prepare}
             onEnter={enterFormal} onUseExample={() => { setJd(exampleJD); setResume(exampleResume); }}
           />
+        ) : mode === 'memory' ? (
+          <MemoryView documents={memoryDocuments} candidates={memoryCandidates} error={memoryError} onRefresh={refreshMemory} />
         ) : packet ? (
           <FormalView
             packet={packet} messages={messages} input={input} error={error} streaming={streaming}
@@ -165,6 +188,84 @@ export function App() {
       {showSettings && <SettingsDialog settings={settings} onClose={() => setShowSettings(false)} onChange={updateSettings} />}
     </main>
   );
+}
+
+function extractChatGPTConversations(value: unknown) {
+  if (!Array.isArray(value)) throw new Error('该文件不是 ChatGPT conversations.json 数组。');
+  return value.flatMap((conversation: any) => {
+    const mapping = conversation?.mapping;
+    if (!mapping || typeof mapping !== 'object') return [];
+    const messages = Object.values(mapping).flatMap((node: any) => {
+      const role = node?.message?.author?.role;
+      const parts = node?.message?.content?.parts;
+      if (!['user', 'assistant'].includes(role) || !Array.isArray(parts)) return [];
+      const text = parts.filter((part: unknown) => typeof part === 'string').join('\n').trim();
+      return text ? [`${role === 'user' ? '我' : 'ChatGPT'}：${text}`] : [];
+    });
+    if (!messages.length) return [];
+    return [{ title: conversation.title || 'ChatGPT 对话', content: messages.join('\n\n') }];
+  });
+}
+
+function MemoryView({ documents, candidates, error, onRefresh }: {
+  documents: MemoryDocument[]; candidates: MemoryCandidate[]; error: string; onRefresh: () => Promise<void>;
+}) {
+  const [note, setNote] = useState('');
+  const [title, setTitle] = useState('随手记录');
+  const [interviewNote, setInterviewNote] = useState('');
+  const [busyDocument, setBusyDocument] = useState<string | null>(null);
+  const [localError, setLocalError] = useState('');
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const pending = candidates.filter((item) => item.status === 'pending');
+  const approved = candidates.filter((item) => item.status === 'approved');
+
+  async function saveText(sourceType: 'note' | 'conversation', value: string, nextTitle: string) {
+    if (value.trim().length < 10) { setLocalError('请至少输入一段完整材料。'); return; }
+    setBusyDocument('new');
+    try {
+      await memoryApi.importDocument({ title: nextTitle.trim() || '未命名材料', sourceType, content: value.trim() });
+      if (sourceType === 'note') setNote(''); else setInterviewNote('');
+      setLocalError('');
+      await onRefresh();
+    } catch (caught) { setLocalError((caught as Error).message); } finally { setBusyDocument(null); }
+  }
+
+  async function importChatGPT(file: File) {
+    setBusyDocument('file');
+    try {
+      const contents = extractChatGPTConversations(JSON.parse(await file.text()));
+      if (!contents.length) throw new Error('未从该导出中找到可读取的用户/助手对话。');
+      for (const item of contents) await memoryApi.importDocument({ ...item, sourceType: 'chatgpt_export' });
+      setLocalError('');
+      await onRefresh();
+    } catch (caught) { setLocalError((caught as Error).message); } finally { setBusyDocument(null); }
+  }
+
+  async function extract(documentId: string) {
+    setBusyDocument(documentId);
+    try { await memoryApi.extract(documentId); setLocalError(''); await onRefresh(); } catch (caught) { setLocalError((caught as Error).message); } finally { setBusyDocument(null); }
+  }
+
+  async function review(id: string, status: MemoryCandidate['status']) {
+    try { await memoryApi.setStatus(id, status); await onRefresh(); } catch (caught) { setLocalError((caught as Error).message); }
+  }
+
+  return <div className="memory-layout">
+    <header className="page-header"><div><p className="eyebrow">ASYNC MEMORY INBOX</p><h1>记忆投喂</h1><p className="subtle">原始材料先留在本机。整理结果需要你确认，才会成为正式可检索记忆。</p></div><button className="ghost-button" onClick={() => void onRefresh()}>刷新资料</button></header>
+    <div className="memory-grid">
+      <section className="memory-imports">
+        <article className="memory-card"><div className="card-heading"><FileUp size={19} /><div><h2>ChatGPT 历史</h2><p>导入官方导出包中的 <code>conversations.json</code></p></div></div><input ref={fileInputRef} className="hidden-input" type="file" accept="application/json,.json" onChange={(event) => { const file = event.target.files?.[0]; if (file) void importChatGPT(file); event.currentTarget.value = ''; }} /><button className="ghost-button full-width" disabled={busyDocument === 'file'} onClick={() => fileInputRef.current?.click()}><Upload size={16} /> {busyDocument === 'file' ? '正在导入...' : '选择 conversations.json'}</button></article>
+        <article className="memory-card"><div className="card-heading"><FileText size={19} /><div><h2>随手记 / Markdown</h2><p>观点、经历、学习笔记或聊天片段</p></div></div><input className="memory-title" value={title} onChange={(event) => setTitle(event.target.value)} placeholder="材料标题" /><textarea className="memory-textarea" value={note} onChange={(event) => setNote(event.target.value)} placeholder="直接粘贴任意文本或 Markdown..." /><button className="primary-button full-width" disabled={busyDocument === 'new'} onClick={() => void saveText('note', note, title)}><Upload size={16} /> 保存原始材料</button></article>
+        <article className="memory-card"><div className="card-heading"><BotMessageSquare size={19} /><div><h2>访谈式投喂</h2><p>先将这轮对话原文存档，后续再接入提问引导</p></div></div><textarea className="memory-textarea short" value={interviewNote} onChange={(event) => setInterviewNote(event.target.value)} placeholder="我最近做了什么、怎么想、遇到了什么问题..." /><button className="ghost-button full-width" disabled={busyDocument === 'new'} onClick={() => void saveText('conversation', interviewNote, '访谈记录')}>保存本轮记录</button></article>
+      </section>
+      <section className="memory-review">
+        <div className="memory-summary"><div><p className="eyebrow">LOCAL MATERIALS</p><h2>{documents.length} <span>份原始材料</span></h2></div><div><p className="eyebrow">APPROVED</p><h2>{approved.length} <span>条已确认记忆</span></h2></div></div>
+        {(error || localError) && <div className="error-note">{error || localError}</div>}
+        <div className="document-list"><h3>等待整理</h3>{documents.length === 0 ? <p className="empty-inline">导入后的原始材料会在此处等待整理。</p> : documents.map((document) => <article className="document-row" key={document.id}><div><strong>{document.title}</strong><span>{document.sourceType === 'chatgpt_export' ? 'ChatGPT 历史' : document.sourceType === 'note' ? '文本记录' : '访谈记录'} · {new Date(document.createdAt).toLocaleDateString('zh-CN')}</span></div><button className="ghost-button" disabled={busyDocument === document.id} onClick={() => void extract(document.id)}>{busyDocument === document.id ? 'DeepSeek 整理中...' : document.extractedAt ? '再次整理' : '提取候选记忆'}</button></article>)}</div>
+        <div className="candidate-list"><h3>候选记忆 <span>{pending.length}</span></h3>{pending.length === 0 ? <p className="empty-inline">没有待审核条目。整理材料后，候选记忆会在此处出现。</p> : pending.map((candidate) => <article className="candidate-card" key={candidate.id}><div className="candidate-kind">{candidate.kind}</div><h4>{candidate.title}</h4><p>{candidate.content}</p>{candidate.tags.length > 0 && <div className="chip-row">{candidate.tags.map((tag) => <span className="chip" key={tag}>{tag}</span>)}</div>}<blockquote>{candidate.sourceQuote}</blockquote><div className="candidate-actions"><button className="reject-button" onClick={() => void review(candidate.id, 'rejected')}><X size={15} /> 忽略</button><button className="primary-button compact" onClick={() => void review(candidate.id, 'approved')}><CheckCircle2 size={15} /> 确认记忆</button></div></article>)}</div>
+      </section>
+    </div>
+  </div>;
 }
 
 function PrepareView(props: {

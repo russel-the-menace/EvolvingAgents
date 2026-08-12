@@ -1,4 +1,4 @@
-export type Mode = 'prepare' | 'formal';
+export type Mode = 'prepare' | 'formal' | 'memory';
 
 export type Settings = {
   baseUrl: string;
@@ -19,5 +19,26 @@ export type Message = {
   id: string;
   role: 'interviewer' | 'candidate';
   content: string;
+  createdAt: string;
+};
+
+export type MemoryDocument = {
+  id: string;
+  title: string;
+  sourceType: 'chatgpt_export' | 'note' | 'conversation';
+  content: string;
+  createdAt: string;
+  extractedAt?: string;
+};
+
+export type MemoryCandidate = {
+  id: string;
+  documentId: string;
+  kind: 'experience' | 'skill' | 'preference' | 'viewpoint' | 'language_sample';
+  title: string;
+  content: string;
+  tags: string[];
+  sourceQuote: string;
+  status: 'pending' | 'approved' | 'rejected';
   createdAt: string;
 };

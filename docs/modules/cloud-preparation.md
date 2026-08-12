@@ -2,7 +2,7 @@
 
 ## Status
 
-Planned integration. This module will serve the asynchronous write path only.
+Initial integration implemented in `server/index.mjs`. The loopback service reads `.env`, calls DeepSeek only after the user clicks “提取候选记忆”, validates the JSON response, and writes pending review entries to local storage.
 
 ## Initial provider
 
