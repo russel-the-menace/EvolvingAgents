@@ -62,14 +62,83 @@ async function proposeWithDeepSeek(document) {
   return Array.isArray(parsed.memories) ? parsed.memories : [];
 }
 
-function approvedMemoryContext(store) {
-  return store.memories.filter((memory) => memory.status === 'approved').slice(0, 24).map((memory) => `- ${memory.kind} | ${memory.title}: ${memory.content}`).join('\n');
+const stopWords = new Set(['a', 'an', 'and', 'are', 'as', 'at', 'be', 'but', 'by', 'for', 'from', 'how', 'i', 'in', 'is', 'it', 'my', 'of', 'on', 'or', 'that', 'the', 'this', 'to', 'was', 'what', 'when', 'where', 'with', 'you', 'your']);
+
+function tokenize(value) {
+  const text = String(value || '').toLowerCase();
+  const words = text.match(/[\p{L}\p{N}_-]{2,}/gu) || [];
+  const ideographs = text.match(/\p{Script=Han}/gu) || [];
+  const bigrams = ideographs.slice(0, -1).map((character, index) => `${character}${ideographs[index + 1]}`);
+  return [...new Set([...words.filter((word) => !stopWords.has(word)), ...bigrams])].slice(0, 40);
 }
 
-async function streamDailyChat(session, store, response) {
+function relevance(queryTokens, value) {
+  if (!queryTokens.length) return 0;
+  const haystack = String(value || '').toLowerCase();
+  return queryTokens.reduce((score, token) => score + (haystack.includes(token) ? 1 : 0), 0);
+}
+
+function clip(value, length = 720) {
+  const text = String(value || '').trim().replace(/\s+/g, ' ');
+  return text.length > length ? `${text.slice(0, length)}...` : text;
+}
+
+function relevantMemoryContext(store, currentSession, query) {
+  const queryTokens = tokenize(query);
+  const trusted = store.memories
+    .filter((memory) => memory.status === 'approved')
+    .sort((left, right) => relevance(queryTokens, `${right.title} ${right.content} ${right.tags.join(' ')}`) - relevance(queryTokens, `${left.title} ${left.content} ${left.tags.join(' ')}`))
+    .slice(0, 10)
+    .map((memory) => `- ${memory.kind}: ${clip(memory.content, 360)}`);
+
+  const candidates = store.memories
+    .filter((memory) => memory.status === 'pending')
+    .map((memory) => ({
+      score: relevance(queryTokens, `${memory.title} ${memory.content} ${memory.tags.join(' ')}`),
+      text: `- ${memory.kind}: ${clip(memory.content, 360)}`,
+    }))
+    .filter((item) => item.score > 0)
+    .sort((left, right) => right.score - left.score)
+    .slice(0, 6)
+    .map((item) => item.text);
+
+  const documents = store.documents
+    .map((document) => ({
+      score: relevance(queryTokens, `${document.title} ${document.content}`),
+      text: `- ${document.title}: ${clip(document.content, 520)}`,
+    }))
+    .filter((item) => item.score > 0)
+    .sort((left, right) => right.score - left.score)
+    .slice(0, 4)
+    .map((item) => item.text);
+
+  const pastTurns = (store.sessions || [])
+    .filter((session) => session.id !== currentSession.id)
+    .flatMap((session) => session.messages.reduce((turns, message, index, messages) => {
+      if (message.role !== 'user') return turns;
+      const reply = messages[index + 1]?.role === 'assistant' ? messages[index + 1].content : '';
+      const text = `User: ${clip(message.content, 320)}${reply ? `\nMindClone: ${clip(reply, 400)}` : ''}`;
+      turns.push({ score: relevance(queryTokens, text), text });
+      return turns;
+    }, []))
+    .filter((turn) => turn.score > 0)
+    .sort((left, right) => right.score - left.score)
+    .slice(0, 4)
+    .map((turn) => `- ${turn.text}`);
+
+  const sections = [];
+  if (trusted.length) sections.push(`Reliable long-term memories:\n${trusted.join('\n')}`);
+  if (candidates.length) sections.push(`Unverified extracted memories. Use these only as leads; do not present them as established facts without support from the conversation:\n${candidates.join('\n')}`);
+  if (documents.length) sections.push(`Relevant imported material:\n${documents.join('\n')}`);
+  if (pastTurns.length) sections.push(`Relevant past conversation turns:\n${pastTurns.join('\n')}`);
+  return sections.join('\n\n');
+}
+
+async function streamDailyChat(session, store, response, query) {
   const apiKey = process.env.DEEPSEEK_API_KEY;
   if (!apiKey) throw new Error('DEEPSEEK_API_KEY is not configured. Set it in the local .env file and restart the service.');
-  const system = `You are MindClone, a long-term conversational partner who helps the user think, organize experiences, and express themselves. Be natural, direct, and willing to make a judgment. Do not mechanically summarize or repeatedly say that you remembered something. When the user discusses experiences, preferences, viewpoints, or important changes, ask useful follow-up questions when appropriate. Treat only approved memories as known facts; never turn speculation into the user's experience. Reply in clear, natural English by default, and match the user's language when they write in another language.\n\nApproved memories:\n${approvedMemoryContext(store) || '(none yet)'}`;
+  const memoryContext = relevantMemoryContext(store, session, query);
+  const system = `You are MindClone, a long-term conversational partner who helps the user think, organize experiences, and express themselves. Be natural, direct, and willing to make a judgment. Do not mechanically summarize or repeatedly say that you remembered something. When the user discusses experiences, preferences, viewpoints, or important changes, ask useful follow-up questions when appropriate. Treat reliable memories as known context, but never turn unverified material or speculation into the user's experience. Reply in clear, natural English by default, and match the user's language when they write in another language.\n\n${memoryContext || 'No relevant long-term context has been retrieved yet.'}`;
   const upstream = await fetch(`${(process.env.DEEPSEEK_BASE_URL || 'https://api.deepseek.com').replace(/\/$/, '')}/chat/completions`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
@@ -191,28 +260,25 @@ app.post('/api/chat/sessions/:id/stream', async (request, response, next) => {
     response.setHeader('Cache-Control', 'no-cache');
     response.setHeader('Connection', 'keep-alive');
     response.flushHeaders();
-    const answer = await streamDailyChat(session, store, response);
+    const answer = await streamDailyChat(session, store, response, content);
     if (answer) session.messages.push({ id: randomUUID(), role: 'assistant', content: answer, createdAt: new Date().toISOString() });
     session.updatedAt = new Date().toISOString();
     const recentMessages = session.messages.slice(-2);
-    const shouldExtract = recentMessages[0]?.content.length >= 60 || /experience|project|work|startup|like|dislike|values|strength|learn|decision|goal/i.test(recentMessages[0]?.content || '');
-    if (shouldExtract) {
-      const document = { id: randomUUID(), title: `Daily chat: ${session.title}`, sourceType: 'conversation', content: recentMessages.map((message) => `${message.role === 'user' ? 'User' : 'MindClone'}: ${message.content}`).join('\n\n'), sourceMessageIds: recentMessages.map((message) => message.id), createdAt: new Date().toISOString() };
-      store.documents.unshift(document);
-      proposeWithDeepSeek(document).then(async (proposed) => {
-        const latest = await loadStore();
-        const deletedIds = new Set(latest.deletedMessageIds || []);
-        if (document.sourceMessageIds.some((id) => deletedIds.has(id))) return;
-        if (!latest.documents.some((item) => item.id === document.id)) return;
-        latest.memories.unshift(...proposed.map((candidate) => cleanCandidate(candidate, document.id, document.sourceMessageIds)).filter((candidate) => candidate.content));
-        const latestDocument = latest.documents.find((item) => item.id === document.id);
-        if (latestDocument) latestDocument.extractedAt = new Date().toISOString();
-        await saveStore(latest);
-      }).catch((error) => console.error('Daily memory extraction failed:', error.message));
-    }
+    const document = { id: randomUUID(), title: `Daily chat: ${session.title}`, sourceType: 'conversation', content: recentMessages.map((message) => `${message.role === 'user' ? 'User' : 'MindClone'}: ${message.content}`).join('\n\n'), sourceMessageIds: recentMessages.map((message) => message.id), createdAt: new Date().toISOString() };
+    store.documents.unshift(document);
     await saveStore(store);
     response.write('data: [DONE]\n\n');
     response.end();
+    void proposeWithDeepSeek(document).then(async (proposed) => {
+      const latest = await loadStore();
+      const deletedIds = new Set(latest.deletedMessageIds || []);
+      if (document.sourceMessageIds.some((id) => deletedIds.has(id))) return;
+      if (!latest.documents.some((item) => item.id === document.id)) return;
+      latest.memories.unshift(...proposed.map((candidate) => cleanCandidate(candidate, document.id, document.sourceMessageIds)).filter((candidate) => candidate.content));
+      const latestDocument = latest.documents.find((item) => item.id === document.id);
+      if (latestDocument) latestDocument.extractedAt = new Date().toISOString();
+      await saveStore(latest);
+    }).catch((error) => console.error('Daily memory extraction failed:', error.message));
   } catch (error) { next(error); }
 });
 app.delete('/api/chat/sessions/:id', async (request, response, next) => {
