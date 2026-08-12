@@ -108,7 +108,9 @@ body { background: var(--mc-bg); color: var(--mc-ink); }
 .session-delete { color: #aaa; }
 .session-delete:hover { color: var(--mc-sidebar-ink); background: var(--mc-sidebar-active); }
 .daily-history-top { padding-bottom: 10px; font-size: 16px; font-weight: 500; }
-.recents-toggle { display: flex; align-items: center; gap: 3px; width: max-content; border: 0; padding: 0 8px 10px; color: var(--mc-sidebar-ink); background: transparent; }
+.recents-toggle { display: inline-flex; align-items: center; gap: 3px; height: 27px; width: max-content; border: 0; padding: 0 8px; color: var(--mc-sidebar-ink); background: transparent; vertical-align: middle; }
+.recents-toggle > span { display: block; line-height: 1; }
+.recents-toggle > svg { display: block; flex: 0 0 auto; }
 .recents-toggle svg { opacity: 0; transform: rotate(0deg); transition: opacity .16s ease .5s, transform .16s ease; }
 .recents-toggle:hover svg, .recents-toggle:focus-visible svg { opacity: .8; }
 .recents-toggle.collapsed svg { transform: rotate(-90deg); opacity: .8; }
@@ -129,7 +131,7 @@ body { background: var(--mc-bg); color: var(--mc-ink); }
 .sidebar-toggle:hover { background: var(--mc-panel-muted); }
 .daily-sidebar-footer { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: auto; padding: 18px 8px 2px; border-top: 1px solid var(--mc-border); }
 .daily-history { display: flex; flex-direction: column; }
-.session-list { min-height: 0; overflow: auto; }
+.session-list { min-height: 0; overflow: visible; }
 .daily-transcript, .transcript { scrollbar-width: none; -ms-overflow-style: none; }
 .daily-transcript::-webkit-scrollbar, .transcript::-webkit-scrollbar { display: none; }
 .daily-message { position: relative; }
