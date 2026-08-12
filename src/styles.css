@@ -175,10 +175,12 @@ body { background: var(--mc-bg); color: var(--mc-ink); }
 .daily-message { max-width: 100%; margin-bottom: 22px; }
 .daily-message.user { display: flex; justify-content: flex-end; }
 .daily-message.user .message-body { max-width: min(80%, 720px); }
-.daily-message.assistant .message-body, .daily-message.assistant .rich-text { width: 100%; }
-.daily-message .message-body, .message .message-body { background: transparent; border: 0; border-radius: 0; padding: 0; color: var(--mc-ink); font-size: 15px; line-height: 1.72; }
+.daily-message.assistant .message-body, .daily-message.assistant .rich-text { width: min(680px, 100%); }
+.daily-message .message-body, .message .message-body { background: transparent; border: 0; border-radius: 0; padding: 0; color: var(--mc-ink); font-size: 14px; font-weight: 400; line-height: 1.72; }
 .daily-message.user .message-body { background: var(--mc-user-bubble); border: 1px solid var(--mc-user-bubble-border); border-radius: 18px; padding: 10px 15px; }
 .daily-message .rich-text > p, .message .rich-text > p { background: transparent; border: 0; border-radius: 0; padding: 0; color: inherit; }
+.daily-message .rich-text, .daily-message .rich-text > p, .message .rich-text, .message .rich-text > p { font-weight: 400; }
+.daily-message .rich-text strong, .message .rich-text strong { font-weight: 650; }
 .message { max-width: 100%; margin-bottom: 25px; }
 .message.interviewer { margin-left: 0; }
 .message .message-body { background: transparent; }
