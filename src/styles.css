@@ -238,7 +238,7 @@ body { background: var(--mc-bg); color: var(--mc-ink); }
 .message .message-body { background: transparent; }
 .message.interviewer .message-body { background: var(--mc-user-bubble); border-color: var(--mc-user-bubble-border); border-radius: 18px; padding: 10px 15px; width: fit-content; max-width: 88%; margin-left: auto; }
 
-/* Keep fixed sidebar navigation identical to recent conversation rows. */
+/* Fixed navigation and recent rows share the same item geometry. */
 .daily-history .daily-nav { gap: 1px; margin: 0 0 12px; padding: 0 0 12px; }
-.daily-history .daily-nav > button { min-height: 24.5px; padding: 3px 10px; gap: 5px; border-radius: 8px; font-size: 14px; line-height: 18.5px; }
+.daily-history .daily-nav > button { height: 28px; min-height: 28px; padding: 3px 10px; gap: 5px; border-radius: 8px; font-size: 10px; line-height: normal; }
 .daily-history .daily-nav > button > svg { width: 12px; height: 12px; }
