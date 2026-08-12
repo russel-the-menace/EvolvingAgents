@@ -2,7 +2,9 @@
 
 MindClone 是一个本地优先的面试演练工作台。每场面试先录入 JD 和本次投递简历，生成并确认一份冻结的面试包；确认后才进入低延迟的正式问答。
 
-当前实现包括面试包准备、正式会话、流式本地模型接口、可取消生成，以及本地记忆投喂与审核。语音和正式记忆检索将在相同架构上增加，正式面试链路不调用云端整理。
+默认首页是日常对话：DeepSeek 负责自然交流，完整会话和记忆归属在本地。每四次你的发言，最近片段会异步形成待审核记忆，不打断聊天。输入框旁的 `+` 用于导入 ChatGPT 历史或补充文本/Markdown。
+
+正式面试是独立模式：它使用本地模型、冻结 JD 与投递简历，并支持可取消的流式候选回答。语音与正式记忆检索将在相同架构上增加。
 
 ## 运行
 
@@ -36,3 +38,4 @@ npm run sync:reference
 - [面试引擎](docs/modules/interview-engine.md)
 - [记忆投喂与审核](docs/modules/memory-ingestion.md)
 - [云端整理提供方](docs/modules/cloud-preparation.md)
+- [日常对话](docs/modules/daily-conversation.md)

@@ -1,4 +1,4 @@
-export type Mode = 'prepare' | 'formal' | 'memory';
+export type Mode = 'daily' | 'prepare' | 'formal' | 'memory';
 
 export type Settings = {
   baseUrl: string;
@@ -41,4 +41,19 @@ export type MemoryCandidate = {
   sourceQuote: string;
   status: 'pending' | 'approved' | 'rejected';
   createdAt: string;
+};
+
+export type DailyMessage = {
+  id: string;
+  role: 'user' | 'assistant';
+  content: string;
+  createdAt: string;
+};
+
+export type DailySession = {
+  id: string;
+  title: string;
+  createdAt: string;
+  updatedAt: string;
+  messages: DailyMessage[];
 };

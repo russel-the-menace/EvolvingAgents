@@ -13,7 +13,7 @@ async function loadStore() {
   try {
     return JSON.parse(await readFile(storePath, 'utf8'));
   } catch (error) {
-    if (error.code === 'ENOENT') return { documents: [], memories: [] };
+    if (error.code === 'ENOENT') return { documents: [], memories: [], sessions: [] };
     throw error;
   }
 }
@@ -63,6 +63,43 @@ async function proposeWithDeepSeek(document) {
   return Array.isArray(parsed.memories) ? parsed.memories : [];
 }
 
+function approvedMemoryContext(store) {
+  return store.memories.filter((memory) => memory.status === 'approved').slice(0, 24).map((memory) => `- ${memory.kind} | ${memory.title}: ${memory.content}`).join('\n');
+}
+
+async function streamDailyChat(session, store, response) {
+  const apiKey = process.env.DEEPSEEK_API_KEY;
+  if (!apiKey) throw new Error('未配置 DEEPSEEK_API_KEY。请在本地 .env 中设置后重启服务。');
+  const system = `你是 MindClone：一个长期陪伴用户思考、梳理经历和表达的日常对话伙伴。自然、直接、有判断，不要机械总结或频繁说“我记住了”。当用户谈及经历、偏好、观点或重要变化时，可顺势追问细节。只能将已确认记忆当作已知事实；不要把推测写成用户经历。默认中文，用户改用英文时自然切换。\n\n已确认记忆：\n${approvedMemoryContext(store) || '（暂无）'}`;
+  const upstream = await fetch(`${(process.env.DEEPSEEK_BASE_URL || 'https://api.deepseek.com').replace(/\/$/, '')}/chat/completions`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ model: process.env.DEEPSEEK_MODEL || 'deepseek-chat', temperature: 0.7, stream: true, messages: [{ role: 'system', content: system }, ...session.messages.slice(-24).map((message) => ({ role: message.role, content: message.content }))] }),
+  });
+  if (!upstream.ok || !upstream.body) throw new Error(`DeepSeek 日常对话请求失败（${upstream.status}）。`);
+  const reader = upstream.body.getReader();
+  const decoder = new TextDecoder();
+  let answer = '';
+  let pending = '';
+  while (true) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    pending += decoder.decode(value, { stream: true });
+    const lines = pending.split('\n');
+    pending = lines.pop() ?? '';
+    for (const line of lines) {
+      if (!line.startsWith('data:')) continue;
+      const data = line.slice(5).trim();
+      if (data === '[DONE]') continue;
+      try {
+        const delta = JSON.parse(data).choices?.[0]?.delta?.content;
+        if (typeof delta === 'string') { answer += delta; response.write(`data: ${JSON.stringify({ delta })}\n\n`); }
+      } catch { /* Ignore provider keep-alives. */ }
+    }
+  }
+  return answer;
+}
+
 app.get('/api/health', (_, response) => response.json({ status: 'ok' }));
 app.get('/api/memory', async (_, response, next) => {
   try { response.json(await loadStore()); } catch (error) { next(error); }
@@ -102,6 +139,55 @@ app.patch('/api/memory/candidates/:id', async (request, response, next) => {
     memory.status = request.body.status;
     await saveStore(store);
     response.json({ memory });
+  } catch (error) { next(error); }
+});
+app.get('/api/chat/sessions', async (_, response, next) => {
+  try { const store = await loadStore(); response.json({ sessions: store.sessions || [] }); } catch (error) { next(error); }
+});
+app.post('/api/chat/sessions', async (_, response, next) => {
+  try {
+    const store = await loadStore();
+    const now = new Date().toISOString();
+    const session = { id: randomUUID(), title: '新的对话', createdAt: now, updatedAt: now, messages: [] };
+    store.sessions = store.sessions || [];
+    store.sessions.unshift(session);
+    await saveStore(store);
+    response.status(201).json({ session });
+  } catch (error) { next(error); }
+});
+app.post('/api/chat/sessions/:id/stream', async (request, response, next) => {
+  try {
+    const content = String(request.body.content || '').trim();
+    if (!content) return response.status(400).json({ error: '消息不能为空。' });
+    const store = await loadStore();
+    const session = (store.sessions || []).find((item) => item.id === request.params.id);
+    if (!session) return response.status(404).json({ error: '未找到对话。' });
+    const now = new Date().toISOString();
+    session.messages.push({ id: randomUUID(), role: 'user', content, createdAt: now });
+    if (session.messages.filter((message) => message.role === 'user').length === 1) session.title = content.slice(0, 28);
+    session.updatedAt = now;
+    response.setHeader('Content-Type', 'text/event-stream');
+    response.setHeader('Cache-Control', 'no-cache');
+    response.setHeader('Connection', 'keep-alive');
+    response.flushHeaders();
+    const answer = await streamDailyChat(session, store, response);
+    if (answer) session.messages.push({ id: randomUUID(), role: 'assistant', content: answer, createdAt: new Date().toISOString() });
+    session.updatedAt = new Date().toISOString();
+    const turnCount = session.messages.filter((message) => message.role === 'user').length;
+    if (turnCount > 0 && turnCount % 4 === 0) {
+      const document = { id: randomUUID(), title: `日常对话：${session.title}`, sourceType: 'conversation', content: session.messages.slice(-8).map((message) => `${message.role === 'user' ? '我' : 'MindClone'}：${message.content}`).join('\n\n'), createdAt: new Date().toISOString() };
+      store.documents.unshift(document);
+      proposeWithDeepSeek(document).then(async (proposed) => {
+        const latest = await loadStore();
+        latest.memories.unshift(...proposed.map((candidate) => cleanCandidate(candidate, document.id)).filter((candidate) => candidate.content));
+        const latestDocument = latest.documents.find((item) => item.id === document.id);
+        if (latestDocument) latestDocument.extractedAt = new Date().toISOString();
+        await saveStore(latest);
+      }).catch((error) => console.error('Daily memory extraction failed:', error.message));
+    }
+    await saveStore(store);
+    response.write('data: [DONE]\n\n');
+    response.end();
   } catch (error) { next(error); }
 });
 app.use((error, _, response, __) => {

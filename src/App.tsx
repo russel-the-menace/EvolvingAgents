@@ -1,13 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ArrowRight, BotMessageSquare, CheckCircle2, CircleStop, FileText,
-  FileUp, ListChecks, MessageSquarePlus, Mic, Play, SendHorizontal, Settings2,
-  Sparkles, Upload, Volume2, X,
+  FileUp, ListChecks, MessageCircle, MessageSquarePlus, Mic, Paperclip, Play,
+  Plus, SendHorizontal, Settings2, Sparkles, Upload, Volume2, X,
 } from 'lucide-react';
 import { preparePacket, streamCandidateAnswer } from './interview';
 import { memoryApi } from './memory-api';
 import { loadPacket, loadSettings, savePacket, saveSettings } from './storage';
-import type { InterviewPacket, MemoryCandidate, MemoryDocument, Message, Mode, Settings } from './types';
+import type { DailyMessage, DailySession, InterviewPacket, MemoryCandidate, MemoryDocument, Message, Mode, Settings } from './types';
 
 const exampleJD = `远程后端工程师
 负责服务端 API、数据库设计、性能优化与线上稳定性。熟悉任一主流后端语言，具备 SQL、Redis、Docker 和分布式系统基础；能独立沟通需求并推进交付。`;
@@ -19,7 +19,7 @@ function formatPreparedAt(value: string) {
 }
 
 export function App() {
-  const [mode, setMode] = useState<Mode>('prepare');
+  const [mode, setMode] = useState<Mode>('daily');
   const [jd, setJd] = useState('');
   const [resume, setResume] = useState('');
   const [packet, setPacket] = useState<InterviewPacket | null>(null);
@@ -32,9 +32,15 @@ export function App() {
   const [memoryDocuments, setMemoryDocuments] = useState<MemoryDocument[]>([]);
   const [memoryCandidates, setMemoryCandidates] = useState<MemoryCandidate[]>([]);
   const [memoryError, setMemoryError] = useState('');
+  const [dailySessions, setDailySessions] = useState<DailySession[]>([]);
+  const [dailySessionId, setDailySessionId] = useState<string | null>(null);
+  const [dailyInput, setDailyInput] = useState('');
+  const [dailyStreaming, setDailyStreaming] = useState(false);
+  const [dailyError, setDailyError] = useState('');
   const abortRef = useRef<AbortController | null>(null);
   const generationRef = useRef(0);
   const transcriptRef = useRef<HTMLDivElement>(null);
+  const dailyAbortRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
     const stored = loadPacket();
@@ -57,6 +63,16 @@ export function App() {
   }
 
   useEffect(() => { void refreshMemory(); }, []);
+
+  async function refreshSessions() {
+    try {
+      const { sessions } = await memoryApi.listSessions();
+      setDailySessions(sessions);
+      setDailySessionId((current) => current && sessions.some((session) => session.id === current) ? current : sessions[0]?.id ?? null);
+    } catch (caught) { setDailyError((caught as Error).message); }
+  }
+
+  useEffect(() => { void refreshSessions(); }, []);
 
   useEffect(() => {
     transcriptRef.current?.scrollTo({ top: transcriptRef.current.scrollHeight, behavior: 'smooth' });
@@ -145,11 +161,31 @@ export function App() {
     saveSettings(next);
   }
 
+  async function newDailySession() {
+    try {
+      const { session } = await memoryApi.createSession();
+      setDailySessions((current) => [session, ...current]);
+      setDailySessionId(session.id);
+      setDailyError('');
+      return session.id;
+    } catch (caught) { setDailyError((caught as Error).message); return null; }
+  }
+
+  async function importChatGPTToInbox(file: File) {
+    const contents = extractChatGPTConversations(JSON.parse(await file.text()));
+    if (!contents.length) throw new Error('未从该导出中找到可读取的用户/助手对话。');
+    for (const item of contents) await memoryApi.importDocument({ ...item, sourceType: 'chatgpt_export' });
+    await refreshMemory();
+  }
+
   return (
     <main className="app-shell">
       <aside className="sidebar">
         <div className="brand"><Sparkles size={20} /><span>MindClone</span></div>
         <nav>
+          <button className={mode === 'daily' ? 'nav-item active' : 'nav-item'} onClick={() => setMode('daily')}>
+            <MessageCircle size={18} /> 日常对话
+          </button>
           <button className={mode === 'prepare' ? 'nav-item active' : 'nav-item'} onClick={() => setMode('prepare')}>
             <FileText size={18} /> 面试准备
           </button>
@@ -173,6 +209,10 @@ export function App() {
             onJdChange={setJd} onResumeChange={setResume} onPrepare={prepare}
             onEnter={enterFormal} onUseExample={() => { setJd(exampleJD); setResume(exampleResume); }}
           />
+        ) : mode === 'daily' ? (
+          <DailyChatView sessions={dailySessions} activeSessionId={dailySessionId} input={dailyInput} streaming={dailyStreaming} error={dailyError}
+            onInputChange={setDailyInput} onSelectSession={setDailySessionId} onNewSession={newDailySession} onRefresh={() => void refreshSessions()}
+            onError={setDailyError} onStreamChange={setDailyStreaming} onImport={importChatGPTToInbox} />
         ) : mode === 'memory' ? (
           <MemoryView documents={memoryDocuments} candidates={memoryCandidates} error={memoryError} onRefresh={refreshMemory} />
         ) : packet ? (
@@ -205,6 +245,67 @@ function extractChatGPTConversations(value: unknown) {
     if (!messages.length) return [];
     return [{ title: conversation.title || 'ChatGPT 对话', content: messages.join('\n\n') }];
   });
+}
+
+function DailyChatView({ sessions, activeSessionId, input, streaming, error, onInputChange, onSelectSession, onNewSession, onRefresh, onError, onStreamChange, onImport }: {
+  sessions: DailySession[]; activeSessionId: string | null; input: string; streaming: boolean; error: string;
+  onInputChange: (value: string) => void; onSelectSession: (id: string) => void; onNewSession: () => Promise<string | null>; onRefresh: () => void;
+  onError: (value: string) => void; onStreamChange: (value: boolean) => void; onImport: (file: File) => Promise<void>;
+}) {
+  const [attachmentOpen, setAttachmentOpen] = useState(false);
+  const [attachmentNote, setAttachmentNote] = useState('');
+  const [attachmentBusy, setAttachmentBusy] = useState(false);
+  const [attachmentStatus, setAttachmentStatus] = useState('');
+  const [draftMessages, setDraftMessages] = useState<DailyMessage[]>([]);
+  const listRef = useRef<HTMLDivElement>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
+  const activeSession = sessions.find((session) => session.id === activeSessionId) ?? null;
+  const messages = draftMessages.length ? draftMessages : activeSession?.messages ?? [];
+
+  useEffect(() => { setDraftMessages([]); }, [activeSessionId]);
+  useEffect(() => { listRef.current?.scrollTo({ top: listRef.current.scrollHeight, behavior: 'smooth' }); }, [messages, streaming]);
+
+  async function send() {
+    const content = input.trim();
+    if (!content || streaming) return;
+    let sessionId = activeSessionId;
+    if (!sessionId) {
+      sessionId = await onNewSession();
+      if (!sessionId) return;
+    }
+    const userMessage: DailyMessage = { id: crypto.randomUUID(), role: 'user', content, createdAt: new Date().toISOString() };
+    const answerMessage: DailyMessage = { id: crypto.randomUUID(), role: 'assistant', content: '', createdAt: new Date().toISOString() };
+    const next = [...(activeSession?.messages ?? []), userMessage, answerMessage];
+    setDraftMessages(next);
+    onInputChange(''); onError(''); onStreamChange(true);
+    const controller = new AbortController();
+    try {
+      await memoryApi.streamChat(sessionId, content, (delta) => setDraftMessages((current) => current.map((message) => message.id === answerMessage.id ? { ...message, content: message.content + delta } : message)), controller.signal);
+      setDraftMessages([]);
+      onRefresh();
+    } catch (caught) {
+      setDraftMessages((current) => current.filter((message) => message.id !== answerMessage.id || message.content));
+      onError((caught as Error).message);
+    } finally { onStreamChange(false); }
+  }
+
+  async function saveAttachmentNote() {
+    if (attachmentNote.trim().length < 10) { setAttachmentStatus('请至少输入一段完整材料。'); return; }
+    setAttachmentBusy(true);
+    try { await memoryApi.importDocument({ title: '对话外补充材料', sourceType: 'note', content: attachmentNote.trim() }); setAttachmentNote(''); setAttachmentStatus('已保存在本地记忆收件箱。'); } catch (caught) { setAttachmentStatus((caught as Error).message); } finally { setAttachmentBusy(false); }
+  }
+
+  async function importFile(file: File) {
+    setAttachmentBusy(true);
+    try { await onImport(file); setAttachmentStatus('ChatGPT 历史已导入本地收件箱。'); } catch (caught) { setAttachmentStatus((caught as Error).message); } finally { setAttachmentBusy(false); }
+  }
+
+  return <div className="daily-layout">
+    <aside className="daily-history"><div className="daily-history-top"><span>对话</span><button className="icon-button light" title="新建对话" onClick={onNewSession}><Plus size={18} /></button></div><div className="session-list">{sessions.length === 0 ? <p>开始一次对话，MindClone 会在本机保留你的记录。</p> : sessions.map((session) => <button key={session.id} className={session.id === activeSessionId ? 'session-item active' : 'session-item'} onClick={() => onSelectSession(session.id)}><span>{session.title}</span><small>{new Date(session.updatedAt).toLocaleDateString('zh-CN')}</small></button>)}</div></aside>
+    <section className="daily-conversation"><header className="daily-header"><div><p className="eyebrow">DAILY MINDCLONE</p><h1>{activeSession?.title || '和 MindClone 聊聊'}</h1></div><span className="provider-pill"><span /> DeepSeek 对话 · 本地记忆</span></header><div className="daily-transcript" ref={listRef}>{messages.length === 0 ? <div className="daily-empty"><Sparkles size={32} /><h2>从最近在想的事开始</h2><p>日常聊天是最主要的投喂方式。重要内容会异步形成待审核记忆，不打断这次对话。</p></div> : messages.map((message) => <article className={`daily-message ${message.role}`} key={message.id}><div>{message.role === 'user' ? '你' : 'MindClone'}</div><p>{message.content || (streaming ? '正在思考...' : '')}</p></article>)}{error && <div className="error-note">{error}</div>}</div>
+      <div className="daily-composer"><div className="attachment-area">{attachmentOpen && <div className="attachment-menu"><div className="attachment-menu-title">补充投喂</div><button onClick={() => fileRef.current?.click()}><FileUp size={17} /> 导入 ChatGPT 历史</button><button onClick={() => setAttachmentStatus('在下方粘贴 Markdown 或随手记。')}><Paperclip size={17} /> 添加文本 / Markdown</button><textarea value={attachmentNote} onChange={(event) => setAttachmentNote(event.target.value)} placeholder="粘贴补充材料..." /><button className="primary-button compact" disabled={attachmentBusy} onClick={() => void saveAttachmentNote()}>{attachmentBusy ? '处理中...' : '保存到收件箱'}</button>{attachmentStatus && <p>{attachmentStatus}</p>}</div>}<input ref={fileRef} className="hidden-input" type="file" accept="application/json,.json" onChange={(event) => { const file = event.target.files?.[0]; if (file) void importFile(file); event.currentTarget.value = ''; }} /><button className={attachmentOpen ? 'plus-button open' : 'plus-button'} title="添加材料" onClick={() => setAttachmentOpen((current) => !current)}><Plus size={21} /></button></div><textarea value={input} onChange={(event) => onInputChange(event.target.value)} onKeyDown={(event) => { if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') void send(); }} placeholder="和 MindClone 聊聊..." /><button className="send-icon" disabled={!input.trim() || streaming} title="发送" onClick={() => void send()}><SendHorizontal size={19} /></button></div>
+    </section>
+  </div>;
 }
 
 function MemoryView({ documents, candidates, error, onRefresh }: {
