@@ -133,7 +133,8 @@ body { background: var(--mc-bg); color: var(--mc-ink); }
 .daily-brand { position: relative; padding-right: 34px; }
 .sidebar-close { position: absolute; top: -4px; right: -2px; }
 .sidebar-resize-handle { position: absolute; inset: 0 -3px 0 auto; z-index: 4; width: 7px; cursor: col-resize; background: transparent; touch-action: none; }
-.sidebar-resize-handle:hover, .sidebar-resizing .sidebar-resize-handle { background: color-mix(in srgb, var(--mc-border) 55%, transparent); }
+.sidebar-resize-handle::after { content: ''; position: absolute; top: 0; right: 2.75px; bottom: 0; width: 1.5px; background: var(--mc-muted); opacity: 0; transition: opacity .12s ease; }
+.sidebar-resize-handle:hover::after, .sidebar-resizing .sidebar-resize-handle::after { opacity: .55; }
 .sidebar-reopen { position: fixed; top: 16px; left: 16px; z-index: 5; display: grid; place-items: center; width: 36px; height: 36px; padding: 0; border: 1px solid var(--mc-border); border-radius: 8px; color: var(--mc-muted); background: var(--mc-panel); box-shadow: 0 1px 4px rgba(0, 0, 0, .08); }
 .sidebar-reopen:hover { color: var(--mc-ink); background: var(--mc-panel-muted); }
 .daily-conversation { grid-template-rows: minmax(0, 1fr) auto; }
