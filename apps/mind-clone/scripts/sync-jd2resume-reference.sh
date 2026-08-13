@@ -18,7 +18,7 @@ git --git-dir="$cache_repo" fetch --prune origin \
 commit="$(git --git-dir="$cache_repo" rev-parse "refs/remotes/origin/$branch")"
 
 # The reference is deliberately a source-only mirror, not a nested repository.
-# This keeps VS Code Source Control focused on MindClone and drops checked-in
+# This keeps VS Code Source Control focused on EvolvingAgents and drops checked-in
 # dependency/build directories from the reference workspace.
 find "$target" -mindepth 1 -depth -delete
 git --git-dir="$cache_repo" archive "$commit" -- . \

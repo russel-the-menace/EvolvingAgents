@@ -32,7 +32,7 @@ Read these first because they most directly constrain MindClone's novelty:
 Run the downloader with the Homebrew Python 3.14 environment:
 
 ```bash
-python research-papers/download_and_verify.py
+python apps/mind-clone/research-papers/download_and_verify.py
 ```
 
 Existing verified files are not downloaded again. Remove a PDF to force a fresh download. Edit `papers.tsv` to add or update sources.

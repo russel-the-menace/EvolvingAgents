@@ -19,7 +19,7 @@ Interviewing is the first acceptance scenario, not the product boundary.
 
 MindClone is a local modular monolith. The browser/Electron client owns interaction and local-model streaming. The Express service owns cognition state, provenance, scene compilation, and audits. SQLite is the sole structured source of truth.
 
-The domain-neutral write/retrieval path lives in the monorepo workspace `packages/learning-engine`. It owns source persistence, text chunking, extractor orchestration, claim/evidence provenance, FTS retrieval, validity filtering, and citation-ready evidence. `apps/mindclone/server/adapters/mindclone-learning.mjs` supplies MindClone's extraction prompt and epistemic authorization policy. This dependency direction allows another application to reuse the engine with a different policy without importing interview or personal-identity code.
+The domain-neutral write/retrieval path lives in the monorepo workspace `packages/learning-engine`. It owns source persistence, text chunking, extractor orchestration, claim/evidence provenance, FTS retrieval, validity filtering, and citation-ready evidence. `apps/mind-clone/server/adapters/mindclone-learning.mjs` supplies MindClone's extraction prompt and epistemic authorization policy. This dependency direction allows another application to reuse the engine with a different policy without importing interview or personal-identity code.
 
 ```text
 Imported source / daily dialogue / transcript
@@ -63,7 +63,7 @@ The separation matters. An external claim can be well understood and highly usef
 
 ## 5. Storage
 
-`apps/mindclone/server/infrastructure/database.mjs` initializes SQLite in WAL mode with foreign-key enforcement. The core records are:
+`apps/mind-clone/server/infrastructure/database.mjs` initializes SQLite in WAL mode with foreign-key enforcement. The core records are:
 
 | Record | Responsibility |
 | --- | --- |

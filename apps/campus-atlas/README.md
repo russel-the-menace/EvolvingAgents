@@ -1,6 +1,6 @@
 # CampusAtlas
 
-CampusAtlas is the campus-policy application in the Evolving Agents monorepo. Its current scope is the learning-domain foundation: it maps extracted policy proposals onto the shared learning engine with publisher authority, access scope, department, validity, evidence, and citation rules.
+CampusAtlas is the campus-policy application in the EvolvingAgents monorepo. Its current scope is the learning-domain foundation: it maps extracted policy proposals onto the shared learning engine with publisher authority, access scope, department, validity, evidence, and citation rules.
 
 Implemented and tested:
 

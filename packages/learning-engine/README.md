@@ -55,7 +55,7 @@ const evidence = engine.buildEvidenceContext(results);
 
 ## Consuming The Package
 
-Inside the Evolving Agents monorepo, applications depend on `@evolving-agents/learning-engine` through npm workspaces. Do not copy the package into each application. The runtime uses only Node built-ins and receives an already-open `node:sqlite` database. A consuming application must:
+Inside the EvolvingAgents monorepo, applications depend on `@evolving-agents/learning-engine` through npm workspaces. Do not copy the package into each application. The runtime uses only Node built-ins and receives an already-open `node:sqlite` database. A consuming application must:
 
 1. open SQLite and call `createSqliteLearningStore(db)`;
 2. implement an extractor;

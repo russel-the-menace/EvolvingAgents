@@ -8,12 +8,11 @@
     "packages/*"
   ],
   "scripts": {
-    "dev": "npm run dev --workspace @evolving-agents/mindclone",
-    "dev:mindclone": "npm run dev --workspace @evolving-agents/mindclone",
-    "desktop": "npm run desktop --workspace @evolving-agents/mindclone",
+    "dev": "node tooling/run-app.mjs dev",
+    "desktop": "node tooling/run-app.mjs desktop",
     "test": "npm test --workspaces --if-present",
     "check": "npm run check --workspaces --if-present",
     "build": "npm run build --workspaces --if-present",
-    "sync:reference": "./scripts/sync-jd2resume-reference.sh"
+    "sync:mind-clone-reference": "npm run sync:reference --workspace @evolving-agents/mind-clone"
   }
 }

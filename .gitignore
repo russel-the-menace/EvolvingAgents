@@ -5,8 +5,8 @@ out/
 .DS_Store
 tmp/
 
-# Reference implementations are separately cloned, read-only caches.
-reference-project/
+# MindClone reference implementations are local read-only caches.
+apps/mind-clone/reference-project/
 
 # App-local data: raw memories, API keys, recordings, and model caches.
 data/

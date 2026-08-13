@@ -1,5 +1,5 @@
 {
-  "name": "@evolving-agents/mindclone",
+  "name": "@evolving-agents/mind-clone",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -12,7 +12,8 @@
     "preview": "vite preview --host 127.0.0.1",
     "desktop": "concurrently -k \"npm:dev:api\" \"vite --host 127.0.0.1\" \"wait-on http://127.0.0.1:5269 && electron .\"",
     "check": "tsc -b",
-    "test": "node --test server/*.test.mjs server/**/*.test.mjs"
+    "test": "node --test server/*.test.mjs server/**/*.test.mjs",
+    "sync:reference": "./scripts/sync-jd2resume-reference.sh"
   },
   "dependencies": {
     "@evolving-agents/learning-engine": "0.1.0",

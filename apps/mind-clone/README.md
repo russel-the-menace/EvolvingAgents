@@ -33,11 +33,11 @@ npm run build
 
 ```bash
 brew install ffmpeg whisper-cpp
-mkdir -p apps/mindclone/models/whisper
-curl -fL -o apps/mindclone/models/whisper/ggml-small.bin https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.bin
+mkdir -p apps/mind-clone/models/whisper
+curl -fL -o apps/mind-clone/models/whisper/ggml-small.bin https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.bin
 ```
 
-在 `apps/mindclone/.env` 设置 `TIKHUB_API_KEY`；模型默认位于 `apps/mindclone/models/whisper/ggml-small.bin`，可通过 `WHISPER_MODEL_PATH` 和 `WHISPER_THREADS` 覆盖。模型目录和 `.env` 均不纳入 Git。
+在 `apps/mind-clone/.env` 设置 `TIKHUB_API_KEY`；模型默认位于 `apps/mind-clone/models/whisper/ggml-small.bin`，可通过 `WHISPER_MODEL_PATH` 和 `WHISPER_THREADS` 覆盖。模型目录和 `.env` 均不纳入 Git。
 
 ## 模型
 
@@ -48,10 +48,10 @@ curl -fL -o apps/mindclone/models/whisper/ggml-small.bin https://huggingface.co/
 `JD2Resume` 不是 MindClone 的依赖或源码副本，而是可随时刷新、不会被提交的参考缓存。执行：
 
 ```bash
-npm run sync:reference
+npm run sync:mind-clone-reference
 ```
 
-它会从 `https://github.com/russel-the-menace/JD2Resume` 的 `master` 分支快进同步。详见 [参考同步说明](../../docs/reference-sync.md)。
+它会从 `https://github.com/russel-the-menace/JD2Resume` 的 `master` 分支快进同步到本应用的 `reference-project`。详见 [参考同步说明](docs/reference-sync.md)。
 
 ## 可复用学习引擎
 
@@ -67,4 +67,6 @@ npm run sync:reference
 - [日常对话](docs/modules/daily-conversation.md)
 - [论文第一版](docs/paper/MindClone_manuscript.md)
 - [文献新颖性审计](docs/paper/MindClone_novelty_audit.md)
+- [研究论文语料](research-papers/README.md)
+- [参考记忆系统](docs/reference-memory-systems.md)
 - [学习引擎抽离评估](../../docs/learning-engine-extraction-assessment.md)
