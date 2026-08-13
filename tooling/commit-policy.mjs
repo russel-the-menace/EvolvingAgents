@@ -1,7 +1,7 @@
 import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 
-const TYPES = new Set(['feat', 'fix', 'refactor', 'perf', 'test', 'docs', 'chore', 'build', 'ci', 'revert']);
+const TYPES = new Set(['feat', 'fix', 'style', 'refactor', 'perf', 'test', 'docs', 'chore', 'build', 'ci', 'revert']);
 const SCOPES = new Set(['mind-clone', 'campus-atlas', 'crypto-agent', 'learning-engine', 'monorepo']);
 const APP_SCOPES = new Set(['mind-clone', 'campus-atlas', 'crypto-agent']);
 

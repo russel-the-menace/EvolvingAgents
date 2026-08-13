@@ -9,6 +9,13 @@ test('accepts a single application scope', () => {
   }).valid, true);
 });
 
+test('accepts style commits', () => {
+  assert.equal(validateCommit({
+    header: 'style(mind-clone): align chat message actions',
+    paths: ['apps/mind-clone/src/styles.css'],
+  }).valid, true);
+});
+
 test('accepts an application plus learning-engine scope', () => {
   assert.deepEqual(expectedScopes(['apps/crypto-agent/src/learning.mjs', 'packages/learning-engine/src/engine.mjs']), ['crypto-agent', 'learning-engine']);
   assert.equal(validateCommit({
