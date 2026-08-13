@@ -2,11 +2,13 @@
 
 ## Status
 
-Initial local vertical slice implemented. The current UI supports ChatGPT `conversations.json`, pasted text/Markdown, and manually recorded interview notes. Imported raw content and candidate-review state are saved locally in `data/memory-store.json`.
+Initial local vertical slice implemented. The current UI supports ChatGPT `conversations.json`, pasted text/Markdown, manually recorded interview notes, and Douyin share messages paired with a reviewable voice transcript. Imported raw content and candidate-review state are saved locally in `data/memory-store.json`.
 
 ## Responsibility
 
 Accept Markdown notes, resumes, chat exports, interview debriefs, and guided conversations. Convert raw material into reviewable memories: experience facts, evidence, skills, preferences, viewpoints, language examples, and uncertainty notes.
+
+For short video sources, MindClone stores the original Douyin share message and link alongside the spoken transcript. It learns from the transcript only: no video frames, OCR, or visual subtitles are processed. Automated audio transcription requires an authorized audio source; the current flow intentionally lets the user review or supply that transcript before import.
 
 ## Proposed flow
 

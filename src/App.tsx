@@ -3,7 +3,7 @@ import {
   ArrowRight, BotMessageSquare, CheckCircle2, ChevronDown, CircleStop, FileText,
   FileUp, ListChecks, MessageCircle, MessageSquarePlus, Mic, Paperclip, Play,
   Copy, MoreHorizontal, PanelLeftClose, PanelLeftOpen, Pencil, Pin, Plus, SendHorizontal, Settings2,
-  Sparkles, Trash2, Upload, Volume2, X,
+  Sparkles, Trash2, Upload, Video, Volume2, X,
 } from 'lucide-react';
 import { preparePacket, streamCandidateAnswer } from './interview';
 import { memoryApi } from './memory-api';
@@ -477,6 +477,9 @@ function MemoryView({ documents, candidates, error, onRefresh }: {
   const [note, setNote] = useState('');
   const [title, setTitle] = useState('Quick note');
   const [interviewNote, setInterviewNote] = useState('');
+  const [shortVideoShare, setShortVideoShare] = useState('');
+  const [shortVideoTitle, setShortVideoTitle] = useState('');
+  const [shortVideoContent, setShortVideoContent] = useState('');
   const [busyDocument, setBusyDocument] = useState<string | null>(null);
   const [localError, setLocalError] = useState('');
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -505,6 +508,26 @@ function MemoryView({ documents, candidates, error, onRefresh }: {
     } catch (caught) { setLocalError((caught as Error).message); } finally { setBusyDocument(null); }
   }
 
+  async function prepareShortVideo() {
+    if (!shortVideoShare.trim()) { setLocalError('Paste a Douyin share message first.'); return; }
+    setBusyDocument('short-video-prepare');
+    try {
+      const prepared = await memoryApi.prepareShortVideo(shortVideoShare);
+      setShortVideoTitle(prepared.title);
+      setShortVideoContent(prepared.content);
+      setLocalError('');
+    } catch (caught) { setLocalError((caught as Error).message); } finally { setBusyDocument(null); }
+  }
+
+  async function saveShortVideo() {
+    if (shortVideoContent.trim().length < 10) { setLocalError('Prepare the share link, then add a spoken transcript.'); return; }
+    setBusyDocument('short-video-save');
+    try {
+      await memoryApi.importDocument({ title: shortVideoTitle.trim() || 'Douyin learning material', sourceType: 'short_video', content: shortVideoContent.trim() });
+      setShortVideoShare(''); setShortVideoTitle(''); setShortVideoContent(''); setLocalError(''); await onRefresh();
+    } catch (caught) { setLocalError((caught as Error).message); } finally { setBusyDocument(null); }
+  }
+
   async function extract(documentId: string) {
     setBusyDocument(documentId);
     try { await memoryApi.extract(documentId); setLocalError(''); await onRefresh(); } catch (caught) { setLocalError((caught as Error).message); } finally { setBusyDocument(null); }
@@ -520,12 +543,13 @@ function MemoryView({ documents, candidates, error, onRefresh }: {
       <section className="memory-imports">
         <article className="memory-card"><div className="card-heading"><FileUp size={19} /><div><h2>ChatGPT history</h2><p>Import <code>conversations.json</code> from an official export.</p></div></div><input ref={fileInputRef} className="hidden-input" type="file" accept="application/json,.json" onChange={(event) => { const file = event.target.files?.[0]; if (file) void importChatGPT(file); event.currentTarget.value = ''; }} /><button className="ghost-button full-width" disabled={busyDocument === 'file'} onClick={() => fileInputRef.current?.click()}><Upload size={16} /> {busyDocument === 'file' ? 'Importing...' : 'Choose conversations.json'}</button></article>
         <article className="memory-card"><div className="card-heading"><FileText size={19} /><div><h2>Notes / Markdown</h2><p>Views, experience, learning notes, or chat excerpts.</p></div></div><input className="memory-title" value={title} onChange={(event) => setTitle(event.target.value)} placeholder="Material title" /><textarea className="memory-textarea" value={note} onChange={(event) => setNote(event.target.value)} placeholder="Paste any text or Markdown..." /><button className="primary-button full-width" disabled={busyDocument === 'new'} onClick={() => void saveText('note', note, title)}><Upload size={16} /> Save source material</button></article>
+        <article className="memory-card short-video-card"><div className="card-heading"><Video size={19} /><div><h2>Douyin voice transcript</h2><p>Paste a full share message, then review or add the spoken transcript. Video frames are not analyzed.</p></div></div><textarea className="memory-textarea short" value={shortVideoShare} onChange={(event) => setShortVideoShare(event.target.value)} placeholder="Paste the Douyin share message or v.douyin.com link..." /><button className="ghost-button full-width" disabled={busyDocument === 'short-video-prepare'} onClick={() => void prepareShortVideo()}><Video size={16} /> {busyDocument === 'short-video-prepare' ? 'Reading link...' : 'Prepare transcript'}</button>{shortVideoContent && <div className="short-video-editor"><input className="memory-title" value={shortVideoTitle} onChange={(event) => setShortVideoTitle(event.target.value)} placeholder="Video title" /><textarea className="memory-textarea" value={shortVideoContent} onChange={(event) => setShortVideoContent(event.target.value)} placeholder="Paste or correct the spoken transcript..." /><button className="primary-button full-width" disabled={busyDocument === 'short-video-save'} onClick={() => void saveShortVideo()}><Upload size={16} /> {busyDocument === 'short-video-save' ? 'Saving...' : 'Save transcript to inbox'}</button></div>}</article>
         <article className="memory-card"><div className="card-heading"><BotMessageSquare size={19} /><div><h2>Conversation intake</h2><p>Archive this conversation first; guided intake can be added later.</p></div></div><textarea className="memory-textarea short" value={interviewNote} onChange={(event) => setInterviewNote(event.target.value)} placeholder="What have you done lately? What changed? What are you working through?" /><button className="ghost-button full-width" disabled={busyDocument === 'new'} onClick={() => void saveText('conversation', interviewNote, 'Conversation intake')}>Save this conversation</button></article>
       </section>
       <section className="memory-review">
         <div className="memory-summary"><div><p className="eyebrow">LOCAL MATERIALS</p><h2>{documents.length} <span>source items</span></h2></div><div><p className="eyebrow">APPROVED</p><h2>{approved.length} <span>approved memories</span></h2></div></div>
         {(error || localError) && <div className="error-note">{error || localError}</div>}
-        <div className="document-list"><h3>Ready to extract</h3>{documents.length === 0 ? <p className="empty-inline">Imported source material will wait here for extraction.</p> : documents.map((document) => <article className="document-row" key={document.id}><div><strong>{document.title}</strong><span>{document.sourceType === 'chatgpt_export' ? 'ChatGPT history' : document.sourceType === 'note' ? 'Text note' : 'Conversation intake'} · {new Date(document.createdAt).toLocaleDateString('en-US')}</span></div><button className="ghost-button" disabled={busyDocument === document.id} onClick={() => void extract(document.id)}>{busyDocument === document.id ? 'DeepSeek is extracting...' : document.extractedAt ? 'Extract again' : 'Extract candidate memories'}</button></article>)}</div>
+        <div className="document-list"><h3>Ready to extract</h3>{documents.length === 0 ? <p className="empty-inline">Imported source material will wait here for extraction.</p> : documents.map((document) => <article className="document-row" key={document.id}><div><strong>{document.title}</strong><span>{document.sourceType === 'chatgpt_export' ? 'ChatGPT history' : document.sourceType === 'note' ? 'Text note' : document.sourceType === 'short_video' ? 'Douyin voice transcript' : 'Conversation intake'} · {new Date(document.createdAt).toLocaleDateString('en-US')}</span></div><button className="ghost-button" disabled={busyDocument === document.id} onClick={() => void extract(document.id)}>{busyDocument === document.id ? 'DeepSeek is extracting...' : document.extractedAt ? 'Extract again' : 'Extract candidate memories'}</button></article>)}</div>
         <div className="candidate-list"><h3>Candidate memories <span>{pending.length}</span></h3>{pending.length === 0 ? <p className="empty-inline">No items are waiting for review. Extract a source item to see candidate memories here.</p> : pending.map((candidate) => <article className="candidate-card" key={candidate.id}><div className="candidate-kind">{candidate.kind}</div><h4>{candidate.title}</h4><p>{candidate.content}</p>{candidate.tags.length > 0 && <div className="chip-row">{candidate.tags.map((tag) => <span className="chip" key={tag}>{tag}</span>)}</div>}<blockquote>{candidate.sourceQuote}</blockquote><div className="candidate-actions"><button className="reject-button" onClick={() => void review(candidate.id, 'rejected')}><X size={15} /> Ignore</button><button className="primary-button compact" onClick={() => void review(candidate.id, 'approved')}><CheckCircle2 size={15} /> Approve memory</button></div></article>)}</div>
       </section>
     </div>

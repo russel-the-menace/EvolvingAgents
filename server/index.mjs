@@ -5,7 +5,7 @@ import { dirname, join } from 'node:path';
 import express from 'express';
 
 const app = express();
-const port = 5270;
+const port = Number(process.env.PORT || 5270);
 const storePath = join(process.cwd(), 'data', 'memory-store.json');
 app.use(express.json({ limit: '50mb' }));
 
@@ -81,6 +81,33 @@ function relevance(queryTokens, value) {
 function clip(value, length = 720) {
   const text = String(value || '').trim().replace(/\s+/g, ' ');
   return text.length > length ? `${text.slice(0, length)}...` : text;
+}
+
+function extractDouyinShare(shareText) {
+  const text = String(shareText || '').trim();
+  const match = text.match(/https?:\/\/v\.douyin\.com\/[A-Za-z0-9_-]+\/?/i);
+  if (!match) throw new Error('Paste a Douyin share message containing a v.douyin.com link.');
+  const withoutLink = text.replace(match[0], '').replace(/复制此链接[，,]?\s*打开Dou音搜索[，,]?\s*直接观看视频！?/gi, '').trim();
+  const titleMatch = withoutLink.match(/[:：]\s*([^#\n]{4,120})/);
+  const titleSource = titleMatch?.[1] || withoutLink.split(/[#\n]/)[0] || 'Douyin learning material';
+  const firstChineseCharacter = titleSource.search(/\p{Script=Han}/u);
+  const title = titleSource.slice(firstChineseCharacter >= 0 ? firstChineseCharacter : 0).trim().replace(/[。！!]+$/, '');
+  const tags = [...withoutLink.matchAll(/#\s*([^#\s]+)/g)].map((item) => item[1]).slice(0, 12);
+  return { sourceUrl: match[0], title: title.slice(0, 120), shareText: text, tags };
+}
+
+async function resolveDouyinLink(sourceUrl) {
+  let current = sourceUrl;
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    const url = new URL(current);
+    if (url.protocol !== 'https:' || !(url.hostname === 'douyin.com' || url.hostname.endsWith('.douyin.com'))) throw new Error('The shared link redirected outside Douyin and was not followed.');
+    const result = await fetch(current, { method: 'HEAD', redirect: 'manual', headers: { 'User-Agent': 'Mozilla/5.0 MindClone/0.1' }, signal: AbortSignal.timeout(8_000) });
+    if (result.status < 300 || result.status >= 400) return current;
+    const next = result.headers.get('location');
+    if (!next) return current;
+    current = new URL(next, current).toString();
+  }
+  return current;
 }
 
 function relevantMemoryContext(store, currentSession, query) {
@@ -196,7 +223,7 @@ app.get('/api/memory', async (_, response, next) => {
 app.post('/api/memory/documents', async (request, response, next) => {
   try {
     const { title, sourceType, content } = request.body;
-    if (!title || !content || !['chatgpt_export', 'note', 'conversation'].includes(sourceType)) {
+    if (!title || !content || !['chatgpt_export', 'note', 'conversation', 'short_video'].includes(sourceType)) {
       return response.status(400).json({ error: 'The imported material is incomplete or has an invalid source type.' });
     }
     const document = { id: randomUUID(), title: String(title).slice(0, 120), sourceType, content: String(content).slice(0, 2_000_000), createdAt: new Date().toISOString() };
@@ -204,6 +231,23 @@ app.post('/api/memory/documents', async (request, response, next) => {
     store.documents.unshift(document);
     await saveStore(store);
     response.status(201).json({ document });
+  } catch (error) { next(error); }
+});
+app.post('/api/memory/short-videos/prepare', async (request, response, next) => {
+  try {
+    const parsed = extractDouyinShare(request.body.shareText);
+    let sourceUrl = parsed.sourceUrl;
+    try { sourceUrl = await resolveDouyinLink(sourceUrl); } catch (error) { console.warn('Douyin link resolution skipped:', error.message); }
+    const lines = [
+      `Source platform: Douyin`,
+      `Source link: ${sourceUrl}`,
+      `Original share text: ${parsed.shareText}`,
+      parsed.tags.length ? `Topics: ${parsed.tags.join(', ')}` : '',
+      '',
+      'Voice transcript:',
+      'Add or correct the spoken transcript here before saving. MindClone learns from text only and does not analyze video frames or subtitles.',
+    ].filter(Boolean);
+    response.json({ title: parsed.title, sourceUrl, content: lines.join('\n') });
   } catch (error) { next(error); }
 });
 app.post('/api/memory/extract', async (request, response, next) => {

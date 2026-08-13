@@ -29,7 +29,7 @@ export type Message = {
 export type MemoryDocument = {
   id: string;
   title: string;
-  sourceType: 'chatgpt_export' | 'note' | 'conversation';
+  sourceType: 'chatgpt_export' | 'note' | 'conversation' | 'short_video';
   content: string;
   createdAt: string;
   extractedAt?: string;
