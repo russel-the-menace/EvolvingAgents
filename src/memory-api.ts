@@ -18,6 +18,8 @@ export const memoryApi = {
     request<{ document: MemoryDocument }>('/memory/documents', { method: 'POST', body: JSON.stringify(payload) }),
   prepareShortVideo: (shareText: string) =>
     request<{ title: string; content: string; sourceUrl: string }>('/memory/short-videos/prepare', { method: 'POST', body: JSON.stringify({ shareText }) }),
+  transcribeShortVideo: (shareText: string) =>
+    request<{ title: string; content: string; sourceUrl: string }>('/memory/short-videos/transcribe', { method: 'POST', body: JSON.stringify({ shareText }) }),
   extract: (documentId: string) =>
     request<{ memories: MemoryCandidate[] }>('/memory/extract', { method: 'POST', body: JSON.stringify({ documentId }) }),
   setStatus: (id: string, status: MemoryCandidate['status']) =>

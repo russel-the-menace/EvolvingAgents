@@ -1,12 +1,16 @@
 import 'dotenv/config';
 import { randomUUID } from 'node:crypto';
-import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
+import { execFile } from 'node:child_process';
+import { mkdir, mkdtemp, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
+import { tmpdir } from 'node:os';
+import { promisify } from 'node:util';
 import express from 'express';
 
 const app = express();
 const port = Number(process.env.PORT || 5270);
 const storePath = join(process.cwd(), 'data', 'memory-store.json');
+const execFileAsync = promisify(execFile);
 app.use(express.json({ limit: '50mb' }));
 
 async function loadStore() {
@@ -108,6 +112,84 @@ async function resolveDouyinLink(sourceUrl) {
     current = new URL(next, current).toString();
   }
   return current;
+}
+
+function findMediaUrl(value, seen = new Set()) {
+  if (!value || typeof value !== 'object' || seen.has(value)) return null;
+  seen.add(value);
+  if (Array.isArray(value)) {
+    for (const item of value) { const found = findMediaUrl(item, seen); if (found) return found; }
+    return null;
+  }
+  const preferredKeys = ['play_addr', 'play_url', 'download_addr', 'download_url', 'video_url', 'url_list', 'url'];
+  for (const key of preferredKeys) {
+    const candidate = value[key];
+    if (typeof candidate === 'string' && /^https?:\/\//i.test(candidate)) return candidate;
+    if (Array.isArray(candidate)) {
+      const url = candidate.find((item) => typeof item === 'string' && /^https?:\/\//i.test(item));
+      if (url) return url;
+    }
+    if (candidate && typeof candidate === 'object') { const found = findMediaUrl(candidate, seen); if (found) return found; }
+  }
+  for (const candidate of Object.values(value)) { const found = findMediaUrl(candidate, seen); if (found) return found; }
+  return null;
+}
+
+function findPlaybackUrl(value, seen = new Set()) {
+  if (!value || typeof value !== 'object' || seen.has(value)) return null;
+  seen.add(value);
+  if (Array.isArray(value)) {
+    for (const item of value) { const found = findPlaybackUrl(item, seen); if (found) return found; }
+    return null;
+  }
+  if (value.play_addr) {
+    const found = findMediaUrl(value.play_addr);
+    if (found) return found;
+  }
+  for (const candidate of Object.values(value)) { const found = findPlaybackUrl(candidate, seen); if (found) return found; }
+  return null;
+}
+
+async function fetchTikHubVideo(shareText) {
+  const token = process.env.TIKHUB_API_KEY;
+  if (!token) throw new Error('TIKHUB_API_KEY is not configured. Add it to the local .env file and restart the service.');
+  const baseUrl = (process.env.TIKHUB_BASE_URL || 'https://api.tikhub.dev').replace(/\/$/, '');
+  const url = new URL('/api/v1/hybrid/video_data', baseUrl);
+  url.searchParams.set('url', shareText);
+  url.searchParams.set('minimal', 'false');
+  const response = await fetch(url, { headers: { Authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(60_000) });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok || payload.code !== 200) throw new Error(payload.message_zh || payload.message || `TikHub video parsing failed (${response.status}).`);
+  const mediaUrl = findPlaybackUrl(payload.data) || findMediaUrl(payload.data);
+  if (!mediaUrl) throw new Error('TikHub returned video data but no downloadable media URL.');
+  return { data: payload.data, mediaUrl };
+}
+
+async function transcribeShortVideo(shareText) {
+  const asrApiKey = process.env.ASR_API_KEY;
+  if (!asrApiKey) throw new Error('ASR_API_KEY is not configured. Configure an OpenAI-compatible speech-to-text service in .env.');
+  const { mediaUrl, data } = await fetchTikHubVideo(shareText);
+  const directory = await mkdtemp(join(tmpdir(), 'mindclone-transcript-'));
+  const mediaPath = join(directory, 'source-media');
+  const audioPath = join(directory, 'speech.wav');
+  try {
+    const media = await fetch(mediaUrl, { headers: { 'User-Agent': 'Mozilla/5.0 MindClone/0.1' }, signal: AbortSignal.timeout(120_000) });
+    if (!media.ok || !media.body) throw new Error(`Media download failed (${media.status}).`);
+    const bytes = Buffer.from(await media.arrayBuffer());
+    if (bytes.length > 200 * 1024 * 1024) throw new Error('The source video exceeds the 200 MB transcription limit.');
+    await writeFile(mediaPath, bytes);
+    await execFileAsync('ffmpeg', ['-y', '-i', mediaPath, '-vn', '-ac', '1', '-ar', '16000', '-c:a', 'pcm_s16le', audioPath], { timeout: 120_000 });
+    const form = new FormData();
+    form.set('file', new Blob([await readFile(audioPath)], { type: 'audio/wav' }), 'speech.wav');
+    form.set('model', process.env.ASR_MODEL || 'whisper-1');
+    form.set('response_format', 'json');
+    form.set('language', 'zh');
+    const endpoint = `${(process.env.ASR_BASE_URL || 'https://api.openai.com/v1').replace(/\/$/, '')}/audio/transcriptions`;
+    const response = await fetch(endpoint, { method: 'POST', headers: { Authorization: `Bearer ${asrApiKey}` }, body: form, signal: AbortSignal.timeout(180_000) });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok || !payload.text) throw new Error(payload.error?.message || `Speech transcription failed (${response.status}).`);
+    return { transcript: String(payload.text).trim(), videoData: data };
+  } finally { await rm(directory, { recursive: true, force: true }); }
 }
 
 function relevantMemoryContext(store, currentSession, query) {
@@ -248,6 +330,22 @@ app.post('/api/memory/short-videos/prepare', async (request, response, next) => 
       'Add or correct the spoken transcript here before saving. MindClone learns from text only and does not analyze video frames or subtitles.',
     ].filter(Boolean);
     response.json({ title: parsed.title, sourceUrl, content: lines.join('\n') });
+  } catch (error) { next(error); }
+});
+app.post('/api/memory/short-videos/transcribe', async (request, response, next) => {
+  try {
+    const parsed = extractDouyinShare(request.body.shareText);
+    const { transcript } = await transcribeShortVideo(parsed.shareText);
+    const lines = [
+      'Source platform: Douyin',
+      `Source link: ${parsed.sourceUrl}`,
+      `Original share text: ${parsed.shareText}`,
+      parsed.tags.length ? `Topics: ${parsed.tags.join(', ')}` : '',
+      '',
+      'Voice transcript:',
+      transcript,
+    ].filter(Boolean);
+    response.json({ title: parsed.title, sourceUrl: parsed.sourceUrl, content: lines.join('\n') });
   } catch (error) { next(error); }
 });
 app.post('/api/memory/extract', async (request, response, next) => {
