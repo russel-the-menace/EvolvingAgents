@@ -1,7 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { DatabaseSync } from 'node:sqlite';
-import { createLearningEngine, createSqliteLearningStore, locateEvidence } from '../src/index.mjs';
+import { createSqliteLearningStore } from '@evolving-agents/learning-engine';
+import { createCampusPolicyEngine } from '../src/learning.mjs';
 
 function createCampusEngine() {
   const db = new DatabaseSync(':memory:');
@@ -28,33 +29,15 @@ function createCampusEngine() {
       }];
     },
   };
-  const policy = {
-    mapProposal: ({ proposal, source, chunk }) => {
-      const located = locateEvidence(chunk, proposal.sourceQuote);
-      return {
-        claim: {
-        ...proposal,
-        owner: source.sourceActor,
-        epistemicStatus: 'published',
-        authorizationScope: 'policy_knowledge',
-      },
-        evidence: [{
-          ...located,
-          ordinal: chunk.ordinal,
-          owner: source.sourceActor,
-          attributes: { ...located.attributes, section: '第二条 申请条件' },
-        }],
-      };
-    },
-    canRetrieve: ({ claim, evidence, context }) => {
-      if (claim.epistemicStatus !== 'published') return false;
-      const requiredScope = claim.attributes.accessScope || 'public';
-      if (requiredScope !== 'public' && !(context.accessScopes || []).includes(requiredScope)) return false;
-      return evidence.length > 0
-        && evidence.every((item) => item.source.metadata.accessScope === requiredScope);
-    },
+  return {
+    db,
+    store,
+    engine: createCampusPolicyEngine({
+      store,
+      extractor,
+      chunking: { maxChars: 800, overlapChars: 80 },
+    }),
   };
-  return { db, store, engine: createLearningEngine({ store, extractor, policy, chunking: { maxChars: 800, overlapChars: 80 } }) };
 }
 
 test('a campus policy adapter learns, filters, and cites without changing engine code', async () => {

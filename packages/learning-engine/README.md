@@ -1,6 +1,6 @@
 # Learning Engine
 
-`@mindclone/learning-engine` is a domain-neutral source-to-evidence retrieval kernel. It is deliberately not a chatbot, crawler, model SDK, identity system, or vector database.
+`@evolving-agents/learning-engine` is a domain-neutral source-to-evidence retrieval kernel. It is deliberately not a chatbot, crawler, model SDK, identity system, or vector database.
 
 ## What It Owns
 
@@ -53,9 +53,9 @@ const results = await engine.retrieve(question, {
 const evidence = engine.buildEvidenceContext(results);
 ```
 
-## Copying To Another Repository
+## Consuming The Package
 
-Copy the entire `packages/learning-engine` directory. The runtime uses only Node built-ins and receives an already-open `node:sqlite` database. A consuming application must:
+Inside the Evolving Agents monorepo, applications depend on `@evolving-agents/learning-engine` through npm workspaces. Do not copy the package into each application. The runtime uses only Node built-ins and receives an already-open `node:sqlite` database. A consuming application must:
 
 1. open SQLite and call `createSqliteLearningStore(db)`;
 2. implement an extractor;
@@ -64,7 +64,7 @@ Copy the entire `packages/learning-engine` directory. The runtime uses only Node
 5. assemble the returned evidence into its own answer prompt;
 6. test domain-specific authority, expiry, conflict, and abstention behavior.
 
-See `examples/campus-policy.mjs` for an authenticated university-policy configuration.
+See `apps/campus-atlas/src/learning.mjs` in the monorepo for an authenticated university-policy configuration.
 
 ## Production Limits
 

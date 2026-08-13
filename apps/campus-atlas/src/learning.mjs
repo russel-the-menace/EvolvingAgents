@@ -1,34 +1,34 @@
-import { createLearningEngine, locateEvidence } from '../src/index.mjs';
+import { createLearningEngine, locateEvidence } from '@evolving-agents/learning-engine';
 
-export function createCampusPolicyEngine({ store, extractor, reranker, retrievers }) {
+export function createCampusPolicyEngine({ store, extractor, reranker, retrievers, chunking }) {
   return createLearningEngine({
     store,
     extractor,
     reranker,
     retrievers,
-    chunking: { maxChars: 6000, overlapChars: 300 },
+    chunking: chunking || { maxChars: 6000, overlapChars: 300 },
     policy: {
       mapProposal: ({ proposal, source, chunk }) => {
         const located = locateEvidence(chunk, proposal.sourceQuote || chunk.text);
         return {
           claim: {
-          title: proposal.title,
-          proposition: proposal.proposition,
-          kind: proposal.kind || 'policy_rule',
-          owner: source.sourceActor || 'unknown_publisher',
-          epistemicStatus: proposal.epistemicStatus || 'published',
-          authorizationScope: 'policy_knowledge',
-          tags: proposal.tags || [],
-          attributes: {
-            ...proposal.attributes,
-            accessScope: source.metadata.accessScope || 'public',
-            department: source.metadata.department,
-            authorityLevel: source.metadata.authorityLevel,
+            title: proposal.title,
+            proposition: proposal.proposition,
+            kind: proposal.kind || 'policy_rule',
+            owner: source.sourceActor || 'unknown_publisher',
+            epistemicStatus: proposal.epistemicStatus || 'published',
+            authorizationScope: 'policy_knowledge',
+            tags: proposal.tags || [],
+            attributes: {
+              ...proposal.attributes,
+              accessScope: source.metadata.accessScope || 'public',
+              department: source.metadata.department,
+              authorityLevel: source.metadata.authorityLevel,
+            },
+            validFrom: proposal.validFrom,
+            validTo: proposal.validTo,
+            confidence: proposal.confidence ?? 0.5,
           },
-          validFrom: proposal.validFrom,
-          validTo: proposal.validTo,
-          confidence: proposal.confidence ?? 0.5,
-        },
           evidence: [{
             ...located,
             ordinal: chunk.ordinal,

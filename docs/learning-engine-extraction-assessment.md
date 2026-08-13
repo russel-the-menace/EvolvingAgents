@@ -2,9 +2,9 @@
 
 ## Decision
 
-Extract the engine and reuse it. Do not fork the full MindClone application for each domain.
+Extract the engine and reuse it. Do not fork the full MindClone application for each domain. The engine now remains an internal workspace package until multiple real applications stabilize its API.
 
-The extracted `packages/learning-engine` passed the decisive test: a campus-policy adapter learned a Chinese authenticated policy, retained the publishing authority and source quote, denied retrieval without the required access scope, allowed retrieval for an authenticated student, excluded the expired policy, abstained on an unrelated query, and returned citation-ready evidence without modifying engine source code. MindClone also uses the same package for its real ingestion and daily retrieval paths.
+The extracted `packages/learning-engine` passed the decisive test: the CampusAtlas adapter learned a Chinese authenticated policy, retained the publishing authority and source quote, denied retrieval without the required access scope, allowed retrieval for an authenticated student, excluded the expired policy, abstained on an unrelated query, and returned citation-ready evidence without modifying engine source code. MindClone also uses the same workspace package for its real ingestion and daily retrieval paths.
 
 This supports reuse as a source-to-evidence learning kernel. It does not support claiming that the package alone is a finished campus RAG product.
 
@@ -17,11 +17,11 @@ Each dimension is scored from 0 to 5. Extraction requires all hard gates and at 
 | Domain independence | Yes | 5/5 | Core source contains no MindClone, resume, interview, school, or scholarship concepts. |
 | Dependency direction | Yes | 5/5 | Applications inject extractor, policy, retrievers, and reranker; the core does not import app code. |
 | Data-model generality | Yes | 4/5 | Source, evidence, claim, relation, attributes, validity, and provenance support both tested domains. Rich tables and binary artifacts remain external. |
-| Second-domain proof | Yes | 5/5 | Campus policy test passes without engine edits. |
+| Second-domain proof | Yes | 5/5 | The `apps/campus-atlas` policy test imports its real adapter and passes without engine edits. |
 | Retrieval extensibility | Yes | 4/5 | SQLite FTS is operational; multiple retrievers and reranking are injectable. No bundled embedding implementation. |
 | Lifecycle correctness | Yes | 4/5 | Checksums, re-extraction replacement, stale search cleanup, evidence cascade, and temporal filtering are tested. Cross-source supersession is domain policy. |
 | Testability | Yes | 5/5 | Deterministic in-memory tests require no model or network and run with the repository suite. |
-| Adoption cost | No | 4/5 | One package copy plus an extractor and policy adapter. It is not yet published as a versioned npm package. |
+| Adoption cost | No | 4/5 | One workspace dependency plus an extractor and policy adapter. It is not yet published as a versioned npm package. |
 
 **Total: 36/40. Hard gates: all passed.**
 
@@ -50,7 +50,7 @@ Domain applications own:
 - response prompt, citations, abstention, and UI;
 - domain-specific evaluation data.
 
-## Campus Agent Effort
+## CampusAtlas Effort
 
 The campus project should start from this package rather than from zero, but it still needs substantial application work:
 

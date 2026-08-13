@@ -3,7 +3,7 @@ import { mkdirSync, readFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { legacyCandidateToClaim } from '../domain/cognition.mjs';
-import { createSqliteLearningStore } from '../../packages/learning-engine/src/index.mjs';
+import { createSqliteLearningStore } from '@evolving-agents/learning-engine';
 
 function json(value, fallback = []) {
   try { return value ? JSON.parse(value) : fallback; } catch { return fallback; }

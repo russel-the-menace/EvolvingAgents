@@ -1,4 +1,4 @@
-import { createLearningEngine, locateEvidence } from '../../packages/learning-engine/src/index.mjs';
+import { createLearningEngine, locateEvidence } from '@evolving-agents/learning-engine';
 import { defaultAuthorization } from '../domain/cognition.mjs';
 
 function sourceIsExternal(source) {

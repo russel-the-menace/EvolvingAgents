@@ -1,37 +1,19 @@
 {
-  "name": "mindclone",
+  "name": "evolving-agents",
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "main": "electron/main.cjs",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
   "scripts": {
-    "dev": "concurrently -k \"npm:dev:api\" \"npm:dev:web\"",
-    "dev:api": "node server/index.mjs",
-    "dev:web": "vite --host 127.0.0.1",
-    "build": "tsc -b && vite build",
-    "preview": "vite preview --host 127.0.0.1",
-    "desktop": "concurrently -k \"npm:dev:api\" \"vite --host 127.0.0.1\" \"wait-on http://127.0.0.1:5269 && electron .\"",
-    "check": "tsc -b",
-    "test": "node --test packages/**/*.test.mjs server/*.test.mjs server/**/*.test.mjs",
+    "dev": "npm run dev --workspace @evolving-agents/mindclone",
+    "dev:mindclone": "npm run dev --workspace @evolving-agents/mindclone",
+    "desktop": "npm run desktop --workspace @evolving-agents/mindclone",
+    "test": "npm test --workspaces --if-present",
+    "check": "npm run check --workspaces --if-present",
+    "build": "npm run build --workspaces --if-present",
     "sync:reference": "./scripts/sync-jd2resume-reference.sh"
-  },
-  "dependencies": {
-    "@vitejs/plugin-react": "latest",
-    "dotenv": "latest",
-    "express": "latest",
-    "lucide-react": "latest",
-    "react": "latest",
-    "react-dom": "latest",
-    "vite": "latest"
-  },
-  "devDependencies": {
-    "@types/node": "latest",
-    "@types/express": "latest",
-    "@types/react": "latest",
-    "@types/react-dom": "latest",
-    "concurrently": "latest",
-    "electron": "latest",
-    "typescript": "latest",
-    "wait-on": "latest"
   }
 }
