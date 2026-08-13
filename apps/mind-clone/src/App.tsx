@@ -1,4 +1,6 @@
-import { Fragment, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import {
   ArrowDown, ArrowRight, BotMessageSquare, CheckCircle2, ChevronDown, CircleStop, FileText,
   FileUp, ListChecks, Mic, Paperclip, Play,
@@ -19,43 +21,11 @@ function formatPreparedAt(value: string) {
   return new Intl.DateTimeFormat('en-US', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(value));
 }
 
-function InlineMarkdown({ text }: { text: string }) {
-  return <>{text.split(/(\*\*[^*]+\*\*)/g).map((part, index) =>
-    part.startsWith('**') && part.endsWith('**')
-      ? <strong key={index}>{part.slice(2, -2)}</strong>
-      : <Fragment key={index}>{part}</Fragment>,
-  )}</>;
-}
-
 function MarkdownText({ content }: { content: string }) {
-  const blocks: React.ReactNode[] = [];
-  let paragraph: string[] = [];
-
-  function flushParagraph() {
-    if (!paragraph.length) return;
-    blocks.push(<p key={`paragraph-${blocks.length}`}>{paragraph.map((line, lineIndex) =>
-      <Fragment key={lineIndex}><InlineMarkdown text={line} />{lineIndex < paragraph.length - 1 && <br />}</Fragment>,
-    )}</p>);
-    paragraph = [];
-  }
-
-  content.split('\n').forEach((line) => {
-    const heading = line.match(/^ {0,3}###\s+(.+)\s*$/);
-    if (/^ {0,3}(?:---+|\*\s*\*\s*\*+)\s*$/.test(line)) {
-      flushParagraph();
-      blocks.push(<hr key={`rule-${blocks.length}`} />);
-    } else if (heading) {
-      flushParagraph();
-      blocks.push(<h3 key={`heading-${blocks.length}`}><InlineMarkdown text={heading[1]} /></h3>);
-    } else if (!line.trim()) {
-      flushParagraph();
-    } else {
-      paragraph.push(line);
-    }
-  });
-  flushParagraph();
-
-  return <div className="rich-text">{blocks}</div>;
+  return <div className="rich-text"><ReactMarkdown
+    remarkPlugins={[remarkGfm]}
+    components={{ table: ({ children }) => <div className="table-scroll"><table>{children}</table></div> }}
+  >{content}</ReactMarkdown></div>;
 }
 
 function ThinkingIndicator() {
@@ -395,9 +365,9 @@ function DailyChatView({ sessions, activeSessionId, input, streaming, error, mod
   const messages = draftMessages.length ? draftMessages : newChatActive ? [] : activeSession?.messages ?? [];
 
   useEffect(() => { setDraftMessages([]); }, [activeSessionId]);
-  useEffect(() => {
+  useLayoutEffect(() => {
     const transcript = listRef.current;
-    if (transcript && followingRef.current) transcript.scrollTo({ top: transcript.scrollHeight });
+    if (transcript && followingRef.current) transcript.scrollTop = transcript.scrollHeight;
   }, [messages, streaming]);
   useEffect(() => {
     const textarea = dailyInputRef.current;
@@ -437,6 +407,7 @@ function DailyChatView({ sessions, activeSessionId, input, streaming, error, mod
     const branchIndex = replaceFromMessageId ? activeSession?.messages.findIndex((message) => message.id === replaceFromMessageId) ?? -1 : -1;
     const branchMessages = branchIndex >= 0 ? activeSession?.messages.slice(0, branchIndex) ?? [] : activeSession?.messages ?? [];
     const next = [...branchMessages, userMessage, answerMessage];
+    followLatest(true);
     setDraftMessages(next);
     if (thinkingTimerRef.current) window.clearTimeout(thinkingTimerRef.current);
     thinkingTimerRef.current = null;
@@ -530,18 +501,21 @@ function DailyChatView({ sessions, activeSessionId, input, streaming, error, mod
     }
   }
 
-  function scrollToLatest() {
+  function followLatest(immediate = false) {
     const transcript = listRef.current;
     if (!transcript) return;
     followingRef.current = true;
     if (scrollTimerRef.current) window.clearTimeout(scrollTimerRef.current);
     scrollTimerRef.current = null;
-    transcript.scrollTo({ top: transcript.scrollHeight, behavior: 'smooth' });
     setShowScrollButton(false);
+    window.requestAnimationFrame(() => {
+      transcript.scrollTo({ top: transcript.scrollHeight, behavior: immediate ? 'auto' : 'smooth' });
+      if (immediate) window.requestAnimationFrame(() => { transcript.scrollTop = transcript.scrollHeight; });
+    });
   }
 
   return <section className="daily-conversation"><div className="daily-transcript" ref={listRef} onScroll={updateScrollPosition}>{messages.length === 0 ? <div className="daily-empty"><Sparkles size={32} /><h2>Start with what is on your mind</h2><p>MindClone learns from your conversations and asks for clarification here when imported material needs your judgment.</p></div> : messages.map((message) => <article className={`daily-message ${message.role}`} key={message.id}>{editingMessage?.id === message.id ? <div className="inline-message-editor"><textarea autoFocus value={editingMessage.content} onChange={(event) => setEditingMessage({ ...editingMessage, content: event.target.value })} onKeyDown={(event) => { if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') void send(editingMessage.content, message.id); if (event.key === 'Escape') setEditingMessage(null); }} /><div><button className="edit-cancel-button" onClick={() => setEditingMessage(null)}>Cancel</button><button className="edit-send-button" disabled={!editingMessage.content.trim() || streaming} onClick={() => void send(editingMessage.content, message.id)}>Send</button></div></div> : <><div className="message-body">{message.content ? <MarkdownText content={message.content} /> : streaming && message.role === 'assistant' ? <ThinkingIndicator /> : null}{thinkingVisible && message.id === messages.at(-1)?.id && message.role === 'assistant' && message.content && <ThinkingIndicator />}</div>{message.content && <div className="message-actions"><button title="Copy message" aria-label="Copy message" onClick={() => void copyMessage(message)}><Copy size={16} /></button>{message.role === 'user' && <button title="Edit message" aria-label="Edit message" onClick={() => editMessage(message)}><Pencil size={16} /></button>}</div>}</>}</article>)}{error && <div className="error-note">{error}</div>}</div>
-      <button className={showScrollButton ? 'scroll-to-latest is-visible' : 'scroll-to-latest'} title="Back to latest message" aria-label="Back to latest message" aria-hidden={!showScrollButton} disabled={!showScrollButton} onClick={scrollToLatest}><ArrowDown size={18} /></button>
+      <button className={showScrollButton ? 'scroll-to-latest is-visible' : 'scroll-to-latest'} title="Back to latest message" aria-label="Back to latest message" aria-hidden={!showScrollButton} disabled={!showScrollButton} onClick={() => followLatest()}><ArrowDown size={18} /></button>
       <div className={composerExpanded ? 'daily-composer expanded' : 'daily-composer'}><div className="attachment-area">{attachmentOpen && <div className="attachment-menu"><div className="attachment-menu-title">Teach MindClone</div><button onClick={() => fileRef.current?.click()}><FileUp size={17} /> Import ChatGPT history</button><button onClick={() => { setAttachmentMode('note'); setAttachmentStatus(''); }}><Paperclip size={17} /> Add text / Markdown</button><button onClick={() => { setAttachmentMode('video'); setAttachmentStatus(''); }}><Video size={17} /> Learn from Douyin audio</button>{attachmentMode === 'note' && <div className="attachment-editor"><textarea value={attachmentNote} onChange={(event) => setAttachmentNote(event.target.value)} placeholder="Paste notes or source material..." /><button className="primary-button compact" disabled={attachmentBusy} onClick={() => void saveAttachmentNote()}>{attachmentBusy ? 'Learning...' : 'Learn this text'}</button></div>}{attachmentMode === 'video' && <div className="attachment-editor video-editor"><textarea value={shortVideoShare} onChange={(event) => setShortVideoShare(event.target.value)} placeholder="Paste the Douyin share message or v.douyin.com link..." /><div className="attachment-actions"><button className="primary-button compact" disabled={attachmentBusy} onClick={() => void prepareShortVideo(true)}>{attachmentBusy ? 'Working...' : 'Transcribe audio'}</button><button className="ghost-button compact" disabled={attachmentBusy} onClick={() => void prepareShortVideo(false)}>Add transcript manually</button></div>{shortVideoContent && <><input value={shortVideoTitle} onChange={(event) => setShortVideoTitle(event.target.value)} placeholder="Video title" /><textarea className="transcript-editor" value={shortVideoContent} onChange={(event) => setShortVideoContent(event.target.value)} placeholder="Review the spoken transcript..." /><button className="primary-button compact" disabled={attachmentBusy} onClick={() => void learnShortVideo()}>{attachmentBusy ? 'Learning...' : 'Learn this transcript'}</button></>}</div>}{attachmentStatus && <p>{attachmentStatus}</p>}</div>}<input ref={fileRef} className="hidden-input" type="file" accept="application/json,.json" onChange={(event) => { const file = event.target.files?.[0]; if (file) void importFile(file); event.currentTarget.value = ''; }} /><button className={attachmentOpen ? 'plus-button open' : 'plus-button'} title="Add material" onClick={() => setAttachmentOpen((current) => !current)}><Plus size={21} /></button></div><textarea ref={dailyInputRef} rows={1} value={input} onChange={(event) => updateDailyInput(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); void send(); } }} placeholder="Message MindClone..." /><div ref={modelMenuRef} className={modelMenuOpen ? 'daily-model-picker open' : 'daily-model-picker'}><button type="button" aria-haspopup="menu" aria-expanded={modelMenuOpen} onClick={() => setModelMenuOpen((open) => !open)}>{({ 'deepseek-light': 'DeepSeek Light', 'deepseek-medium': 'DeepSeek Medium', 'deepseek-high': 'DeepSeek High', 'deepseek-ultra': 'DeepSeek Ultra' } as const)[model]}<ChevronDown size={16} /></button>{modelMenuOpen && <div className="daily-model-menu" role="menu">{([{ id: 'deepseek-light', name: 'DeepSeek Light', detail: 'deepseek-v4-flash · non-thinking' }, { id: 'deepseek-medium', name: 'DeepSeek Medium', detail: 'deepseek-v4-flash · thinking' }, { id: 'deepseek-high', name: 'DeepSeek High', detail: 'deepseek-v4-pro · non-thinking' }, { id: 'deepseek-ultra', name: 'DeepSeek Ultra', detail: 'deepseek-v4-pro · thinking' }] as const).map((option) => <button key={option.id} role="menuitem" className={model === option.id ? 'selected' : ''} onClick={() => { onModelChange(option.id); setModelMenuOpen(false); }}><strong>{option.name}</strong><span>{option.detail}</span></button>)}</div>}</div><button className="send-icon" disabled={!input.trim() || streaming} title="Send" onClick={() => void send()}><SendHorizontal size={19} /></button></div>
     </section>;
 }

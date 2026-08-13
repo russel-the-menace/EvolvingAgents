@@ -1,4 +1,4 @@
-import type { AnswerPlan, Claim, DailyModel, DailySession, InterviewPacket, MemoryCandidate, MemoryDocument } from './types';
+import type { AnswerPlan, Claim, DailyModel, DailySession, InterviewPacket, MemoryDocument } from './types';
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`/api${path}`, {
@@ -13,21 +13,12 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export const memoryApi = {
-  list: () => request<{ documents: MemoryDocument[]; memories: MemoryCandidate[]; claims: Claim[] }>('/memory'),
   importDocument: (payload: Pick<MemoryDocument, 'title' | 'sourceType' | 'content'>) =>
     request<{ document: MemoryDocument; claims: Claim[] }>('/memory/documents', { method: 'POST', body: JSON.stringify(payload) }),
   prepareShortVideo: (shareText: string) =>
     request<{ title: string; content: string; sourceUrl: string }>('/memory/short-videos/prepare', { method: 'POST', body: JSON.stringify({ shareText }) }),
   transcribeShortVideo: (shareText: string) =>
     request<{ title: string; content: string; sourceUrl: string }>('/memory/short-videos/transcribe', { method: 'POST', body: JSON.stringify({ shareText }) }),
-  extract: (documentId: string) =>
-    request<{ memories: MemoryCandidate[] }>('/memory/extract', { method: 'POST', body: JSON.stringify({ documentId }) }),
-  setStatus: (id: string, status: MemoryCandidate['status']) =>
-    request<{ memory: MemoryCandidate }>(`/memory/candidates/${id}`, { method: 'PATCH', body: JSON.stringify({ status }) }),
-  transitionClaim: (id: string, payload: { status: Claim['epistemicStatus']; authorizationScope?: Claim['authorizationScope']; reason: string }) =>
-    request<{ claim: Claim }>(`/claims/${id}/transition`, { method: 'POST', body: JSON.stringify(payload) }),
-  internalizeClaim: (id: string, payload: { proposition?: string; title?: string; reason: string; contextScope?: string[] }) =>
-    request<{ sourceClaim: Claim; claim: Claim }>(`/claims/${id}/internalize`, { method: 'POST', body: JSON.stringify(payload) }),
   compileScene: (payload: { jd: string; resume: string; audience?: string; goal?: string; sceneType?: string }) =>
     request<{ scene: Omit<InterviewPacket, 'preparedAt' | 'focusAreas' | 'questionTypes' | 'brief' | 'sceneId'> & { id: string; writeBack: false; knowledgeClaims: Claim[]; personalClaims: Claim[]; expressionClaims: Claim[] } }>('/scenes/compile', { method: 'POST', body: JSON.stringify(payload) }),
   planAnswer: (sceneId: string, question: string) =>

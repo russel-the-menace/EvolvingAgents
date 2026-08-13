@@ -69,23 +69,6 @@ export type MemoryDocument = {
   extractedAt?: string;
 };
 
-export type MemoryCandidate = {
-  id: string;
-  documentId: string;
-  kind: 'experience' | 'skill' | 'preference' | 'viewpoint' | 'language_sample' | 'concept' | 'framework' | 'answer_pattern' | 'case_example';
-  scope?: 'personal' | 'learning';
-  title: string;
-  content: string;
-  tags: string[];
-  sourceQuote: string;
-  sourceMessageIds?: string[];
-  status: 'pending' | 'approved' | 'rejected';
-  epistemicStatus?: EpistemicStatus;
-  authorizationScope?: AuthorizationScope;
-  owner?: Claim['owner'];
-  createdAt: string;
-};
-
 export type DailyMessage = {
   id: string;
   role: 'user' | 'assistant';
