@@ -176,9 +176,27 @@ function createRepository(db) {
     getSource: (id) => getSource(db, id),
     addSource: (source) => insertSource(db, source),
     markSourceExtracted: (id) => db.prepare('UPDATE sources SET extracted_at = ? WHERE id = ?').run(new Date().toISOString(), id),
-    deleteClaimsForSource: (sourceId) => db.prepare(`DELETE FROM claims WHERE id IN (
-      SELECT claim_id FROM claim_evidence JOIN evidence_units ON evidence_units.id = claim_evidence.evidence_id WHERE evidence_units.source_id = ?
-    )`).run(sourceId),
+    deleteClaimsForSource: (sourceId) => {
+      const claimIds = db.prepare(`SELECT DISTINCT claim_id FROM claim_evidence
+        JOIN evidence_units ON evidence_units.id = claim_evidence.evidence_id
+        WHERE evidence_units.source_id = ?`).all(sourceId).map((row) => row.claim_id);
+      db.exec('BEGIN IMMEDIATE');
+      try {
+        const deleteSearch = db.prepare('DELETE FROM claim_search WHERE claim_id = ?');
+        const deleteInquiry = db.prepare('DELETE FROM inquiry_items WHERE claim_id = ?');
+        const deleteClaim = db.prepare('DELETE FROM claims WHERE id = ?');
+        for (const claimId of claimIds) {
+          deleteSearch.run(claimId);
+          deleteInquiry.run(claimId);
+          deleteClaim.run(claimId);
+        }
+        db.exec('COMMIT');
+        return claimIds.length;
+      } catch (error) {
+        db.exec('ROLLBACK');
+        throw error;
+      }
+    },
     addEvidence: ({ sourceId, text, speaker, owner, ordinal = 0 }) => {
       const id = randomUUID();
       db.prepare('INSERT INTO evidence_units (id, source_id, ordinal, text, speaker, owner, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)')

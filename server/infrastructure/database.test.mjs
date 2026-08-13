@@ -25,3 +25,21 @@ test('legacy JSON migration is lossless and idempotent', () => {
   assert.equal(second.listClaims().length, 1);
   second.close();
 });
+
+test('re-extraction removes stale claims, search rows, and inquiries', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'mindclone-db-cleanup-test-'));
+  const repository = openDatabase(join(directory, 'mindclone.sqlite'), join(directory, 'missing.json'));
+  const source = repository.addSource({ title: 'Article', sourceType: 'article', content: 'External claim' });
+  const evidenceId = repository.addEvidence({ sourceId: source.id, text: 'External claim', speaker: 'author', owner: 'external' });
+  const claim = repository.addClaim({
+    title: 'Claim', proposition: 'External claim', kind: 'knowledge', owner: 'external',
+    epistemicStatus: 'understood', authorizationScope: 'reasoning_use', tags: [], confidence: 0.8,
+  }, evidenceId);
+  repository.addInquiry({ claimId: claim.id, question: 'Do you endorse this?', reason: 'Test', priority: 1 });
+
+  assert.equal(repository.deleteClaimsForSource(source.id), 1);
+  assert.equal(repository.listClaims().length, 0);
+  assert.equal(repository.listInquiries().length, 0);
+  assert.equal(repository.db.prepare('SELECT COUNT(*) AS count FROM claim_search').get().count, 0);
+  repository.close();
+});

@@ -106,7 +106,7 @@ function persistProposals(source, proposals) {
   return claims;
 }
 
-function relevantContext(currentSession, query) {
+function relevantContext(query) {
   const queryTokens = tokenize(query);
   const ranked = repository.listClaims()
     .filter((claim) => claim.authorizationScope !== 'none' && !['rejected', 'superseded', 'contested'].includes(claim.epistemicStatus))
@@ -117,14 +117,9 @@ function relevantContext(currentSession, query) {
   const personal = ranked.filter(({ claim }) => claim.owner === 'user').map(({ claim }) => `- [${claim.id}] ${claim.kind}: ${clip(claim.proposition, 360)}`);
   const knowledge = ranked.filter(({ claim }) => claim.owner !== 'user').map(({ claim }) => `- [${claim.id}] ${claim.kind}: ${clip(claim.proposition, 360)}`);
   const inquiries = repository.listInquiries().slice(0, 2).map((item) => `- ${item.question}`);
-  const pastTurns = repository.listSessions()
-    .filter((session) => session.id !== currentSession.id)
-    .flatMap((session) => session.messages.filter((message) => message.role === 'user').map((message) => ({ score: relevance(queryTokens, { proposition: message.content }), text: clip(message.content, 360) })))
-    .filter((item) => item.score > 0).sort((a, b) => b.score - a.score).slice(0, 4).map((item) => `- ${item.text}`);
   const sections = [];
   if (personal.length) sections.push(`User-owned authorized cognition:\n${personal.join('\n')}`);
   if (knowledge.length) sections.push(`External understood knowledge for reasoning only. Never claim its experiences as the user's:\n${knowledge.join('\n')}`);
-  if (pastTurns.length) sections.push(`Relevant prior user statements (evidence, not automatically beliefs):\n${pastTurns.join('\n')}`);
   if (inquiries.length) sections.push(`Deferred discussion candidates. Address the user's request first; then ask at most one if natural:\n${inquiries.join('\n')}`);
   return sections.join('\n\n');
 }
@@ -132,7 +127,7 @@ function relevantContext(currentSession, query) {
 async function streamDailyChat(session, response, query, model) {
   const apiKey = process.env.DEEPSEEK_API_KEY;
   if (!apiKey) throw new Error('DEEPSEEK_API_KEY is not configured. Set it in the local .env file and restart the service.');
-  const context = relevantContext(session, query);
+  const context = relevantContext(query);
   const system = `You are MindClone, a long-term conversational partner. Help the user think, challenge weak assumptions when warranted, and express conclusions naturally. Distinguish source knowledge from the user's position. An understood external claim is available for reasoning but is not the user's belief. Never turn external or third-party material into the user's experience. Match the user's language.\n\n${context || 'No authorized long-term context is relevant yet.'}`;
   const options = {
     'deepseek-light': { model: 'deepseek-v4-flash', thinking: false },
