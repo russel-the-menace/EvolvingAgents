@@ -38,3 +38,5 @@ cd apps/mind-clone && npm run dev
 Research papers and reference implementations belong to their application. MindClone's existing corpus is under `apps/mind-clone`; CryptoAgent has empty project-specific directories ready for future curation. Only cross-application architecture documents remain at the root.
 
 See [`docs/monorepo.md`](docs/monorepo.md) for dependency direction, code ownership, shared-engine change rules, and the criteria for eventually extracting the engine into its own repository.
+
+提交必须遵守 scope 规范，校验器会根据暂存文件自动拒绝错误范围。详见 [`docs/commit-conventions.md`](docs/commit-conventions.md)。

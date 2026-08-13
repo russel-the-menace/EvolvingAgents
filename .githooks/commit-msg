@@ -1,0 +1,4 @@
+#!/bin/sh
+set -eu
+
+node "$(git rev-parse --show-toplevel)/tooling/commit-policy.mjs" "$1"

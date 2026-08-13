@@ -13,6 +13,8 @@
     "test": "npm test --workspaces --if-present",
     "check": "npm run check --workspaces --if-present",
     "build": "npm run build --workspaces --if-present",
-    "sync:mind-clone-reference": "npm run sync:reference --workspace @evolving-agents/mind-clone"
+    "sync:mind-clone-reference": "npm run sync:reference --workspace @evolving-agents/mind-clone",
+    "test:commit-policy": "node --test tooling/commit-policy.test.mjs",
+    "prepare": "node tooling/install-hooks.mjs"
   }
 }

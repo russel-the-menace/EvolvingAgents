@@ -1,0 +1,30 @@
+name: Commit Policy
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm ci
+      - run: npm run test:commit-policy
+      - name: Validate commit headers against changed paths
+        shell: bash
+        run: |
+          commits=$(git rev-list --no-merges "${{ github.event.before }}..${{ github.sha }}" 2>/dev/null || git rev-list --no-merges -n 1 HEAD)
+          for commit in $commits; do
+            message_file=$(mktemp)
+            git log -1 --format=%B "$commit" > "$message_file"
+            git diff-tree --root --no-commit-id --name-only -r "$commit" > "$message_file.paths"
+            COMMIT_POLICY_PATHS_FILE="$message_file.paths" node tooling/commit-policy-ci.mjs "$message_file"
+            rm -f "$message_file" "$message_file.paths"
+          done
