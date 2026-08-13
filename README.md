@@ -1,8 +1,10 @@
 # MindClone
 
-MindClone 是一个本地优先的面试演练工作台。每场面试先录入 JD 和本次投递简历，生成并确认一份冻结的面试包；确认后才进入低延迟的正式问答。
+MindClone 是一个长期学习的个人智能体。它把外部知识、用户观点、个人经历和说话方式分开建模，再按当前场景组合成“像本人、本人愿意说、并且没有编造经历”的回答。面试是第一验收场景，不是最终产品边界。
 
-默认首页是日常对话：DeepSeek 负责自然交流，完整会话和记忆归属在本地。每轮结束后，系统会异步判断该轮是否值得形成待审核记忆，不打断聊天。单一可收起侧栏提供本地对话搜索、会话删除和单条消息删除；输入框旁的 `+` 用于导入 ChatGPT 历史或补充文本/Markdown。
+每场面试先录入 JD 和本次投递的准确简历。系统生成一个 `writeBack=false` 的场景快照：简历在本场面试内优先，但不会反向改写长期身份。外部材料自动进入“已理解、仅用于推理”；只有经过讨论与认同后，系统才新建一条用户所有的个人观点，原始外部知识的所有权保持不变。
+
+默认首页是日常对话：DeepSeek 负责自然交流，完整会话、来源、认知状态、授权记录、场景快照和回答审计保存在本地 SQLite。每轮结束后，系统异步提取可能值得保留的认知，不打断聊天。
 
 正式面试是独立模式：它使用本地模型、冻结 JD 与投递简历，并支持可取消的流式候选回答。语音与正式记忆检索将在相同架构上增加。
 
@@ -15,7 +17,15 @@ npm run desktop
 
 开发服务器固定为 `http://127.0.0.1:5269/`。只启动网页调试界面可运行 `npm run dev`。
 
-`npm run dev` 会同时启动网页端和只监听本机的记忆 API（`127.0.0.1:5270`）。在“记忆投喂”中可导入 ChatGPT `conversations.json`、粘贴文本/Markdown，或保存访谈记录；点击整理后才会将单份材料发送给 DeepSeek，候选记忆必须人工确认。
+`npm run dev` 会同时启动网页端和只监听本机的认知 API（`127.0.0.1:5270`）。在“认知库”中可导入 ChatGPT `conversations.json`、粘贴文本/Markdown、学习短视频语音或保存访谈记录。旧版 `data/memory-store.json` 会一次性迁移到 `data/mindclone.sqlite`，原文件不会被删除。
+
+验证命令：
+
+```bash
+npm test
+npm run check
+npm run build
+```
 
 ## 本地视频转写
 
@@ -51,3 +61,5 @@ npm run sync:reference
 - [记忆投喂与审核](docs/modules/memory-ingestion.md)
 - [云端整理提供方](docs/modules/cloud-preparation.md)
 - [日常对话](docs/modules/daily-conversation.md)
+- [论文第一版](docs/paper/MindClone_manuscript.md)
+- [文献新颖性审计](docs/paper/MindClone_novelty_audit.md)

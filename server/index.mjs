@@ -1,67 +1,63 @@
 import 'dotenv/config';
 import { randomUUID } from 'node:crypto';
-import { execFile } from 'node:child_process';
-import { mkdir, mkdtemp, readFile, rename, rm, writeFile } from 'node:fs/promises';
-import { dirname, join } from 'node:path';
-import { tmpdir } from 'node:os';
-import { promisify } from 'node:util';
+import { join } from 'node:path';
 import express from 'express';
+import { allowedAuthorization, assertOwnershipNonEscalation, assertTransition, defaultAuthorization } from './domain/cognition.mjs';
+import { auditAnswer } from './domain/answer-audit.mjs';
+import { compileSceneView, makeAnswerPlan, relevance, tokenize } from './domain/scenes.mjs';
+import { openDatabase } from './infrastructure/database.mjs';
+import { extractDouyinShare, resolveDouyinLink, transcribeShortVideo } from './infrastructure/video-transcription.mjs';
 
 const app = express();
 const port = Number(process.env.PORT || 5270);
-const storePath = join(process.cwd(), 'data', 'memory-store.json');
-const execFileAsync = promisify(execFile);
+const repository = openDatabase(
+  process.env.MINDCLONE_DB_PATH || join(process.cwd(), 'data', 'mindclone.sqlite'),
+  process.env.MINDCLONE_LEGACY_STORE_PATH || join(process.cwd(), 'data', 'memory-store.json'),
+);
 app.use(express.json({ limit: '50mb' }));
 
-async function loadStore() {
-  try {
-    return JSON.parse(await readFile(storePath, 'utf8'));
-  } catch (error) {
-    if (error.code === 'ENOENT') return { documents: [], memories: [], sessions: [], deletedMessageIds: [] };
-    throw error;
-  }
+function clip(value, length = 720) {
+  const text = String(value || '').trim().replace(/\s+/g, ' ');
+  return text.length > length ? `${text.slice(0, length)}...` : text;
 }
 
-async function saveStore(store) {
-  await mkdir(dirname(storePath), { recursive: true });
-  const temporary = `${storePath}.tmp`;
-  await writeFile(temporary, JSON.stringify(store, null, 2));
-  await rename(temporary, storePath);
+function sourceIsExternal(source) {
+  return ['short_video', 'article', 'paper', 'podcast'].includes(source.sourceType);
 }
 
-function cleanCandidate(candidate, documentId, sourceMessageIds = []) {
-  const personalKinds = new Set(['experience', 'skill', 'preference', 'viewpoint', 'language_sample']);
-  const learningKinds = new Set(['concept', 'framework', 'answer_pattern', 'case_example']);
-  const scope = candidate.scope === 'learning' ? 'learning' : 'personal';
+function mapClaimToLegacy(claim) {
+  const learning = claim.owner !== 'user';
+  const kindMap = { knowledge: 'concept', example: 'case_example', expression: 'language_sample', value: 'viewpoint' };
   return {
-    id: randomUUID(),
-    documentId,
-    kind: (scope === 'learning' ? learningKinds : personalKinds).has(candidate.kind) ? candidate.kind : scope === 'learning' ? 'concept' : 'experience',
-    scope,
-    title: String(candidate.title || 'Untitled memory').slice(0, 80),
-    content: String(candidate.content || '').slice(0, 800),
-    tags: Array.isArray(candidate.tags) ? candidate.tags.map(String).slice(0, 8) : [],
-    sourceQuote: String(candidate.sourceQuote || '').slice(0, 500),
-    sourceMessageIds,
-    status: scope === 'learning' ? 'approved' : 'pending',
-    createdAt: new Date().toISOString(),
+    id: claim.id,
+    documentId: '',
+    kind: kindMap[claim.kind] || claim.kind,
+    scope: learning ? 'learning' : 'personal',
+    title: claim.title,
+    content: claim.proposition,
+    tags: claim.tags,
+    sourceQuote: '',
+    status: claim.epistemicStatus === 'endorsed' || claim.epistemicStatus === 'understood' ? 'approved' : claim.epistemicStatus === 'rejected' ? 'rejected' : 'pending',
+    epistemicStatus: claim.epistemicStatus,
+    authorizationScope: claim.authorizationScope,
+    owner: claim.owner,
+    createdAt: claim.createdAt,
   };
 }
 
-async function proposeWithDeepSeek(document) {
+async function proposeWithDeepSeek(source) {
   const apiKey = process.env.DEEPSEEK_API_KEY;
   if (!apiKey) throw new Error('DEEPSEEK_API_KEY is not configured. Set it in the local .env file and restart the service.');
-
-  const learningSource = document.sourceType === 'short_video';
-  const prompt = learningSource
-    ? `You extract reusable learning knowledge from a video transcript. This is not the user's personal history. Never describe a speaker's experience, claims, preferences, or cases as the user's experience. Return strict JSON in this format: {"memories":[{"scope":"learning","kind":"concept|framework|answer_pattern|case_example","title":"short title","content":"clear, reusable knowledge in Chinese","tags":["tag"],"sourceQuote":"short direct source quote"}]}. Capture core concepts, reasoning frameworks, and answer patterns. When the speaker gives a case, label it as a third-party example. Return at most 10 items. Source material:\n${document.content.slice(0, 24000)}`
-    : `You extract candidate memories from personal source material. Use only facts supported by the source; never invent details. Return strict JSON in this format: {"memories":[{"scope":"personal","kind":"experience|skill|preference|viewpoint|language_sample","title":"short title","content":"clear complete candidate memory","tags":["tag"],"sourceQuote":"short direct source quote"}]}. Return at most 12 items. Return an empty array when no reliable information exists. Source material:\n${document.content.slice(0, 24000)}`;
+  const external = sourceIsExternal(source);
+  const prompt = external
+    ? `Extract atomic, reusable claims from external learning material. Never attribute the source author's experience or opinion to the user. Return strict JSON: {"claims":[{"kind":"knowledge|example","owner":"external|third_party","title":"short title","proposition":"clear reusable claim in the source language","tags":["tag"],"sourceQuote":"direct supporting quote","confidence":0.0}]}. Use owner=third_party for cases or speaker-specific viewpoints. Every item initially represents understanding, not user endorsement. Return at most 12 items. Source:\n${source.content.slice(0, 24000)}`
+    : `Extract atomic claims from user-owned material. Use only supported information and distinguish experience, viewpoint, preference, value, knowledge, and expression samples. In conversation records, extract personal claims only from text explicitly labeled User; assistant text is context and must never become a user claim. Return strict JSON: {"claims":[{"kind":"experience|viewpoint|preference|value|knowledge|expression","owner":"user","title":"short title","proposition":"complete candidate claim","tags":["tag"],"sourceQuote":"direct supporting quote from the user","confidence":0.0}]}. These are observed candidates and require user endorsement before first-person use. Return at most 12 items. Source:\n${source.content.slice(0, 24000)}`;
   const response = await fetch(`${(process.env.DEEPSEEK_BASE_URL || 'https://api.deepseek.com').replace(/\/$/, '')}/chat/completions`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({
       model: process.env.DEEPSEEK_MODEL || 'deepseek-chat',
-      temperature: 0.2,
+      temperature: 0.1,
       response_format: { type: 'json_object' },
       messages: [{ role: 'user', content: prompt }],
     }),
@@ -69,402 +65,283 @@ async function proposeWithDeepSeek(document) {
   if (!response.ok) throw new Error(`DeepSeek extraction request failed (${response.status}).`);
   const payload = await response.json();
   const parsed = JSON.parse(payload.choices?.[0]?.message?.content || '{}');
-  return Array.isArray(parsed.memories) ? parsed.memories : [];
+  return Array.isArray(parsed.claims) ? parsed.claims : [];
 }
 
-const stopWords = new Set(['a', 'an', 'and', 'are', 'as', 'at', 'be', 'but', 'by', 'for', 'from', 'how', 'i', 'in', 'is', 'it', 'my', 'of', 'on', 'or', 'that', 'the', 'this', 'to', 'was', 'what', 'when', 'where', 'with', 'you', 'your']);
-
-function tokenize(value) {
-  const text = String(value || '').toLowerCase();
-  const words = text.match(/[\p{L}\p{N}_-]{2,}/gu) || [];
-  const ideographs = text.match(/\p{Script=Han}/gu) || [];
-  const bigrams = ideographs.slice(0, -1).map((character, index) => `${character}${ideographs[index + 1]}`);
-  return [...new Set([...words.filter((word) => !stopWords.has(word)), ...bigrams])].slice(0, 40);
-}
-
-function relevance(queryTokens, value) {
-  if (!queryTokens.length) return 0;
-  const haystack = String(value || '').toLowerCase();
-  return queryTokens.reduce((score, token) => score + (haystack.includes(token) ? 1 : 0), 0);
-}
-
-function clip(value, length = 720) {
-  const text = String(value || '').trim().replace(/\s+/g, ' ');
-  return text.length > length ? `${text.slice(0, length)}...` : text;
-}
-
-function extractDouyinShare(shareText) {
-  const text = String(shareText || '').trim();
-  const match = text.match(/https?:\/\/v\.douyin\.com\/[A-Za-z0-9_-]+\/?/i);
-  if (!match) throw new Error('Paste a Douyin share message containing a v.douyin.com link.');
-  const withoutLink = text.replace(match[0], '').replace(/复制此链接[，,]?\s*打开Dou音搜索[，,]?\s*直接观看视频！?/gi, '').trim();
-  const titleMatch = withoutLink.match(/[:：]\s*([^#\n]{4,120})/);
-  const titleSource = titleMatch?.[1] || withoutLink.split(/[#\n]/)[0] || 'Douyin learning material';
-  const firstChineseCharacter = titleSource.search(/\p{Script=Han}/u);
-  const title = titleSource.slice(firstChineseCharacter >= 0 ? firstChineseCharacter : 0).trim().replace(/[。！!]+$/, '');
-  const tags = [...withoutLink.matchAll(/#\s*([^#\s]+)/g)].map((item) => item[1]).slice(0, 12);
-  return { sourceUrl: match[0], title: title.slice(0, 120), shareText: text, tags };
-}
-
-async function resolveDouyinLink(sourceUrl) {
-  let current = sourceUrl;
-  for (let attempt = 0; attempt < 4; attempt += 1) {
-    const url = new URL(current);
-    if (url.protocol !== 'https:' || !(url.hostname === 'douyin.com' || url.hostname.endsWith('.douyin.com'))) throw new Error('The shared link redirected outside Douyin and was not followed.');
-    const result = await fetch(current, { method: 'HEAD', redirect: 'manual', headers: { 'User-Agent': 'Mozilla/5.0 MindClone/0.1' }, signal: AbortSignal.timeout(8_000) });
-    if (result.status < 300 || result.status >= 400) return current;
-    const next = result.headers.get('location');
-    if (!next) return current;
-    current = new URL(next, current).toString();
-  }
-  return current;
-}
-
-function findMediaUrl(value, seen = new Set()) {
-  if (!value || typeof value !== 'object' || seen.has(value)) return null;
-  seen.add(value);
-  if (Array.isArray(value)) {
-    for (const item of value) { const found = findMediaUrl(item, seen); if (found) return found; }
-    return null;
-  }
-  const preferredKeys = ['play_addr', 'play_url', 'download_addr', 'download_url', 'video_url', 'url_list', 'url'];
-  for (const key of preferredKeys) {
-    const candidate = value[key];
-    if (typeof candidate === 'string' && /^https?:\/\//i.test(candidate)) return candidate;
-    if (Array.isArray(candidate)) {
-      const url = candidate.find((item) => typeof item === 'string' && /^https?:\/\//i.test(item));
-      if (url) return url;
+function persistProposals(source, proposals) {
+  repository.deleteClaimsForSource(source.id);
+  const claims = proposals.map((proposal, ordinal) => {
+    const external = sourceIsExternal(source);
+    const owner = external ? (proposal.owner === 'third_party' ? 'third_party' : 'external') : 'user';
+    const kind = String(proposal.kind || (external ? 'knowledge' : 'experience'));
+    const epistemicStatus = external ? 'understood' : 'observed';
+    const evidenceId = repository.addEvidence({
+      sourceId: source.id,
+      ordinal,
+      text: String(proposal.sourceQuote || proposal.proposition || '').slice(0, 1200),
+      speaker: external ? 'source_author' : 'user',
+      owner,
+    });
+    return repository.addClaim({
+      title: String(proposal.title || 'Untitled claim').slice(0, 120),
+      proposition: String(proposal.proposition || '').slice(0, 1600),
+      kind,
+      owner,
+      epistemicStatus,
+      authorizationScope: defaultAuthorization({ owner, kind, status: epistemicStatus }),
+      tags: Array.isArray(proposal.tags) ? proposal.tags.map(String).slice(0, 12) : [],
+      confidence: Math.max(0, Math.min(Number(proposal.confidence || 0.6), 1)),
+    }, evidenceId);
+  }).filter((claim) => claim.proposition);
+  if (sourceIsExternal(source)) {
+    for (const claim of claims.filter((item) => item.kind === 'knowledge').slice(0, 3)) {
+      repository.addInquiry({
+        claimId: claim.id,
+        question: `你怎么看“${clip(claim.proposition, 120)}”？这只是你理解的新知识，还是也代表你的判断？`,
+        reason: 'External knowledge requires user deliberation before it can represent a personal viewpoint.',
+        priority: 0.5 + claim.confidence * 0.3,
+      });
     }
-    if (candidate && typeof candidate === 'object') { const found = findMediaUrl(candidate, seen); if (found) return found; }
   }
-  for (const candidate of Object.values(value)) { const found = findMediaUrl(candidate, seen); if (found) return found; }
-  return null;
+  return claims;
 }
 
-function findPlaybackUrl(value, seen = new Set()) {
-  if (!value || typeof value !== 'object' || seen.has(value)) return null;
-  seen.add(value);
-  if (Array.isArray(value)) {
-    for (const item of value) { const found = findPlaybackUrl(item, seen); if (found) return found; }
-    return null;
-  }
-  if (value.play_addr) {
-    const found = findMediaUrl(value.play_addr);
-    if (found) return found;
-  }
-  for (const candidate of Object.values(value)) { const found = findPlaybackUrl(candidate, seen); if (found) return found; }
-  return null;
-}
-
-async function fetchTikHubVideo(shareText) {
-  const token = process.env.TIKHUB_API_KEY;
-  if (!token) throw new Error('TIKHUB_API_KEY is not configured. Add it to the local .env file and restart the service.');
-  const baseUrl = (process.env.TIKHUB_BASE_URL || 'https://api.tikhub.dev').replace(/\/$/, '');
-  const url = new URL('/api/v1/hybrid/video_data', baseUrl);
-  url.searchParams.set('url', shareText);
-  url.searchParams.set('minimal', 'false');
-  const response = await fetch(url, { headers: { Authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(60_000) });
-  const payload = await response.json().catch(() => ({}));
-  if (!response.ok || payload.code !== 200) throw new Error(payload.message_zh || payload.message || `TikHub video parsing failed (${response.status}).`);
-  const mediaUrl = findPlaybackUrl(payload.data) || findMediaUrl(payload.data);
-  if (!mediaUrl) throw new Error('TikHub returned video data but no downloadable media URL.');
-  return { data: payload.data, mediaUrl };
-}
-
-async function transcribeShortVideo(shareText) {
-  const whisperModel = process.env.WHISPER_MODEL_PATH || join(process.cwd(), 'models', 'whisper', 'ggml-small.bin');
-  try { await readFile(whisperModel); } catch { throw new Error(`Local Whisper model was not found at ${whisperModel}. Run the setup command or set WHISPER_MODEL_PATH.`); }
-  const { mediaUrl, data } = await fetchTikHubVideo(shareText);
-  const directory = await mkdtemp(join(tmpdir(), 'mindclone-transcript-'));
-  const mediaPath = join(directory, 'source-media');
-  const audioPath = join(directory, 'speech.wav');
-  try {
-    const media = await fetch(mediaUrl, { headers: { 'User-Agent': 'Mozilla/5.0 MindClone/0.1' }, signal: AbortSignal.timeout(120_000) });
-    if (!media.ok || !media.body) throw new Error(`Media download failed (${media.status}).`);
-    const bytes = Buffer.from(await media.arrayBuffer());
-    if (bytes.length > 200 * 1024 * 1024) throw new Error('The source video exceeds the 200 MB transcription limit.');
-    await writeFile(mediaPath, bytes);
-    await execFileAsync('ffmpeg', ['-y', '-i', mediaPath, '-vn', '-ac', '1', '-ar', '16000', '-c:a', 'pcm_s16le', audioPath], { timeout: 120_000 });
-    const outputBase = join(directory, 'transcript');
-    const threads = String(Math.max(1, Math.min(Number(process.env.WHISPER_THREADS || 4), 12)));
-    await execFileAsync(process.env.WHISPER_CLI_PATH || 'whisper-cli', ['-m', whisperModel, '-f', audioPath, '-l', 'zh', '-otxt', '-of', outputBase, '-t', threads, '-np'], { timeout: 15 * 60_000, maxBuffer: 4 * 1024 * 1024 });
-    const transcript = (await readFile(`${outputBase}.txt`, 'utf8')).trim();
-    if (!transcript) throw new Error('Local Whisper returned an empty transcript.');
-    return { transcript, videoData: data };
-  } finally { await rm(directory, { recursive: true, force: true }); }
-}
-
-function relevantMemoryContext(store, currentSession, query) {
+function relevantContext(currentSession, query) {
   const queryTokens = tokenize(query);
-  const approved = store.memories
-    .filter((memory) => memory.status === 'approved')
-    .sort((left, right) => relevance(queryTokens, `${right.title} ${right.content} ${right.tags.join(' ')}`) - relevance(queryTokens, `${left.title} ${left.content} ${left.tags.join(' ')}`))
-    .slice(0, 10);
-
-  const personalMemories = approved.filter((memory) => memory.scope !== 'learning').map((memory) => `- ${memory.kind}: ${clip(memory.content, 360)}`);
-  const learnedKnowledge = approved.filter((memory) => memory.scope === 'learning').map((memory) => `- ${memory.kind}: ${clip(memory.content, 360)}`);
-  const candidates = store.memories
-    .filter((memory) => memory.status === 'pending' && memory.scope !== 'learning')
-    .map((memory) => ({
-      score: relevance(queryTokens, `${memory.title} ${memory.content} ${memory.tags.join(' ')}`),
-      text: `- ${memory.kind}: ${clip(memory.content, 360)}`,
-    }))
+  const ranked = repository.listClaims()
+    .filter((claim) => claim.authorizationScope !== 'none' && !['rejected', 'superseded', 'contested'].includes(claim.epistemicStatus))
+    .map((claim) => ({ claim, score: relevance(queryTokens, claim) }))
     .filter((item) => item.score > 0)
     .sort((left, right) => right.score - left.score)
-    .slice(0, 6)
-    .map((item) => item.text);
-
-  const documents = store.documents
-    .map((document) => ({
-      score: relevance(queryTokens, `${document.title} ${document.content}`),
-      text: `- ${document.title}: ${clip(document.content, 520)}`,
-    }))
-    .filter((item) => item.score > 0)
-    .sort((left, right) => right.score - left.score)
-    .slice(0, 4)
-    .map((item) => item.text);
-
-  const pastTurns = (store.sessions || [])
+    .slice(0, 12);
+  const personal = ranked.filter(({ claim }) => claim.owner === 'user').map(({ claim }) => `- [${claim.id}] ${claim.kind}: ${clip(claim.proposition, 360)}`);
+  const knowledge = ranked.filter(({ claim }) => claim.owner !== 'user').map(({ claim }) => `- [${claim.id}] ${claim.kind}: ${clip(claim.proposition, 360)}`);
+  const inquiries = repository.listInquiries().slice(0, 2).map((item) => `- ${item.question}`);
+  const pastTurns = repository.listSessions()
     .filter((session) => session.id !== currentSession.id)
-    .flatMap((session) => session.messages.reduce((turns, message, index, messages) => {
-      if (message.role !== 'user') return turns;
-      const reply = messages[index + 1]?.role === 'assistant' ? messages[index + 1].content : '';
-      const text = `User: ${clip(message.content, 320)}${reply ? `\nMindClone: ${clip(reply, 400)}` : ''}`;
-      turns.push({ score: relevance(queryTokens, text), text });
-      return turns;
-    }, []))
-    .filter((turn) => turn.score > 0)
-    .sort((left, right) => right.score - left.score)
-    .slice(0, 4)
-    .map((turn) => `- ${turn.text}`);
-
+    .flatMap((session) => session.messages.filter((message) => message.role === 'user').map((message) => ({ score: relevance(queryTokens, { proposition: message.content }), text: clip(message.content, 360) })))
+    .filter((item) => item.score > 0).sort((a, b) => b.score - a.score).slice(0, 4).map((item) => `- ${item.text}`);
   const sections = [];
-  if (personalMemories.length) sections.push(`Reliable personal memories. These are facts about the user:\n${personalMemories.join('\n')}`);
-  if (learnedKnowledge.length) sections.push(`Learned knowledge. Use this to reason and explain, but do not present its source author's experience as the user's own:\n${learnedKnowledge.join('\n')}`);
-  if (candidates.length) sections.push(`Unverified extracted memories. Use these only as leads; do not present them as established facts without support from the conversation:\n${candidates.join('\n')}`);
-  if (documents.length) sections.push(`Relevant imported material:\n${documents.join('\n')}`);
-  if (pastTurns.length) sections.push(`Relevant past conversation turns:\n${pastTurns.join('\n')}`);
+  if (personal.length) sections.push(`User-owned authorized cognition:\n${personal.join('\n')}`);
+  if (knowledge.length) sections.push(`External understood knowledge for reasoning only. Never claim its experiences as the user's:\n${knowledge.join('\n')}`);
+  if (pastTurns.length) sections.push(`Relevant prior user statements (evidence, not automatically beliefs):\n${pastTurns.join('\n')}`);
+  if (inquiries.length) sections.push(`Deferred discussion candidates. Address the user's request first; then ask at most one if natural:\n${inquiries.join('\n')}`);
   return sections.join('\n\n');
 }
 
-async function streamDailyChat(session, store, response, query, model) {
+async function streamDailyChat(session, response, query, model) {
   const apiKey = process.env.DEEPSEEK_API_KEY;
   if (!apiKey) throw new Error('DEEPSEEK_API_KEY is not configured. Set it in the local .env file and restart the service.');
-  const memoryContext = relevantMemoryContext(store, session, query);
-  const system = `You are MindClone, a long-term conversational partner who helps the user think, organize experiences, and express themselves. Be natural, direct, and willing to make a judgment. Do not mechanically summarize or repeatedly say that you remembered something. When the user discusses experiences, preferences, viewpoints, or important changes, ask useful follow-up questions when appropriate. Treat reliable memories as known context, but never turn unverified material or speculation into the user's experience. Reply in clear, natural English by default, and match the user's language when they write in another language.\n\n${memoryContext || 'No relevant long-term context has been retrieved yet.'}`;
-  const modelOptions = {
+  const context = relevantContext(session, query);
+  const system = `You are MindClone, a long-term conversational partner. Help the user think, challenge weak assumptions when warranted, and express conclusions naturally. Distinguish source knowledge from the user's position. An understood external claim is available for reasoning but is not the user's belief. Never turn external or third-party material into the user's experience. Match the user's language.\n\n${context || 'No authorized long-term context is relevant yet.'}`;
+  const options = {
     'deepseek-light': { model: 'deepseek-v4-flash', thinking: false },
     'deepseek-medium': { model: 'deepseek-v4-flash', thinking: true },
     'deepseek-high': { model: 'deepseek-v4-pro', thinking: false },
     'deepseek-ultra': { model: 'deepseek-v4-pro', thinking: true },
   };
-  const selectedModel = modelOptions[model] || modelOptions['deepseek-light'];
+  const selected = options[model] || options['deepseek-light'];
   const upstream = await fetch(`${(process.env.DEEPSEEK_BASE_URL || 'https://api.deepseek.com').replace(/\/$/, '')}/chat/completions`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ model: selectedModel.model, stream: true, thinking: { type: selectedModel.thinking ? 'enabled' : 'disabled' }, ...(selectedModel.thinking ? { reasoning_effort: 'high' } : { temperature: 0.7 }), messages: [{ role: 'system', content: system }, ...session.messages.slice(-24).map((message) => ({ role: message.role, content: message.content }))] }),
+    body: JSON.stringify({ model: selected.model, stream: true, thinking: { type: selected.thinking ? 'enabled' : 'disabled' }, ...(selected.thinking ? { reasoning_effort: 'high' } : { temperature: 0.7 }), messages: [{ role: 'system', content: system }, ...session.messages.slice(-24).map(({ role, content }) => ({ role, content }))] }),
   });
   if (!upstream.ok || !upstream.body) throw new Error(`DeepSeek daily chat request failed (${upstream.status}).`);
   const reader = upstream.body.getReader();
   const decoder = new TextDecoder();
-  let answer = '';
-  let pending = '';
+  let answer = ''; let pending = '';
   while (true) {
-    const { value, done } = await reader.read();
-    if (done) break;
+    const { value, done } = await reader.read(); if (done) break;
     pending += decoder.decode(value, { stream: true });
-    const lines = pending.split('\n');
-    pending = lines.pop() ?? '';
+    const lines = pending.split('\n'); pending = lines.pop() || '';
     for (const line of lines) {
       if (!line.startsWith('data:')) continue;
-      const data = line.slice(5).trim();
-      if (data === '[DONE]') continue;
-      try {
-        const delta = JSON.parse(data).choices?.[0]?.delta?.content;
-        if (typeof delta === 'string') { answer += delta; response.write(`data: ${JSON.stringify({ delta })}\n\n`); }
-      } catch { /* Ignore provider keep-alives. */ }
+      const data = line.slice(5).trim(); if (data === '[DONE]') continue;
+      try { const delta = JSON.parse(data).choices?.[0]?.delta?.content; if (typeof delta === 'string') { answer += delta; response.write(`data: ${JSON.stringify({ delta })}\n\n`); } } catch { /* provider keep-alive */ }
     }
   }
   return answer;
 }
 
-function removeMessageLinkedData(store, messageIds) {
-  const ids = new Set(messageIds);
-  store.deletedMessageIds = [...new Set([...(store.deletedMessageIds || []), ...messageIds])].slice(-10_000);
-  const removedDocumentIds = new Set();
-  store.documents = store.documents.filter((document) => {
-    const linked = (document.sourceMessageIds || []).some((id) => ids.has(id));
-    if (linked) removedDocumentIds.add(document.id);
-    return !linked;
-  });
-  store.memories = store.memories.filter((memory) =>
-    !removedDocumentIds.has(memory.documentId) && !(memory.sourceMessageIds || []).some((id) => ids.has(id)),
-  );
-}
+app.get('/api/health', (_, response) => response.json({ status: 'ok', store: 'sqlite', schema: 1 }));
 
-app.get('/api/health', (_, response) => response.json({ status: 'ok' }));
-app.get('/api/memory', async (_, response, next) => {
-  try { response.json(await loadStore()); } catch (error) { next(error); }
+app.get('/api/memory', (_, response) => {
+  const claims = repository.listClaims();
+  response.json({ documents: repository.listSources(), claims, memories: claims.map(mapClaimToLegacy), inquiries: repository.listInquiries() });
 });
-app.post('/api/memory/documents', async (request, response, next) => {
+
+app.post('/api/memory/documents', (request, response, next) => {
   try {
-    const { title, sourceType, content } = request.body;
-    if (!title || !content || !['chatgpt_export', 'note', 'conversation', 'short_video'].includes(sourceType)) {
+    const { title, sourceType, content, sourceUri, sourceActor } = request.body;
+    if (!title || !content || !['chatgpt_export', 'note', 'conversation', 'short_video', 'resume', 'job_description', 'article', 'paper', 'podcast'].includes(sourceType)) {
       return response.status(400).json({ error: 'The imported material is incomplete or has an invalid source type.' });
     }
-    const document = { id: randomUUID(), title: String(title).slice(0, 120), sourceType, content: String(content).slice(0, 2_000_000), createdAt: new Date().toISOString() };
-    const store = await loadStore();
-    store.documents.unshift(document);
-    await saveStore(store);
+    const document = repository.addSource({ id: randomUUID(), title: String(title).slice(0, 160), sourceType, content: String(content).slice(0, 2_000_000), sourceUri, sourceActor, createdAt: new Date().toISOString() });
     response.status(201).json({ document });
   } catch (error) { next(error); }
 });
+
+app.post('/api/memory/extract', async (request, response, next) => {
+  try {
+    const source = repository.getSource(request.body.documentId);
+    if (!source) return response.status(404).json({ error: 'Source material was not found.' });
+    const claims = persistProposals(source, await proposeWithDeepSeek(source));
+    repository.markSourceExtracted(source.id);
+    response.json({ claims, memories: claims.map(mapClaimToLegacy) });
+  } catch (error) { next(error); }
+});
+
+app.post('/api/claims/:id/transition', (request, response, next) => {
+  try {
+    const claim = repository.getClaim(request.params.id);
+    if (!claim) return response.status(404).json({ error: 'Claim was not found.' });
+    const toStatus = request.body.status;
+    const requestedScope = request.body.authorizationScope || defaultAuthorization({ owner: claim.owner, kind: claim.kind, status: toStatus });
+    assertTransition(claim.epistemicStatus, toStatus);
+    assertOwnershipNonEscalation(claim, requestedScope);
+    if (!allowedAuthorization({ owner: claim.owner, kind: claim.kind, status: toStatus, requestedScope })) {
+      return response.status(400).json({ error: `Authorization ${requestedScope} is not valid for this claim.` });
+    }
+    const updated = repository.updateClaim(claim.id, { epistemicStatus: toStatus, authorizationScope: requestedScope, supersededBy: request.body.supersededBy });
+    repository.addAuthorizationEvent({ claimId: claim.id, fromStatus: claim.epistemicStatus, toStatus, fromScope: claim.authorizationScope, toScope: requestedScope, reason: String(request.body.reason || 'User review').slice(0, 500) });
+    response.json({ claim: updated, memory: mapClaimToLegacy(updated) });
+  } catch (error) { next(error); }
+});
+
+app.post('/api/claims/:id/internalize', (request, response, next) => {
+  try {
+    const sourceClaim = repository.getClaim(request.params.id);
+    if (!sourceClaim) return response.status(404).json({ error: 'Source claim was not found.' });
+    if (!['external', 'third_party'].includes(sourceClaim.owner) || sourceClaim.epistemicStatus !== 'understood') {
+      return response.status(400).json({ error: 'Only understood external knowledge can be internalized through this operation.' });
+    }
+    const proposition = String(request.body.proposition || sourceClaim.proposition).trim();
+    const reason = String(request.body.reason || '').trim();
+    if (!reason) return response.status(400).json({ error: 'A user discussion or endorsement reason is required.' });
+    const derived = repository.addClaim({
+      title: String(request.body.title || `My view: ${sourceClaim.title}`).slice(0, 120),
+      proposition: proposition.slice(0, 1600),
+      kind: 'viewpoint',
+      owner: 'user',
+      epistemicStatus: 'endorsed',
+      authorizationScope: 'personal_view',
+      tags: sourceClaim.tags,
+      contextScope: Array.isArray(request.body.contextScope) ? request.body.contextScope : [],
+      confidence: Math.max(0.5, sourceClaim.confidence),
+    });
+    repository.addClaimRelation(sourceClaim.id, derived.id, 'internalized_as');
+    repository.addAuthorizationEvent({
+      claimId: derived.id,
+      fromStatus: 'observed',
+      toStatus: 'endorsed',
+      fromScope: 'none',
+      toScope: 'personal_view',
+      reason,
+    });
+    response.status(201).json({ sourceClaim, claim: derived });
+  } catch (error) { next(error); }
+});
+
+app.patch('/api/memory/candidates/:id', (request, response, next) => {
+  try {
+    const claim = repository.getClaim(request.params.id);
+    if (!claim) return response.status(404).json({ error: 'Candidate claim was not found.' });
+    const legacyToStatus = { approved: 'endorsed', rejected: 'rejected', pending: 'contested' };
+    const toStatus = legacyToStatus[request.body.status];
+    if (!toStatus) return response.status(400).json({ error: 'Invalid review status.' });
+    assertTransition(claim.epistemicStatus, toStatus);
+    const scope = defaultAuthorization({ owner: claim.owner, kind: claim.kind, status: toStatus });
+    const updated = repository.updateClaim(claim.id, { epistemicStatus: toStatus, authorizationScope: scope });
+    repository.addAuthorizationEvent({ claimId: claim.id, fromStatus: claim.epistemicStatus, toStatus, fromScope: claim.authorizationScope, toScope: scope, reason: 'Legacy review interface' });
+    response.json({ memory: mapClaimToLegacy(updated), claim: updated });
+  } catch (error) { next(error); }
+});
+
+app.post('/api/scenes/compile', (request, response, next) => {
+  try {
+    const { jd, resume, audience = 'interviewer', goal = 'perform faithfully in the target interview', sceneType = 'interview' } = request.body;
+    if (!jd?.trim() || !resume?.trim()) return response.status(400).json({ error: 'A job description and the submitted resume are required.' });
+    const scene = compileSceneView({ sceneId: randomUUID(), sceneType, audience, goal, jd, resume, claims: repository.listClaims() });
+    repository.addScene(scene);
+    response.status(201).json({ scene });
+  } catch (error) { next(error); }
+});
+
+app.post('/api/scenes/:id/plan', (request, response, next) => {
+  try {
+    const scene = repository.getScene(request.params.id);
+    if (!scene) return response.status(404).json({ error: 'Scene snapshot was not found.' });
+    const plan = makeAnswerPlan({ question: String(request.body.question || ''), scene });
+    const claims = repository.listClaims();
+    const selected = claims.filter((claim) => [...plan.knowledgeClaimIds, ...plan.personalClaimIds].includes(claim.id));
+    response.json({ plan, scene, claims: selected });
+  } catch (error) { next(error); }
+});
+
+app.post('/api/scenes/:id/complete', (request, response, next) => {
+  try {
+    const scene = repository.getScene(request.params.id);
+    if (!scene) return response.status(404).json({ error: 'Scene snapshot was not found.' });
+    const { question, plan, answer } = request.body;
+    const audit = auditAnswer({ answer, scene, plan, claims: repository.listClaims() });
+    const runId = repository.addAnswerRun({ sceneId: scene.id, question, plan, answer, audit });
+    response.json({ runId, audit });
+  } catch (error) { next(error); }
+});
+
 app.post('/api/memory/short-videos/prepare', async (request, response, next) => {
   try {
     const parsed = extractDouyinShare(request.body.shareText);
     let sourceUrl = parsed.sourceUrl;
     try { sourceUrl = await resolveDouyinLink(sourceUrl); } catch (error) { console.warn('Douyin link resolution skipped:', error.message); }
-    const lines = [
-      `Source platform: Douyin`,
-      `Source link: ${sourceUrl}`,
-      `Original share text: ${parsed.shareText}`,
-      parsed.tags.length ? `Topics: ${parsed.tags.join(', ')}` : '',
-      '',
-      'Voice transcript:',
-      'Add or correct the spoken transcript here before saving. MindClone learns from text only and does not analyze video frames or subtitles.',
-    ].filter(Boolean);
-    response.json({ title: parsed.title, sourceUrl, content: lines.join('\n') });
+    response.json({ title: parsed.title, sourceUrl, content: ['Source platform: Douyin', `Source link: ${sourceUrl}`, `Original share text: ${parsed.shareText}`, parsed.tags.length ? `Topics: ${parsed.tags.join(', ')}` : '', '', 'Voice transcript:', 'Add or correct the spoken transcript here before saving.'].filter(Boolean).join('\n') });
   } catch (error) { next(error); }
 });
+
 app.post('/api/memory/short-videos/transcribe', async (request, response, next) => {
   try {
     const parsed = extractDouyinShare(request.body.shareText);
     const { transcript } = await transcribeShortVideo(parsed.shareText);
-    const lines = [
-      'Source platform: Douyin',
-      `Source link: ${parsed.sourceUrl}`,
-      `Original share text: ${parsed.shareText}`,
-      parsed.tags.length ? `Topics: ${parsed.tags.join(', ')}` : '',
-      '',
-      'Voice transcript:',
-      transcript,
-    ].filter(Boolean);
-    response.json({ title: parsed.title, sourceUrl: parsed.sourceUrl, content: lines.join('\n') });
+    response.json({ title: parsed.title, sourceUrl: parsed.sourceUrl, content: ['Source platform: Douyin', `Source link: ${parsed.sourceUrl}`, `Original share text: ${parsed.shareText}`, parsed.tags.length ? `Topics: ${parsed.tags.join(', ')}` : '', '', 'Voice transcript:', transcript].filter(Boolean).join('\n') });
   } catch (error) { next(error); }
 });
-app.post('/api/memory/extract', async (request, response, next) => {
-  try {
-    const store = await loadStore();
-    const document = store.documents.find((item) => item.id === request.body.documentId);
-    if (!document) return response.status(404).json({ error: 'Source material was not found.' });
-    const proposed = await proposeWithDeepSeek(document);
-    store.memories = store.memories.filter((memory) => memory.documentId !== document.id);
-    const memories = proposed.map((candidate) => cleanCandidate(candidate, document.id)).filter((candidate) => candidate.content);
-    store.memories.unshift(...memories);
-    document.extractedAt = new Date().toISOString();
-    await saveStore(store);
-    response.json({ memories });
-  } catch (error) { next(error); }
+
+app.get('/api/chat/sessions', (_, response) => response.json({ sessions: repository.listSessions() }));
+app.post('/api/chat/sessions', (_, response) => response.status(201).json({ session: repository.createSession() }));
+app.patch('/api/chat/sessions/:id', (request, response) => {
+  const session = repository.updateSession(request.params.id, request.body);
+  if (!session) return response.status(404).json({ error: 'Conversation was not found.' });
+  response.json({ session });
 });
-app.patch('/api/memory/candidates/:id', async (request, response, next) => {
-  try {
-    if (!['approved', 'rejected', 'pending'].includes(request.body.status)) return response.status(400).json({ error: 'Invalid review status.' });
-    const store = await loadStore();
-    const memory = store.memories.find((item) => item.id === request.params.id);
-    if (!memory) return response.status(404).json({ error: 'Candidate memory was not found.' });
-    memory.status = request.body.status;
-    await saveStore(store);
-    response.json({ memory });
-  } catch (error) { next(error); }
-});
-app.get('/api/chat/sessions', async (_, response, next) => {
-  try { const store = await loadStore(); response.json({ sessions: store.sessions || [] }); } catch (error) { next(error); }
-});
-app.post('/api/chat/sessions', async (_, response, next) => {
-  try {
-    const store = await loadStore();
-    const now = new Date().toISOString();
-    const session = { id: randomUUID(), title: 'New conversation', createdAt: now, updatedAt: now, messages: [] };
-    store.sessions = store.sessions || [];
-    store.sessions.unshift(session);
-    await saveStore(store);
-    response.status(201).json({ session });
-  } catch (error) { next(error); }
-});
-app.patch('/api/chat/sessions/:id', async (request, response, next) => {
-  try {
-    const store = await loadStore();
-    const session = (store.sessions || []).find((item) => item.id === request.params.id);
-    if (!session) return response.status(404).json({ error: 'Conversation was not found.' });
-    if (typeof request.body.title === 'string') {
-      const title = request.body.title.trim();
-      if (!title) return response.status(400).json({ error: 'A conversation title is required.' });
-      session.title = title.slice(0, 120);
-    }
-    if (typeof request.body.pinned === 'boolean') session.pinned = request.body.pinned;
-    session.updatedAt = new Date().toISOString();
-    store.sessions.sort((left, right) => Number(Boolean(right.pinned)) - Number(Boolean(left.pinned)) || new Date(right.updatedAt).getTime() - new Date(left.updatedAt).getTime());
-    await saveStore(store);
-    response.json({ session });
-  } catch (error) { next(error); }
-});
+
 app.post('/api/chat/sessions/:id/stream', async (request, response, next) => {
   try {
     const content = String(request.body.content || '').trim();
     if (!content) return response.status(400).json({ error: 'A message is required.' });
-    const store = await loadStore();
-    const session = (store.sessions || []).find((item) => item.id === request.params.id);
+    let session = repository.getSession(request.params.id);
     if (!session) return response.status(404).json({ error: 'Conversation was not found.' });
-    const replaceFromMessageId = request.body.replaceFromMessageId;
-    if (replaceFromMessageId) {
-      const position = session.messages.findIndex((message) => message.id === replaceFromMessageId);
-      if (position < 0) return response.status(404).json({ error: 'The message to edit was not found.' });
-      const removedIds = session.messages.slice(position).map((message) => message.id);
-      session.messages = session.messages.slice(0, position);
-      removeMessageLinkedData(store, removedIds);
-    }
-    const now = new Date().toISOString();
-    session.messages.push({ id: randomUUID(), role: 'user', content, createdAt: now });
-    if (session.messages.filter((message) => message.role === 'user').length === 1) session.title = content.slice(0, 28);
-    session.updatedAt = now;
-    response.setHeader('Content-Type', 'text/event-stream');
-    response.setHeader('Cache-Control', 'no-cache');
-    response.setHeader('Connection', 'keep-alive');
-    response.flushHeaders();
-    const answer = await streamDailyChat(session, store, response, content, request.body.model);
-    if (answer) session.messages.push({ id: randomUUID(), role: 'assistant', content: answer, createdAt: new Date().toISOString() });
-    session.updatedAt = new Date().toISOString();
-    const recentMessages = session.messages.slice(-2);
-    const document = { id: randomUUID(), title: `Daily chat: ${session.title}`, sourceType: 'conversation', content: recentMessages.map((message) => `${message.role === 'user' ? 'User' : 'MindClone'}: ${message.content}`).join('\n\n'), sourceMessageIds: recentMessages.map((message) => message.id), createdAt: new Date().toISOString() };
-    store.documents.unshift(document);
-    await saveStore(store);
-    response.write('data: [DONE]\n\n');
-    response.end();
-    void proposeWithDeepSeek(document).then(async (proposed) => {
-      const latest = await loadStore();
-      const deletedIds = new Set(latest.deletedMessageIds || []);
-      if (document.sourceMessageIds.some((id) => deletedIds.has(id))) return;
-      if (!latest.documents.some((item) => item.id === document.id)) return;
-      latest.memories.unshift(...proposed.map((candidate) => cleanCandidate(candidate, document.id, document.sourceMessageIds)).filter((candidate) => candidate.content));
-      const latestDocument = latest.documents.find((item) => item.id === document.id);
-      if (latestDocument) latestDocument.extractedAt = new Date().toISOString();
-      await saveStore(latest);
-    }).catch((error) => console.error('Daily memory extraction failed:', error.message));
+    if (request.body.replaceFromMessageId && !repository.truncateSession(session.id, request.body.replaceFromMessageId)) return response.status(404).json({ error: 'The message to edit was not found.' });
+    repository.addMessage(session.id, { role: 'user', content });
+    session = repository.getSession(session.id);
+    if (session.messages.filter((message) => message.role === 'user').length === 1) repository.updateSession(session.id, { title: content.slice(0, 28) });
+    response.setHeader('Content-Type', 'text/event-stream'); response.setHeader('Cache-Control', 'no-cache'); response.setHeader('Connection', 'keep-alive'); response.flushHeaders();
+    const answer = await streamDailyChat(repository.getSession(session.id), response, content, request.body.model);
+    if (answer) repository.addMessage(session.id, { role: 'assistant', content: answer });
+    const source = repository.addSource({ id: randomUUID(), title: `Daily chat: ${repository.getSession(session.id).title}`, sourceType: 'conversation', content: `User: ${content}\n\nMindClone: ${answer}`, sourceActor: 'user_and_mindclone', createdAt: new Date().toISOString() });
+    response.write('data: [DONE]\n\n'); response.end();
+    void proposeWithDeepSeek(source).then((proposals) => { persistProposals(source, proposals); repository.markSourceExtracted(source.id); }).catch((error) => console.error('Daily claim extraction failed:', error.message));
   } catch (error) { next(error); }
 });
-app.delete('/api/chat/sessions/:id', async (request, response, next) => {
-  try {
-    const store = await loadStore();
-    const session = (store.sessions || []).find((item) => item.id === request.params.id);
-    if (!session) return response.status(404).json({ error: 'Conversation was not found.' });
-    removeMessageLinkedData(store, session.messages.map((message) => message.id));
-    store.sessions = store.sessions.filter((item) => item.id !== session.id);
-    await saveStore(store);
-    response.status(204).end();
-  } catch (error) { next(error); }
-});
+
+app.delete('/api/chat/sessions/:id', (request, response) => { repository.deleteSession(request.params.id); response.status(204).end(); });
+
 app.use((error, _, response, __) => {
   console.error(error);
-  response.status(500).json({ error: error.message || 'The local memory service encountered an unknown error.' });
+  response.status(500).json({ error: error.message || 'The local cognition service encountered an unknown error.' });
 });
-app.listen(port, '127.0.0.1', () => console.log(`MindClone memory API listening on http://127.0.0.1:${port}`));
+
+if (process.env.MINDCLONE_NO_LISTEN !== '1') {
+  app.listen(port, '127.0.0.1', () => console.log(`MindClone cognition API listening on http://127.0.0.1:${port}`));
+}
+
+export { app, repository };

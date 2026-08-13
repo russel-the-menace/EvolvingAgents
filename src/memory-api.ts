@@ -1,4 +1,4 @@
-import type { DailyModel, DailySession, MemoryCandidate, MemoryDocument } from './types';
+import type { AnswerPlan, Claim, DailyModel, DailySession, InterviewPacket, MemoryCandidate, MemoryDocument } from './types';
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`/api${path}`, {
@@ -13,7 +13,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export const memoryApi = {
-  list: () => request<{ documents: MemoryDocument[]; memories: MemoryCandidate[] }>('/memory'),
+  list: () => request<{ documents: MemoryDocument[]; memories: MemoryCandidate[]; claims: Claim[] }>('/memory'),
   importDocument: (payload: Pick<MemoryDocument, 'title' | 'sourceType' | 'content'>) =>
     request<{ document: MemoryDocument }>('/memory/documents', { method: 'POST', body: JSON.stringify(payload) }),
   prepareShortVideo: (shareText: string) =>
@@ -24,6 +24,16 @@ export const memoryApi = {
     request<{ memories: MemoryCandidate[] }>('/memory/extract', { method: 'POST', body: JSON.stringify({ documentId }) }),
   setStatus: (id: string, status: MemoryCandidate['status']) =>
     request<{ memory: MemoryCandidate }>(`/memory/candidates/${id}`, { method: 'PATCH', body: JSON.stringify({ status }) }),
+  transitionClaim: (id: string, payload: { status: Claim['epistemicStatus']; authorizationScope?: Claim['authorizationScope']; reason: string }) =>
+    request<{ claim: Claim }>(`/claims/${id}/transition`, { method: 'POST', body: JSON.stringify(payload) }),
+  internalizeClaim: (id: string, payload: { proposition?: string; title?: string; reason: string; contextScope?: string[] }) =>
+    request<{ sourceClaim: Claim; claim: Claim }>(`/claims/${id}/internalize`, { method: 'POST', body: JSON.stringify(payload) }),
+  compileScene: (payload: { jd: string; resume: string; audience?: string; goal?: string; sceneType?: string }) =>
+    request<{ scene: Omit<InterviewPacket, 'preparedAt' | 'focusAreas' | 'questionTypes' | 'brief' | 'sceneId'> & { id: string; writeBack: false; knowledgeClaims: Claim[]; personalClaims: Claim[]; expressionClaims: Claim[] } }>('/scenes/compile', { method: 'POST', body: JSON.stringify(payload) }),
+  planAnswer: (sceneId: string, question: string) =>
+    request<{ plan: AnswerPlan; claims: Claim[] }>(`/scenes/${sceneId}/plan`, { method: 'POST', body: JSON.stringify({ question }) }),
+  completeAnswer: (sceneId: string, payload: { question: string; plan: AnswerPlan; answer: string }) =>
+    request<{ runId: string; audit: { passed: boolean; violations: Array<{ type: string }> } }>(`/scenes/${sceneId}/complete`, { method: 'POST', body: JSON.stringify(payload) }),
   listSessions: () => request<{ sessions: DailySession[] }>('/chat/sessions'),
   createSession: () => request<{ session: DailySession }>('/chat/sessions', { method: 'POST' }),
   updateSession: (sessionId: string, payload: Partial<Pick<DailySession, 'title' | 'pinned'>>) =>

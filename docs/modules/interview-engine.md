@@ -1,28 +1,38 @@
-# Interview Engine
+# Scene-Conditioned Interview Engine
 
 ## Responsibility
 
-The interview engine turns a frozen interview packet and short-term transcript into a candidate answer. It is the latency-critical read path.
+Generate an answer that is both recognizably the user and correct for the current interview. The exact resume submitted for that role is authoritative inside the scene, even when the longitudinal conversation contains another professional identity.
 
-## Input and output
+## Bounded Autobiographical Override
 
-Input: packet, current transcript, local model settings, and the newest interviewer question.
+Preparation compiles a persisted scene snapshot from the job description, submitted resume, audience, goal, and currently authorized cognition. Every snapshot has `writeBack=false`. Its precedence is:
 
-Output: a streamed candidate-answer draft. The user reads and adapts it; it is not spoken automatically in the current version.
+1. submitted resume and explicit scene facts;
+2. compatible authorized personal experience;
+3. authorized personal viewpoints;
+4. understood external knowledge;
+5. attributed third-party examples.
 
-## Design decisions
+The resume can authorize an HR or sales history for that interview. It cannot write that identity into the longitudinal store, and it cannot authorize facts absent from the resume.
 
-- OpenAI-compatible streaming protocol: Ollama exposes it directly and MLX-LM can be adapted behind the same contract. This keeps the UI independent of the runtime.
-- Browser `AbortController`: each generation owns a cancellation token. A new question aborts the old request before creating the new one.
-- Frozen packet: JD and resume cannot drift during a live thread. Follow-ups use the transcript as a consistency constraint.
-- Bounded answer length: answers should start with the point, then provide evidence suitable for reading aloud. The prompt directs the model to avoid generic filler.
-- No cloud fallback: failure should be visible. Silently falling back to Gemini/GPT would violate the response-time and privacy model.
+## Answer Flow
 
-## Model baseline
+1. Compile and freeze the scene through `/api/scenes/compile`.
+2. Rank knowledge and personal claims separately for each question.
+3. Assemble a plan containing claim IDs, experience policy, and follow-up constraints.
+4. Stream the plan through the configured local model.
+5. Audit the completed answer and persist the run.
 
-Use a quantized Qwen 7B instruct model first on M1 Pro 16GB. Test first-token latency, tokens per second, Chinese fluency, English switching, and whether it maintains consistency across follow-ups. Only increase model size if measured quality is insufficient and latency remains acceptable.
+The current audit detects unsupported numbers in Chinese and English, first-person claims without an evidence channel, and accidental scene write-back. Clause-level semantic citation and contradiction audits are the next increment.
+
+## Latency and Privacy
+
+Formal mode never waits for extraction, embedding, background study, or a cloud model. The packet and scene snapshot are frozen before questioning. Each generation is cancellable. Daily dialogue and ingestion may use cloud models, but formal interview generation remains local.
 
 ## Source
 
+- `server/domain/scenes.mjs`
+- `server/domain/answer-audit.mjs`
 - `src/interview.ts`
-- relevant session behavior in `src/App.tsx`
+- formal-mode orchestration in `src/App.tsx`

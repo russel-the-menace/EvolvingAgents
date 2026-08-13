@@ -1,38 +1,41 @@
-# Memory Ingestion and Review
-
-## Status
-
-Initial local vertical slice implemented. The current UI supports ChatGPT `conversations.json`, pasted text/Markdown, manually recorded interview notes, and Douyin share messages paired with a reviewable voice transcript. Imported raw content and candidate-review state are saved locally in `data/memory-store.json`.
+# Memory Ingestion and Epistemic Authorization
 
 ## Responsibility
 
-Accept Markdown notes, resumes, chat exports, interview debriefs, and guided conversations. Convert raw material into reviewable memories: experience facts, evidence, skills, preferences, viewpoints, language examples, and uncertainty notes.
+Convert conversations, notes, resumes, papers, articles, podcasts, and speech transcripts into claims without losing who originally said or experienced them. The module controls both epistemic state and representational authority.
 
-The knowledge base has two distinct scopes:
+## Source Classes
 
-- Personal memory: the user's own experience, skills, preferences, and viewpoints. These candidates require explicit approval before they are treated as facts about the user.
-- Learned knowledge: frameworks, concepts, answer patterns, and clearly attributed third-party examples from learning materials. Short-video imports enter this scope and become available to help reason about an answer immediately. They must never be represented as the user's personal history.
+- Personal sources provide possible evidence about the user. Extracted claims begin as `observed/none` and require review.
+- External learning sources provide knowledge and third-party examples. Extracted claims enter `understood/reasoning_use` automatically.
+- A third-party example remains third-party even when it is relevant, memorable, or repeatedly retrieved.
 
-When answering, MindClone combines learned knowledge for the reasoning with approved personal memory for the user's own evidence, judgment, and expression.
+## Internalization
 
-For short video sources, MindClone stores the original Douyin share message and link alongside the spoken transcript. It learns from the transcript only: no video frames, OCR, or visual subtitles are processed. The local server uses TiKHub's hybrid video parsing API to obtain media, extracts a temporary audio-only WAV with `ffmpeg`, and runs the local `whisper.cpp` model. Both source media and audio are deleted after transcription.
+The UI action “Discuss and adopt” asks for the user's own formulation and the reason it was adopted. The API does not relabel the external claim. It creates a separate `user/endorsed/personal_view` claim, links it to the source by `internalized_as`, and records an authorization event.
 
-## Proposed flow
+This is the first implementation of Endorsement-Gated Cognitive Assimilation. Later versions will accept multi-turn discussion or evidenced application instead of requiring one explicit action.
 
-1. Store the original local document with source and timestamp.
-2. Chunk and extract candidate memories asynchronously.
-3. Explicitly request DeepSeek to label, summarize, find contradictions, and suggest interview-ready stories.
-4. Present candidate memories for user approval, correction, merge, or rejection.
-5. Index approved memories locally for retrieval by interview preparation.
+## Short Video Flow
 
-## Design decisions
+1. Parse the user-supplied Douyin share text.
+2. Resolve media metadata through TiKHub.
+3. Download media to a temporary directory.
+4. Extract a mono 16 kHz WAV with `ffmpeg`.
+5. Transcribe locally with `whisper.cpp`.
+6. Store the original share text, URL, topics, and speech transcript.
+7. Delete temporary media and audio.
+8. Extract speech-derived knowledge as external cognition.
 
-- One experience graph, not fixed role personas: the same experience can support engineering, support, operations, sales, or remote-work discussions when relevant to a JD.
-- Provenance is mandatory: every formal memory must cite its source fragment or user confirmation. This makes later correction possible.
-- Retrieval changes emphasis, not history: a JD changes which stories are selected and in what order they are explained; it does not rewrite the underlying record.
-- Cloud models are allowed only before approval: DeepSeek initially helps organize material but cannot silently become the source of truth.
-- The prototype uses an atomic JSON store to validate product flow. Replace it with Markdown originals plus SQLite metadata before adding retrieval to formal interview packets.
+No video frame, OCR, facial, or scene analysis is performed.
 
-## Interface with formal mode
+## Deletion and Revision
 
-Preparation retrieves approved evidence and compiles it into the packet. Formal mode never waits for ingestion, extraction, embedding, or cloud requests.
+Rejected and superseded claims leave the active cognition view and cannot be reauthorized by an invalid state transition. Original conversations remain as source evidence. A future tombstone layer will prevent a deliberately rejected old view from being re-extracted from unchanged source text.
+
+## Source
+
+- `server/domain/cognition.mjs`
+- `server/infrastructure/database.mjs`
+- `server/infrastructure/video-transcription.mjs`
+- memory routes in `server/index.mjs`

@@ -1,32 +1,119 @@
 # MindClone Architecture
 
-## Product boundary
+## 1. Product Objective
 
-MindClone helps prepare and rehearse candidate answers. It does not replace the candidate: the candidate reads and answers in their own words. The purpose is to select the relevant parts of one evolving experience and knowledge base for a specific interview, then provide a fast, coherent response during a live rehearsal.
+MindClone is a longitudinal personal agent whose first requirement is likeness: it should answer in a way the user recognizes and is willing to say. Likeness is constrained by honesty and context. The same person may present different authorized experience in an HR interview, a sales interview, or a private discussion, but external examples must never become first-person history and a temporary role must never rewrite the longitudinal self.
 
-## Two paths
+Interviewing is the first acceptance scenario, not the product boundary.
 
-| Path | Purpose | Latency rule | Model policy |
-| --- | --- | --- | --- |
-| Write path | Import notes, chat exports, resumes, interview debriefs, and guided conversations | Asynchronous; may be slow | DeepSeek is the initial cloud extractor. Nothing becomes formal memory without review. |
-| Read path | Answer an interviewer's current question | First token in seconds; generation must be cancellable | Local, already-running model only. No cloud call, long extraction, or re-indexing. |
+## 2. Architectural Invariants
 
-## Interview packet
+1. **Exposure is not endorsement.** External material can enter reasoning after extraction, but it is not a user belief.
+2. **Ownership cannot escalate.** Compression, inference, or rendering cannot turn `external` or `third_party` evidence into `personal_experience`.
+3. **Internalization creates a derived user claim.** The external source claim remains unchanged and linked by `internalized_as`.
+4. **Scene identity is bounded.** The exact submitted resume may authorize facts inside one interview snapshot, whose `writeBack` value is always `false`.
+5. **Old cognition leaves the active view.** Superseded or rejected claims cannot be retrieved; raw source conversations remain available for provenance.
+6. **Answers are planned and audited.** Knowledge, personal evidence, and expression samples travel in separate channels until rendering.
 
-The packet is the bridge between both paths. Before an interview, the user supplies the JD and the exact resume submitted. Preparation extracts the role's requirements, selects relevant existing evidence, and writes a compact answer strategy. User confirmation freezes this packet. The formal conversation uses only the frozen packet, the approved memory store, and short-term turn history.
+## 3. Runtime Shape
 
-This prevents a JD change or late cloud analysis from changing the meaning of an answer halfway through a follow-up question.
+MindClone is a local modular monolith. The browser/Electron client owns interaction and local-model streaming. The Express service owns cognition state, provenance, scene compilation, and audits. SQLite is the sole structured source of truth.
 
-## Planned components
+```text
+Imported source / daily dialogue / transcript
+                    |
+                    v
+         Source + evidence units
+                    |
+                    v
+        Atomic claims with owner
+                    |
+          +---------+----------+
+          |                    |
+ external knowledge      user evidence/view
+ understood +            observed -> endorsed
+ reasoning_use                  |
+          |         discussion  |
+          +------------+--------+
+                       v
+            derived personal view
 
-1. `daily-conversation`: default experience. DeepSeek-led daily dialogue with local session persistence and asynchronous memory proposals.
-2. `desktop-workbench`: local Electron UI for preparation, rehearsal, model status, and later voice controls.
-3. `interview-engine`: packet creation, prompt assembly, streaming output, interruption, and turn consistency.
-4. `memory-ingestion`: asynchronous import, cloud-assisted extraction, candidate-memory review, and local indexing.
-5. `audio-bridge`: later, permissioned microphone/system-audio transcription and diarization. It will produce text events for the interview engine and never bypass its session model.
+JD + exact submitted resume + audience + goal
+                       |
+                       v
+      Bounded Autobiographical Override
+             (snapshot, writeBack=false)
+                       |
+                       v
+       Answer plan -> local model -> audit
+```
 
-## Model policy
+## 4. Cognition Model
 
-The starting runtime is a quantized Qwen 7B instruction model served locally by Ollama or MLX-LM. The model is chosen for Chinese and mixed Chinese-English capability within M1 Pro 16GB constraints. The exact model is configurable because the latency and answer quality benchmark, rather than a model name, decides the production choice.
+A claim is an atomic proposition with two independent control axes:
 
-DeepSeek is the initial cloud model for daily conversation and write-path extraction, contradiction detection, and interview-debrief coaching. Gemini/GPT remain optional future providers. All cloud providers are intentionally absent from the formal answer path.
+- `owner`: `user`, `external`, `third_party`, or `inferred`;
+- `epistemicStatus`: `observed`, `understood`, `contested`, `endorsed`, `superseded`, or `rejected`;
+- `authorizationScope`: `none`, `reasoning_use`, `personal_view`, `personal_experience`, or `scene_fact`.
+
+The separation matters. An external claim can be well understood and highly useful while still being unauthorized as the user's position. When the user discusses and adopts it, the service creates a new user-owned `viewpoint` and retains the source claim unchanged.
+
+## 5. Storage
+
+`server/infrastructure/database.mjs` initializes SQLite in WAL mode with foreign-key enforcement. The core records are:
+
+| Record | Responsibility |
+| --- | --- |
+| `sources` | Immutable imported material, checksum, URI, actor, and metadata |
+| `evidence_units` | Source fragments with speaker and semantic owner |
+| `claims` | Atomic cognition with ownership, status, scope, time, and context |
+| `claim_evidence` | Claim-to-source provenance |
+| `claim_relations` | Derivation, support, conflict, and supersession edges |
+| `authorization_events` | Auditable state and scope transitions |
+| `scenes` | Frozen, bounded identity snapshots |
+| `inquiry_items` | Deferred questions generated by learning or contradictions |
+| `answer_runs` | Question, plan, answer, and audit trace |
+| `sessions` / `messages` | Original daily conversations |
+
+On first open, the repository migrates `data/memory-store.json` once and records a migration marker. The legacy file is retained. Previously approved learning cards become `external/understood/reasoning_use`, not personal beliefs.
+
+## 6. Write Path
+
+1. Save the source locally before model extraction.
+2. Extract atomic claims and evidence through the configured cloud model.
+3. Classify source ownership before assigning authorization.
+4. External learning becomes `understood/reasoning_use` and may create a deferred inquiry.
+5. Personal material remains `observed/none` until reviewed.
+6. Discussion-based adoption creates a new `user/endorsed/personal_view` claim and an `internalized_as` edge.
+
+Short-video ingestion resolves the supplied link through TiKHub, downloads temporary media, extracts audio, runs local Whisper, and deletes temporary files. Only speech text enters cognition; video frames are outside the current scope.
+
+## 7. Scene Read Path
+
+Preparation submits the job description, exact resume, audience, and goal to `/api/scenes/compile`. The scene compiler selects authorized cognition and freezes four channels:
+
+- scene resume and job description;
+- understood knowledge for reasoning;
+- authorized personal evidence and views;
+- user-owned expression examples.
+
+For every question, `/api/scenes/:id/plan` ranks relevant claims without merging their ownership. The local model renders from that plan. `/api/scenes/:id/complete` records the answer and currently audits unsupported numeric claims, first-person evidence availability, and scene write-back. The next audit increment will add clause-level provenance and semantic contradiction checking.
+
+## 8. Model Boundary
+
+DeepSeek is used on the non-latency-critical write path for daily dialogue and structured extraction. Formal interview generation uses the configured local OpenAI-compatible model only. A missing local model is surfaced as a failure; formal mode does not silently transmit interview content to a cloud fallback.
+
+## 9. Implemented and Next
+
+Implemented in the first refactor:
+
+- SQLite schema and idempotent JSON migration;
+- epistemic state transitions and authorization guards;
+- ownership-preserving internalization;
+- deferred inquiry records;
+- bounded interview scene snapshots;
+- separated answer plans and post-answer audit records;
+- local Whisper short-video speech ingestion;
+- deterministic domain, repository, and HTTP integration tests.
+
+Next research increments are hybrid FTS/embedding retrieval, contradiction confirmation with tombstones, clause-level citations, inquiry scheduling, learned expression features from `Recents`, and the preregistered longitudinal evaluation.

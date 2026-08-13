@@ -1,104 +1,69 @@
-import type { InterviewPacket, Message, Settings } from './types';
+import type { AnswerPlan, Claim, InterviewPacket, Message, Settings } from './types';
 
-const keywords = [
-  'Java', 'Kotlin', 'Android', 'iOS', 'Python', 'JavaScript', 'TypeScript', 'Go', 'Golang',
-  '.NET', 'C#', 'Node', 'SQL', 'MySQL', 'PostgreSQL', 'Redis', 'Docker', 'Kubernetes',
-  'microservices', 'distributed systems', 'customer support', 'customer success', 'operations', 'sales', 'recruiting', 'HR', 'remote', 'English',
-];
-
-function matchingKeywords(text: string) {
-  const lowered = text.toLowerCase();
-  return keywords.filter((keyword) => lowered.includes(keyword.toLowerCase())).slice(0, 8);
+function claimLines(ids: string[], claims: Claim[]) {
+  const allowed = new Set(ids);
+  return claims.filter((claim) => allowed.has(claim.id)).map((claim) => `- [${claim.id}] ${claim.proposition}`).join('\n') || '- None selected';
 }
 
-export function preparePacket(jd: string, resume: string): InterviewPacket {
-  const jdKeywords = matchingKeywords(jd);
-  const resumeKeywords = matchingKeywords(resume);
-  const matching = jdKeywords.filter((item) => resumeKeywords.some((resumeItem) => resumeItem.toLowerCase() === item.toLowerCase()));
-  const gaps = jdKeywords.filter((item) => !matching.includes(item));
-  const focusAreas = [...matching, ...gaps].slice(0, 6);
-  const questionTypes = ['Introduction and role fit', 'Project and experience deep dives', 'Technical or business judgment', 'Cross-functional collaboration', 'Motivation and remote collaboration'];
+function systemPrompt(packet: InterviewPacket, plan: AnswerPlan, claims: Claim[]) {
+  return `You are MindClone's scene-conditioned answer renderer. Produce a candidate answer the user can deliver aloud.
 
-  return {
-    id: crypto.randomUUID(),
-    preparedAt: new Date().toISOString(),
-    jd,
-    resume,
-    focusAreas,
-    questionTypes,
-    brief: matching.length
-      ? `Prioritize experience related to ${matching.join(', ')}. For ${gaps.join(', ') || 'the role requirements'}, first explain transferable strengths and concrete learning or practice, then describe the problem-solving approach.`
-      : 'No clear overlap was identified. Prioritize evidence from the submitted resume and map the role requirements to transferable strengths.',
-  };
-}
-
-function systemPrompt(packet: InterviewPacket) {
-  return `You are MindClone's interview-answer engine. Your response is a candidate answer to read and deliver aloud.
+The answer plan has already selected authorized cognition. Do not introduce a new first-person experience outside the submitted resume or PERSONAL AUTHORIZED CLAIMS.
 
 Rules:
-1. Answer directly: lead with a clear conclusion, then give one or two concrete supporting points. Do not add greetings or say "as an AI."
-2. Use only experience supported by this resume and the supplied interview context. When a question reaches beyond the material, explain transferable strengths plus a concrete learning or validation plan. Never invent metrics, companies, projects, tenure, or responsibilities.
-3. For follow-up questions, challenges, or interruptions, treat what has already been said in this interview as binding context and remain consistent.
-4. Write naturally for spoken delivery. Match the interviewer's language. Keep answers to roughly 90-170 English words unless the interviewer explicitly asks for more depth.
-5. Interview preparation brief: ${packet.brief}
+1. Lead with a clear conclusion, then support it with relevant industry reasoning and authorized evidence.
+2. The submitted resume is authoritative only inside this frozen interview scene. Never modify the longitudinal identity.
+3. External understood knowledge may improve reasoning, but its author, cases, and experiences are not the user's.
+4. Never invent employers, projects, dates, metrics, responsibilities, tenure, or achievements.
+5. If evidence is insufficient, state a transferable approach or learning plan instead of fabricating experience.
+6. Remain consistent with prior answers and match the interviewer's language.
+7. Sound like a clear, professional version of the user, not generic assistant prose.
 
-Target job description:
+ANSWER PLAN:
+${plan.thesisInstruction}
+
+AUTHORIZED KNOWLEDGE:
+${claimLines(plan.knowledgeClaimIds, claims)}
+
+PERSONAL AUTHORIZED CLAIMS:
+${claimLines(plan.personalClaimIds, claims)}
+
+SCENE GOAL:
+${packet.brief}
+
+TARGET JOB DESCRIPTION:
 ${packet.jd}
 
-Submitted resume:
+SCENE-AUTHORIZED SUBMITTED RESUME:
 ${packet.resume}`;
 }
 
 export async function streamCandidateAnswer(
   settings: Settings,
   packet: InterviewPacket,
+  plan: AnswerPlan,
+  claims: Claim[],
   messages: Message[],
   onDelta: (delta: string) => void,
   signal: AbortSignal,
 ) {
   const requestMessages = [
-    { role: 'system', content: systemPrompt(packet) },
-    ...messages.map((message) => ({
-      role: message.role === 'interviewer' ? 'user' : 'assistant',
-      content: message.content,
-    })),
+    { role: 'system', content: systemPrompt(packet, plan, claims) },
+    ...messages.map((message) => ({ role: message.role === 'interviewer' ? 'user' : 'assistant', content: message.content })),
   ];
-
   const response = await fetch(`${settings.baseUrl.replace(/\/$/, '')}/chat/completions`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    signal,
-    body: JSON.stringify({
-      model: settings.model,
-      messages: requestMessages,
-      temperature: 0.45,
-      stream: true,
-    }),
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, signal,
+    body: JSON.stringify({ model: settings.model, messages: requestMessages, temperature: 0.35, stream: true }),
   });
-
-  if (!response.ok || !response.body) {
-    throw new Error(`The local model did not respond (${response.status}). Check the model service and settings.`);
-  }
-
-  const reader = response.body.getReader();
-  const decoder = new TextDecoder();
-  let pending = '';
+  if (!response.ok || !response.body) throw new Error(`The local model did not respond (${response.status}). Check the model service and settings.`);
+  const reader = response.body.getReader(); const decoder = new TextDecoder(); let pending = '';
   while (true) {
-    const { value, done } = await reader.read();
-    if (done) break;
-    pending += decoder.decode(value, { stream: true });
-    const lines = pending.split('\n');
-    pending = lines.pop() ?? '';
+    const { value, done } = await reader.read(); if (done) break;
+    pending += decoder.decode(value, { stream: true }); const lines = pending.split('\n'); pending = lines.pop() ?? '';
     for (const line of lines) {
       if (!line.startsWith('data:')) continue;
-      const data = line.slice(5).trim();
-      if (data === '[DONE]') return;
-      try {
-        const delta = JSON.parse(data).choices?.[0]?.delta?.content;
-        if (typeof delta === 'string') onDelta(delta);
-      } catch {
-        // Ignore provider keep-alives and partial event frames.
-      }
+      const data = line.slice(5).trim(); if (data === '[DONE]') return;
+      try { const delta = JSON.parse(data).choices?.[0]?.delta?.content; if (typeof delta === 'string') onDelta(delta); } catch { /* provider keep-alive */ }
     }
   }
 }

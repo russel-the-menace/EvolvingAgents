@@ -22,7 +22,8 @@ export function saveSettings(settings: Settings) {
 
 export function loadPacket(): InterviewPacket | null {
   try {
-    return JSON.parse(localStorage.getItem(packetKey) ?? 'null');
+    const packet = JSON.parse(localStorage.getItem(packetKey) ?? 'null');
+    return packet?.sceneId ? packet : null;
   } catch {
     return null;
   }

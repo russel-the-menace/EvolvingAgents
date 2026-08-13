@@ -5,7 +5,7 @@ import {
   Copy, MoreHorizontal, PanelLeftClose, PanelLeftOpen, Pencil, Pin, Plus, SendHorizontal, Settings2,
   Sparkles, Trash2, Upload, Video, Volume2, X,
 } from 'lucide-react';
-import { preparePacket, streamCandidateAnswer } from './interview';
+import { streamCandidateAnswer } from './interview';
 import { memoryApi } from './memory-api';
 import { loadPacket, loadSettings, savePacket, saveSettings } from './storage';
 import type { DailyMessage, DailyModel, DailySession, InterviewPacket, MemoryCandidate, MemoryDocument, Message, Mode, Settings, ThemeMode } from './types';
@@ -121,11 +121,30 @@ export function App() {
     [messages],
   );
 
-  function prepare() {
-    const next = preparePacket(jd, resume);
-    setPacket(next);
-    savePacket(next);
-    setError('');
+  async function prepare() {
+    try {
+      const { scene } = await memoryApi.compileScene({ jd, resume, audience: 'HR or hiring interviewer', goal: 'Answer as the scene-appropriate professional self while remaining consistent under follow-up.' });
+      const focusAreas = [...scene.personalClaims, ...scene.knowledgeClaims].slice(0, 6).map((claim) => claim.title);
+      const next: InterviewPacket = {
+        id: scene.id,
+        sceneId: scene.id,
+        preparedAt: new Date().toISOString(),
+        jd,
+        resume,
+        focusAreas: focusAreas.length ? focusAreas : ['Submitted resume', 'Target role requirements'],
+        questionTypes: ['Role fit', 'Industry judgment', 'Authorized experience deep dive', 'Adversarial follow-up', 'Motivation and collaboration'],
+        brief: `Use the submitted resume as the scene-local identity source, supported by ${scene.personalClaims.length} authorized personal claims and ${scene.knowledgeClaims.length} understood knowledge claims.`,
+        knowledgeClaims: scene.knowledgeClaims,
+        personalClaims: scene.personalClaims,
+        expressionClaims: scene.expressionClaims,
+        writeBack: false,
+      };
+      setPacket(next);
+      savePacket(next);
+      setError('');
+    } catch (caught) {
+      setError((caught as Error).message);
+    }
   }
 
   function enterFormal() {
@@ -165,11 +184,16 @@ export function App() {
     abortRef.current = controller;
 
     try {
-      await streamCandidateAnswer(settings, packet, nextMessages.slice(0, -1), (delta) => {
+      const { plan, claims } = await memoryApi.planAnswer(packet.sceneId, question);
+      let completedAnswer = '';
+      await streamCandidateAnswer(settings, packet, plan, claims, nextMessages.slice(0, -1), (delta) => {
+        completedAnswer += delta;
         setMessages((current) => current.map((message) =>
           message.id === answerMessage.id ? { ...message, content: message.content + delta } : message,
         ));
       }, controller.signal);
+      const { audit } = await memoryApi.completeAnswer(packet.sceneId, { question, plan, answer: completedAnswer });
+      if (!audit.passed) setError(`Answer audit flagged: ${audit.violations.map((violation) => violation.type).join(', ')}. Review before using this answer.`);
     } catch (caught) {
       if ((caught as Error).name !== 'AbortError') {
         const message = (caught as Error).message;
@@ -242,7 +266,7 @@ export function App() {
         {mode === 'prepare' ? (
           <PrepareView
             jd={jd} resume={resume} packet={packet} ready={ready}
-            onJdChange={setJd} onResumeChange={setResume} onPrepare={prepare}
+            onJdChange={setJd} onResumeChange={setResume} onPrepare={() => void prepare()}
             onEnter={enterFormal} onUseExample={() => { setJd(exampleJD); setResume(exampleResume); }}
           />
         ) : mode === 'daily' ? (
@@ -485,7 +509,7 @@ function MemoryView({ documents, candidates, error, onRefresh }: {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const pending = candidates.filter((item) => item.status === 'pending');
   const approved = candidates.filter((item) => item.status === 'approved');
-  const learned = candidates.filter((item) => item.scope === 'learning' && item.status === 'approved');
+  const learned = candidates.filter((item) => item.scope === 'learning' && item.epistemicStatus === 'understood');
 
   async function saveText(sourceType: 'note' | 'conversation', value: string, nextTitle: string) {
     if (value.trim().length < 10) { setLocalError('Please enter at least one complete piece of source material.'); return; }
@@ -549,8 +573,19 @@ function MemoryView({ documents, candidates, error, onRefresh }: {
     try { await memoryApi.setStatus(id, status); await onRefresh(); } catch (caught) { setLocalError((caught as Error).message); }
   }
 
+  async function internalize(candidate: MemoryCandidate) {
+    const interpretation = window.prompt('把这条知识改写成你真正认同、愿意代表自己表达的观点：', candidate.content);
+    if (!interpretation?.trim()) return;
+    const reason = window.prompt('你为什么认同它？请写下讨论后的理由或实际应用：');
+    if (!reason?.trim()) return;
+    try {
+      await memoryApi.internalizeClaim(candidate.id, { proposition: interpretation.trim(), reason: reason.trim() });
+      await onRefresh();
+    } catch (caught) { setLocalError((caught as Error).message); }
+  }
+
   return <div className="memory-layout">
-    <header className="page-header"><div><p className="eyebrow">ASYNC MEMORY INBOX</p><h1>Memory inbox</h1><p className="subtle">Source material stays on this device. Review extracted candidates before they become searchable memories.</p></div><button className="ghost-button" onClick={() => void onRefresh()}>Refresh</button></header>
+    <header className="page-header"><div><p className="eyebrow">COGNITIVE INBOX</p><h1>Knowledge and self model</h1><p className="subtle">External material becomes understood knowledge. Only your confirmation authorizes a claim to represent your viewpoint or experience.</p></div><button className="ghost-button" onClick={() => void onRefresh()}>Refresh</button></header>
     <div className="memory-grid">
       <section className="memory-imports">
         <article className="memory-card"><div className="card-heading"><FileUp size={19} /><div><h2>ChatGPT history</h2><p>Import <code>conversations.json</code> from an official export.</p></div></div><input ref={fileInputRef} className="hidden-input" type="file" accept="application/json,.json" onChange={(event) => { const file = event.target.files?.[0]; if (file) void importChatGPT(file); event.currentTarget.value = ''; }} /><button className="ghost-button full-width" disabled={busyDocument === 'file'} onClick={() => fileInputRef.current?.click()}><Upload size={16} /> {busyDocument === 'file' ? 'Importing...' : 'Choose conversations.json'}</button></article>
@@ -559,11 +594,12 @@ function MemoryView({ documents, candidates, error, onRefresh }: {
         <article className="memory-card"><div className="card-heading"><BotMessageSquare size={19} /><div><h2>Conversation intake</h2><p>Archive this conversation first; guided intake can be added later.</p></div></div><textarea className="memory-textarea short" value={interviewNote} onChange={(event) => setInterviewNote(event.target.value)} placeholder="What have you done lately? What changed? What are you working through?" /><button className="ghost-button full-width" disabled={busyDocument === 'new'} onClick={() => void saveText('conversation', interviewNote, 'Conversation intake')}>Save this conversation</button></article>
       </section>
       <section className="memory-review">
-        <div className="memory-summary"><div><p className="eyebrow">LOCAL MATERIALS</p><h2>{documents.length} <span>source items</span></h2></div><div><p className="eyebrow">LEARNED KNOWLEDGE</p><h2>{learned.length} <span>knowledge cards</span></h2></div></div>
+        <div className="memory-summary"><div><p className="eyebrow">IMMUTABLE EVIDENCE</p><h2>{documents.length} <span>source items</span></h2></div><div><p className="eyebrow">UNDERSTOOD</p><h2>{learned.length} <span>reasoning claims</span></h2></div></div>
         {(error || localError) && <div className="error-note">{error || localError}</div>}
         <div className="document-list"><h3>Ready to extract</h3>{documents.length === 0 ? <p className="empty-inline">Imported source material will wait here for extraction.</p> : documents.map((document) => <article className="document-row" key={document.id}><div><strong>{document.title}</strong><span>{document.sourceType === 'chatgpt_export' ? 'ChatGPT history' : document.sourceType === 'note' ? 'Text note' : document.sourceType === 'short_video' ? 'Douyin voice transcript' : 'Conversation intake'} · {new Date(document.createdAt).toLocaleDateString('en-US')}</span></div><button className="ghost-button" disabled={busyDocument === document.id} onClick={() => void extract(document.id)}>{busyDocument === document.id ? 'DeepSeek is extracting...' : document.extractedAt ? 'Extract again' : 'Extract candidate memories'}</button></article>)}</div>
-        <div className="candidate-list"><h3>Learned knowledge <span>{learned.length}</span></h3>{learned.length === 0 ? <p className="empty-inline">Video and course material will become reusable knowledge here.</p> : learned.map((candidate) => <article className="candidate-card" key={candidate.id}><div className="candidate-kind">{candidate.kind}</div><h4>{candidate.title}</h4><p>{candidate.content}</p>{candidate.tags.length > 0 && <div className="chip-row">{candidate.tags.map((tag) => <span className="chip" key={tag}>{tag}</span>)}</div>}<blockquote>{candidate.sourceQuote}</blockquote></article>)}</div>
-        <div className="candidate-list"><h3>Personal memory review <span>{pending.length}</span></h3>{pending.length === 0 ? <p className="empty-inline">No personal memories are waiting for review.</p> : pending.map((candidate) => <article className="candidate-card" key={candidate.id}><div className="candidate-kind">{candidate.kind}</div><h4>{candidate.title}</h4><p>{candidate.content}</p>{candidate.tags.length > 0 && <div className="chip-row">{candidate.tags.map((tag) => <span className="chip" key={tag}>{tag}</span>)}</div>}<blockquote>{candidate.sourceQuote}</blockquote><div className="candidate-actions"><button className="reject-button" onClick={() => void review(candidate.id, 'rejected')}><X size={15} /> Ignore</button><button className="primary-button compact" onClick={() => void review(candidate.id, 'approved')}><CheckCircle2 size={15} /> Approve memory</button></div></article>)}</div>
+        <div className="candidate-list"><h3>Understood knowledge <span>{learned.length}</span></h3>{learned.length === 0 ? <p className="empty-inline">External material will become reasoning knowledge here, without becoming your viewpoint.</p> : learned.map((candidate) => <article className="candidate-card" key={candidate.id}><div className="candidate-kind">{candidate.kind} · reasoning only</div><h4>{candidate.title}</h4><p>{candidate.content}</p>{candidate.tags.length > 0 && <div className="chip-row">{candidate.tags.map((tag) => <span className="chip" key={tag}>{tag}</span>)}</div>}<blockquote>{candidate.sourceQuote}</blockquote><div className="candidate-actions"><button className="primary-button compact" onClick={() => void internalize(candidate)}><MessageCircle size={15} /> Discuss and adopt</button></div></article>)}</div>
+        <div className="candidate-list"><h3>Personal claim review <span>{pending.length}</span></h3>{pending.length === 0 ? <p className="empty-inline">No user-owned claims are waiting for authorization.</p> : pending.map((candidate) => <article className="candidate-card" key={candidate.id}><div className="candidate-kind">{candidate.kind} · {candidate.owner || 'user'} · {candidate.epistemicStatus || 'observed'}</div><h4>{candidate.title}</h4><p>{candidate.content}</p>{candidate.tags.length > 0 && <div className="chip-row">{candidate.tags.map((tag) => <span className="chip" key={tag}>{tag}</span>)}</div>}<blockquote>{candidate.sourceQuote}</blockquote><div className="candidate-actions"><button className="reject-button" onClick={() => void review(candidate.id, 'rejected')}><X size={15} /> Reject claim</button><button className="primary-button compact" onClick={() => void review(candidate.id, 'approved')}><CheckCircle2 size={15} /> Authorize as mine</button></div></article>)}</div>
+        <div className="candidate-list"><h3>Authorized self <span>{approved.filter((item) => item.scope !== 'learning').length}</span></h3>{approved.filter((item) => item.scope !== 'learning').length === 0 ? <p className="empty-inline">Confirmed experiences and viewpoints will appear here.</p> : approved.filter((item) => item.scope !== 'learning').map((candidate) => <article className="candidate-card" key={candidate.id}><div className="candidate-kind">{candidate.kind} · {candidate.authorizationScope || 'authorized'}</div><h4>{candidate.title}</h4><p>{candidate.content}</p></article>)}</div>
       </section>
     </div>
   </div>;
@@ -584,17 +620,17 @@ function PrepareView(props: {
       <div className="input-stack">
         <label className="input-card"><span>职位描述 <small>JD</small></span><textarea value={jd} onChange={(event) => onJdChange(event.target.value)} placeholder="粘贴本次面试的 JD" /></label>
         <label className="input-card"><span>本次投递简历 <small>RESUME</small></span><textarea value={resume} onChange={(event) => onResumeChange(event.target.value)} placeholder="粘贴或导入投递给这家公司的简历文本" /></label>
-        <button className="primary-button" disabled={!ready} onClick={onPrepare}><ListChecks size={18} /> 生成面试简报 <ArrowRight size={17} /></button>
+        <button className="primary-button" disabled={!ready} onClick={onPrepare}><ListChecks size={18} /> 编译场景身份 <ArrowRight size={17} /></button>
       </div>
       <div className="brief-panel">
         {packet ? <>
           <div className="brief-top"><div><p className="eyebrow">READY TO REVIEW</p><h2>面试简报</h2></div><CheckCircle2 size={24} /></div>
           <p className="prepared-time">最近准备于 {formatPreparedAt(packet.preparedAt)}</p>
           <section><h3>回答优先级</h3><div className="chip-row">{packet.focusAreas.map((item) => <span className="chip" key={item}>{item}</span>)}</div></section>
-          <section><h3>本轮回答策略</h3><p>{packet.brief}</p></section>
+          <section><h3>本轮认知授权</h3><p>{packet.brief}</p></section>
           <section><h3>预计追问</h3><ul>{packet.questionTypes.map((item) => <li key={item}>{item}</li>)}</ul></section>
           <button className="enter-button" onClick={onEnter}><Play size={17} fill="currentColor" /> 确认，进入正式面试</button>
-          <p className="fine-print">进入后会冻结本次 JD 与简历。正式链路只调用本地模型，可随时中断生成。</p>
+          <p className="fine-print">进入后冻结 JD、简历和命题权限。场景身份不会写回长期自我；正式链路只调用本地模型。</p>
         </> : <div className="empty-brief"><BotMessageSquare size={30} /><h2>等待本次材料</h2><p>准备完成后，MindClone 才会按这份 JD 组织你的经历与回答重点。</p></div>}
       </div>
     </div>
