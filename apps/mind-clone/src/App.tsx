@@ -1,6 +1,6 @@
 import { Fragment, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import {
-  ArrowRight, BotMessageSquare, CheckCircle2, ChevronDown, CircleStop, FileText,
+  ArrowDown, ArrowRight, BotMessageSquare, CheckCircle2, ChevronDown, CircleStop, FileText,
   FileUp, ListChecks, MessageCircle, MessageSquarePlus, Mic, Paperclip, Play,
   Copy, MoreHorizontal, PanelLeftClose, PanelLeftOpen, Pencil, Pin, Plus, SendHorizontal, Settings2,
   Sparkles, Trash2, Upload, Video, Volume2, X,
@@ -94,6 +94,8 @@ export function App() {
   const abortRef = useRef<AbortController | null>(null);
   const generationRef = useRef(0);
   const transcriptRef = useRef<HTMLDivElement>(null);
+  const formalFollowingRef = useRef(true);
+  const [formalAtBottom, setFormalAtBottom] = useState(true);
   const dailyAbortRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
@@ -134,8 +136,25 @@ export function App() {
   useEffect(() => { void refreshSessions(); }, []);
 
   useEffect(() => {
-    transcriptRef.current?.scrollTo({ top: transcriptRef.current.scrollHeight, behavior: 'smooth' });
+    const transcript = transcriptRef.current;
+    if (transcript && formalFollowingRef.current) transcript.scrollTo({ top: transcript.scrollHeight });
   }, [messages, streaming]);
+
+  function updateFormalScrollPosition() {
+    const transcript = transcriptRef.current;
+    if (!transcript) return;
+    const atBottom = transcript.scrollHeight - transcript.scrollTop - transcript.clientHeight <= 24;
+    formalFollowingRef.current = atBottom;
+    setFormalAtBottom(atBottom);
+  }
+
+  function scrollFormalToBottom() {
+    const transcript = transcriptRef.current;
+    if (!transcript) return;
+    formalFollowingRef.current = true;
+    transcript.scrollTo({ top: transcript.scrollHeight, behavior: 'smooth' });
+    setFormalAtBottom(true);
+  }
 
   const ready = jd.trim().length > 40 && resume.trim().length > 40;
   const messageCount = messages.filter((message) => message.role === 'interviewer').length;
@@ -304,6 +323,7 @@ export function App() {
           <FormalView
             packet={packet} messages={messages} input={input} error={error} streaming={streaming}
             candidateDraft={candidateDraft} messageCount={messageCount} transcriptRef={transcriptRef}
+            atBottom={formalAtBottom} onScroll={updateFormalScrollPosition} onScrollToBottom={scrollFormalToBottom}
             onInputChange={setInput} onAsk={() => void askQuestion()} onStop={stopGeneration}
             onInterrupt={() => void interruptWithDraft()} onBack={() => { stopGeneration(); setMode('prepare'); }}
           />
@@ -352,6 +372,7 @@ function DailyChatView({ sessions, activeSessionId, input, streaming, error, mod
   const [modelMenuOpen, setModelMenuOpen] = useState(false);
   const [sessionMenuId, setSessionMenuId] = useState<string | null>(null);
   const [newChatActive, setNewChatActive] = useState(false);
+  const [atBottom, setAtBottom] = useState(true);
   const [sidebarWidth, setSidebarWidth] = useState(() => {
     const saved = Number(window.localStorage.getItem('mindclone-sidebar-width'));
     return Number.isFinite(saved) ? Math.min(420, Math.max(240, saved)) : 280;
@@ -363,11 +384,15 @@ function DailyChatView({ sessions, activeSessionId, input, streaming, error, mod
   const resizeRef = useRef<{ startX: number; startWidth: number } | null>(null);
   const sidebarWidthRef = useRef(sidebarWidth);
   const thinkingTimerRef = useRef<number | null>(null);
+  const followingRef = useRef(true);
   const activeSession = sessions.find((session) => session.id === activeSessionId) ?? null;
   const messages = draftMessages.length ? draftMessages : newChatActive ? [] : activeSession?.messages ?? [];
 
   useEffect(() => { setDraftMessages([]); }, [activeSessionId]);
-  useEffect(() => { listRef.current?.scrollTo({ top: listRef.current.scrollHeight, behavior: 'smooth' }); }, [messages, streaming]);
+  useEffect(() => {
+    const transcript = listRef.current;
+    if (transcript && followingRef.current) transcript.scrollTo({ top: transcript.scrollHeight });
+  }, [messages, streaming]);
   useEffect(() => {
     const textarea = dailyInputRef.current;
     if (!textarea) return;
@@ -510,9 +535,26 @@ function DailyChatView({ sessions, activeSessionId, input, streaming, error, mod
     try { await navigator.clipboard.writeText(message.content); } catch { onError('Unable to access the system clipboard.'); }
   }
 
+  function updateScrollPosition() {
+    const transcript = listRef.current;
+    if (!transcript) return;
+    const nextAtBottom = transcript.scrollHeight - transcript.scrollTop - transcript.clientHeight <= 24;
+    followingRef.current = nextAtBottom;
+    setAtBottom(nextAtBottom);
+  }
+
+  function scrollToLatest() {
+    const transcript = listRef.current;
+    if (!transcript) return;
+    followingRef.current = true;
+    transcript.scrollTo({ top: transcript.scrollHeight, behavior: 'smooth' });
+    setAtBottom(true);
+  }
+
   return <div className="daily-layout" style={{ '--daily-sidebar-width': `${sidebarWidth}px` } as CSSProperties}>
     <aside className="daily-history"><div className="daily-brand"><Sparkles size={21} /><span>MindClone</span><button className="icon-button sidebar-close" title="Collapse sidebar" onClick={onToggleSidebar}><PanelLeftClose size={19} /></button></div><nav className="daily-nav"><button className={newChatActive || !activeSessionId ? 'active' : ''} onClick={startNewChat}><Plus size={14} /> New Chat</button><button onClick={() => onModeChange('prepare')}><FileText size={14} /> Interview prep</button><button onClick={() => onModeChange('memory')}><MessageSquarePlus size={14} /> Memory inbox</button><button disabled={!hasPacket} onClick={() => hasPacket && onModeChange('formal')}><BotMessageSquare size={14} /> Live interview</button></nav><div className="recents-panel"><button className={recentsCollapsed ? 'daily-history-top recents-toggle collapsed' : 'daily-history-top recents-toggle'} onClick={() => setRecentsCollapsed((collapsed) => !collapsed)}><span>Recents</span><ChevronDown size={17} /></button>{!recentsCollapsed && <div className="session-list">{sessions.length === 0 ? <p>Start a conversation. MindClone keeps your record on this device.</p> : [...sessions].sort((left, right) => Number(Boolean(right.pinned)) - Number(Boolean(left.pinned)) || new Date(right.updatedAt).getTime() - new Date(left.updatedAt).getTime()).map((session) => <div key={session.id} className={session.id === activeSessionId && !newChatActive ? 'session-item active' : 'session-item'}><button onClick={() => selectSession(session.id)}><span>{session.pinned && <Pin size={12} fill="currentColor" />} {session.title}</span></button><div className="session-more"><button className="session-more-trigger" title="Conversation options" onClick={(event) => { event.stopPropagation(); setSessionMenuId((current) => current === session.id ? null : session.id); }}><MoreHorizontal size={17} /></button>{sessionMenuId === session.id && <div className="session-context-menu"><button onClick={() => void updateSession(session, { pinned: !session.pinned })}><Pin size={15} /> {session.pinned ? 'Unpin' : 'Pin'}</button><button onClick={() => renameSession(session)}><Pencil size={15} /> Rename</button><button className="danger" onClick={() => void deleteSession(session)}><Trash2 size={15} /> Delete</button></div>}</div></div>)}</div>}</div><div className="daily-sidebar-footer"><div className="local-status"><span /> Local engine</div><button className="icon-button light" title="Settings" onClick={onOpenSettings}><Settings2 size={18} /></button></div><div className="sidebar-resize-handle" role="separator" aria-orientation="vertical" aria-label="Resize sidebar" onPointerDown={startSidebarResize} onPointerMove={resizeSidebar} onPointerUp={endSidebarResize} onPointerCancel={endSidebarResize} /></aside>{sidebarCollapsed && <button className="sidebar-reopen" title="Expand sidebar" onClick={onToggleSidebar}><PanelLeftOpen size={19} /></button>}
-    <section className="daily-conversation"><div className="daily-transcript" ref={listRef}>{messages.length === 0 ? <div className="daily-empty"><Sparkles size={32} /><h2>Start with what is on your mind</h2><p>Every conversation is saved locally. Important material is added to candidate memories asynchronously for your review.</p></div> : messages.map((message) => <article className={`daily-message ${message.role}`} key={message.id}>{editingMessage?.id === message.id ? <div className="inline-message-editor"><textarea autoFocus value={editingMessage.content} onChange={(event) => setEditingMessage({ ...editingMessage, content: event.target.value })} onKeyDown={(event) => { if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') void send(editingMessage.content, message.id); if (event.key === 'Escape') setEditingMessage(null); }} /><div><button className="edit-cancel-button" onClick={() => setEditingMessage(null)}>Cancel</button><button className="edit-send-button" disabled={!editingMessage.content.trim() || streaming} onClick={() => void send(editingMessage.content, message.id)}>Send</button></div></div> : <><div className="message-body">{message.content ? <MarkdownText content={message.content} /> : streaming && message.role === 'assistant' ? <ThinkingIndicator /> : null}{thinkingVisible && message.id === messages.at(-1)?.id && message.role === 'assistant' && message.content && <ThinkingIndicator />}</div>{message.content && <div className="message-actions"><button title="Copy message" aria-label="Copy message" onClick={() => void copyMessage(message)}><Copy size={16} /></button>{message.role === 'user' && <button title="Edit message" aria-label="Edit message" onClick={() => editMessage(message)}><Pencil size={16} /></button>}</div>}</>}</article>)}{error && <div className="error-note">{error}</div>}</div>
+    <section className="daily-conversation"><div className="daily-transcript" ref={listRef} onScroll={updateScrollPosition}>{messages.length === 0 ? <div className="daily-empty"><Sparkles size={32} /><h2>Start with what is on your mind</h2><p>Every conversation is saved locally. Important material is added to candidate memories asynchronously for your review.</p></div> : messages.map((message) => <article className={`daily-message ${message.role}`} key={message.id}>{editingMessage?.id === message.id ? <div className="inline-message-editor"><textarea autoFocus value={editingMessage.content} onChange={(event) => setEditingMessage({ ...editingMessage, content: event.target.value })} onKeyDown={(event) => { if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') void send(editingMessage.content, message.id); if (event.key === 'Escape') setEditingMessage(null); }} /><div><button className="edit-cancel-button" onClick={() => setEditingMessage(null)}>Cancel</button><button className="edit-send-button" disabled={!editingMessage.content.trim() || streaming} onClick={() => void send(editingMessage.content, message.id)}>Send</button></div></div> : <><div className="message-body">{message.content ? <MarkdownText content={message.content} /> : streaming && message.role === 'assistant' ? <ThinkingIndicator /> : null}{thinkingVisible && message.id === messages.at(-1)?.id && message.role === 'assistant' && message.content && <ThinkingIndicator />}</div>{message.content && <div className="message-actions"><button title="Copy message" aria-label="Copy message" onClick={() => void copyMessage(message)}><Copy size={16} /></button>{message.role === 'user' && <button title="Edit message" aria-label="Edit message" onClick={() => editMessage(message)}><Pencil size={16} /></button>}</div>}</>}</article>)}{error && <div className="error-note">{error}</div>}</div>
+      {!atBottom && <button className="scroll-to-latest" title="Back to latest message" aria-label="Back to latest message" onClick={scrollToLatest}><ArrowDown size={24} /></button>}
       <div className={composerExpanded ? 'daily-composer expanded' : 'daily-composer'}><div className="attachment-area">{attachmentOpen && <div className="attachment-menu"><div className="attachment-menu-title">Add context</div><button onClick={() => fileRef.current?.click()}><FileUp size={17} /> Import ChatGPT history</button><button onClick={() => setAttachmentStatus('Paste Markdown or notes below.')}><Paperclip size={17} /> Add text / Markdown</button><textarea value={attachmentNote} onChange={(event) => setAttachmentNote(event.target.value)} placeholder="Paste supplementary material..." /><button className="primary-button compact" disabled={attachmentBusy} onClick={() => void saveAttachmentNote()}>{attachmentBusy ? 'Processing...' : 'Save to inbox'}</button>{attachmentStatus && <p>{attachmentStatus}</p>}</div>}<input ref={fileRef} className="hidden-input" type="file" accept="application/json,.json" onChange={(event) => { const file = event.target.files?.[0]; if (file) void importFile(file); event.currentTarget.value = ''; }} /><button className={attachmentOpen ? 'plus-button open' : 'plus-button'} title="Add material" onClick={() => setAttachmentOpen((current) => !current)}><Plus size={21} /></button></div><textarea ref={dailyInputRef} rows={1} value={input} onChange={(event) => updateDailyInput(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); void send(); } }} placeholder="Message MindClone..." /><div ref={modelMenuRef} className={modelMenuOpen ? 'daily-model-picker open' : 'daily-model-picker'}><button type="button" aria-haspopup="menu" aria-expanded={modelMenuOpen} onClick={() => setModelMenuOpen((open) => !open)}>{({ 'deepseek-light': 'DeepSeek Light', 'deepseek-medium': 'DeepSeek Medium', 'deepseek-high': 'DeepSeek High', 'deepseek-ultra': 'DeepSeek Ultra' } as const)[model]}<ChevronDown size={16} /></button>{modelMenuOpen && <div className="daily-model-menu" role="menu">{([{ id: 'deepseek-light', name: 'DeepSeek Light', detail: 'deepseek-v4-flash · non-thinking' }, { id: 'deepseek-medium', name: 'DeepSeek Medium', detail: 'deepseek-v4-flash · thinking' }, { id: 'deepseek-high', name: 'DeepSeek High', detail: 'deepseek-v4-pro · non-thinking' }, { id: 'deepseek-ultra', name: 'DeepSeek Ultra', detail: 'deepseek-v4-pro · thinking' }] as const).map((option) => <button key={option.id} role="menuitem" className={model === option.id ? 'selected' : ''} onClick={() => { onModelChange(option.id); setModelMenuOpen(false); }}><strong>{option.name}</strong><span>{option.detail}</span></button>)}</div>}</div><button className="send-icon" disabled={!input.trim() || streaming} title="Send" onClick={() => void send()}><SendHorizontal size={19} /></button></div>
     </section>
   </div>;
@@ -662,18 +704,20 @@ function PrepareView(props: {
 
 function FormalView(props: {
   packet: InterviewPacket; messages: Message[]; input: string; error: string; streaming: boolean;
-  candidateDraft: string; messageCount: number; transcriptRef: React.RefObject<HTMLDivElement | null>;
+  candidateDraft: string; messageCount: number; transcriptRef: React.RefObject<HTMLDivElement | null>; atBottom: boolean;
+  onScroll: () => void; onScrollToBottom: () => void;
   onInputChange: (value: string) => void; onAsk: () => void; onStop: () => void; onInterrupt: () => void; onBack: () => void;
 }) {
-  const { packet, messages, input, error, streaming, candidateDraft, messageCount, transcriptRef, onInputChange, onAsk, onStop, onInterrupt, onBack } = props;
+  const { packet, messages, input, error, streaming, candidateDraft, messageCount, transcriptRef, atBottom, onScroll, onScrollToBottom, onInputChange, onAsk, onStop, onInterrupt, onBack } = props;
   return <div className="formal-layout">
     <header className="formal-header"><div><p className="eyebrow">FORMAL INTERVIEW</p><h1>候选回答</h1></div><div className="header-actions"><span className="ready-pill"><span /> 已冻结面试简报</span><button className="ghost-button" onClick={onBack}>返回准备</button></div></header>
     <div className="formal-body">
       <aside className="context-rail"><h2>本场上下文</h2><p>{packet.brief}</p><h3>优先素材</h3><div className="chip-row">{packet.focusAreas.map((item) => <span className="chip" key={item}>{item}</span>)}</div><div className="session-counter"><strong>{messageCount}</strong><span>个面试问题</span></div></aside>
-      <section className="conversation"><div className="transcript" ref={transcriptRef}>
+      <section className="conversation"><div className="transcript" ref={transcriptRef} onScroll={onScroll}>
         {messages.length === 0 ? <div className="conversation-empty"><Volume2 size={28} /><h2>等待面试官问题</h2><p>输入问题，或稍后接入语音转写。候选回答将立即流式出现。</p></div> : messages.map((message) => <article className={`message ${message.role}`} key={message.id}><div className="message-label">{message.role === 'interviewer' ? '面试官' : 'MindClone 候选回答'}</div><div className="message-body">{message.content ? <MarkdownText content={message.content} /> : streaming && message.role === 'candidate' ? <ThinkingIndicator /> : null}</div></article>)}
         {error && <div className="error-note">{error}</div>}
       </div>
+      {!atBottom && <button className="scroll-to-latest formal-scroll-to-latest" title="回到最新回答" aria-label="回到最新回答" onClick={onScrollToBottom}><ArrowDown size={24} /></button>}
       <div className="composer"><textarea value={input} onChange={(event) => onInputChange(event.target.value)} onKeyDown={(event) => { if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') onAsk(); }} placeholder="输入面试官的问题..." />
         <div className="composer-bar"><span><Mic size={15} /> 语音转写接入后会进入此处</span>{streaming ? <><button className="stop-button" onClick={onStop}><CircleStop size={17} /> 停止</button><button className="primary-button compact" disabled={!input.trim()} onClick={onInterrupt}>打断并提问 <SendHorizontal size={16} /></button></> : <button className="primary-button compact" disabled={!input.trim()} onClick={onAsk}>发送问题 <SendHorizontal size={16} /></button>}</div>
       </div></section>

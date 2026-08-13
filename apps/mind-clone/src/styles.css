@@ -211,7 +211,7 @@ button:disabled { cursor: not-allowed; opacity: .45; }
 
 /* Formal interview conversation uses the same neutral theme in both modes. */
 .formal-layout, .formal-body { background: var(--mc-bg); color: var(--mc-ink); }
-.conversation { background: var(--mc-panel); border-color: var(--mc-border); }
+.conversation { position: relative; background: var(--mc-panel); border-color: var(--mc-border); }
 .context-rail { border-color: var(--mc-border); }
 .daily-message { max-width: 100%; margin-bottom: 1px; padding-bottom: 39px; }
 .daily-message.user { display: flex; justify-content: flex-end; }
@@ -223,6 +223,9 @@ button:disabled { cursor: not-allowed; opacity: .45; }
 .daily-message .rich-text, .daily-message .rich-text > p, .message .rich-text, .message .rich-text > p { font-weight: 400; }
 .daily-message .rich-text strong, .message .rich-text strong { font-weight: 650; }
 .daily-transcript, .daily-composer { width: min(680px, calc(100% - 56px)); }
+.scroll-to-latest { position: absolute; left: 50%; bottom: 100px; z-index: 3; display: grid; place-items: center; width: 56px; height: 56px; padding: 0; border: 1px solid var(--mc-border); border-radius: 50%; color: var(--mc-ink); background: var(--mc-panel); box-shadow: 0 4px 14px rgba(0, 0, 0, .16); transform: translateX(-50%); }
+.scroll-to-latest:hover { background: var(--mc-panel-muted); }
+.formal-scroll-to-latest { bottom: 92px; }
 .message-actions { position: absolute; right: 0; bottom: 0; z-index: 2; display: flex; justify-content: flex-end; gap: 5px; height: 30px; opacity: 0; transform: translateY(-3px); transition: opacity .16s ease .5s, transform .16s ease .5s; pointer-events: none; }
 .daily-message.assistant .message-actions { right: auto; left: 0; }
 .daily-message.user .message-actions { bottom: 1px; }
