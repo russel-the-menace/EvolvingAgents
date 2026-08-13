@@ -166,8 +166,8 @@ async function fetchTikHubVideo(shareText) {
 }
 
 async function transcribeShortVideo(shareText) {
-  const asrApiKey = process.env.ASR_API_KEY;
-  if (!asrApiKey) throw new Error('ASR_API_KEY is not configured. Configure an OpenAI-compatible speech-to-text service in .env.');
+  const whisperModel = process.env.WHISPER_MODEL_PATH || join(process.cwd(), 'models', 'whisper', 'ggml-small.bin');
+  try { await readFile(whisperModel); } catch { throw new Error(`Local Whisper model was not found at ${whisperModel}. Run the setup command or set WHISPER_MODEL_PATH.`); }
   const { mediaUrl, data } = await fetchTikHubVideo(shareText);
   const directory = await mkdtemp(join(tmpdir(), 'mindclone-transcript-'));
   const mediaPath = join(directory, 'source-media');
@@ -179,16 +179,12 @@ async function transcribeShortVideo(shareText) {
     if (bytes.length > 200 * 1024 * 1024) throw new Error('The source video exceeds the 200 MB transcription limit.');
     await writeFile(mediaPath, bytes);
     await execFileAsync('ffmpeg', ['-y', '-i', mediaPath, '-vn', '-ac', '1', '-ar', '16000', '-c:a', 'pcm_s16le', audioPath], { timeout: 120_000 });
-    const form = new FormData();
-    form.set('file', new Blob([await readFile(audioPath)], { type: 'audio/wav' }), 'speech.wav');
-    form.set('model', process.env.ASR_MODEL || 'whisper-1');
-    form.set('response_format', 'json');
-    form.set('language', 'zh');
-    const endpoint = `${(process.env.ASR_BASE_URL || 'https://api.openai.com/v1').replace(/\/$/, '')}/audio/transcriptions`;
-    const response = await fetch(endpoint, { method: 'POST', headers: { Authorization: `Bearer ${asrApiKey}` }, body: form, signal: AbortSignal.timeout(180_000) });
-    const payload = await response.json().catch(() => ({}));
-    if (!response.ok || !payload.text) throw new Error(payload.error?.message || `Speech transcription failed (${response.status}).`);
-    return { transcript: String(payload.text).trim(), videoData: data };
+    const outputBase = join(directory, 'transcript');
+    const threads = String(Math.max(1, Math.min(Number(process.env.WHISPER_THREADS || 4), 12)));
+    await execFileAsync(process.env.WHISPER_CLI_PATH || 'whisper-cli', ['-m', whisperModel, '-f', audioPath, '-l', 'zh', '-otxt', '-of', outputBase, '-t', threads, '-np'], { timeout: 15 * 60_000, maxBuffer: 4 * 1024 * 1024 });
+    const transcript = (await readFile(`${outputBase}.txt`, 'utf8')).trim();
+    if (!transcript) throw new Error('Local Whisper returned an empty transcript.');
+    return { transcript, videoData: data };
   } finally { await rm(directory, { recursive: true, force: true }); }
 }
 

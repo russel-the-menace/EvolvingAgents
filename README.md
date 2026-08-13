@@ -17,6 +17,18 @@ npm run desktop
 
 `npm run dev` 会同时启动网页端和只监听本机的记忆 API（`127.0.0.1:5270`）。在“记忆投喂”中可导入 ChatGPT `conversations.json`、粘贴文本/Markdown，或保存访谈记录；点击整理后才会将单份材料发送给 DeepSeek，候选记忆必须人工确认。
 
+## 本地视频转写
+
+短视频导入使用 TiKHub 解析抖音分享文案，并在本机下载临时媒体、提取音频和运行 Whisper。视频画面不会被分析，临时媒体和 WAV 会在转写结束后删除。首次配置：
+
+```bash
+brew install ffmpeg whisper-cpp
+mkdir -p models/whisper
+curl -fL -o models/whisper/ggml-small.bin https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.bin
+```
+
+在 `.env` 设置 `TIKHUB_API_KEY`；模型默认位于 `models/whisper/ggml-small.bin`，可通过 `WHISPER_MODEL_PATH` 和 `WHISPER_THREADS` 覆盖。模型目录和 `.env` 均不纳入 Git。
+
 ## 模型
 
 默认连接 Ollama 的 OpenAI 兼容接口 `http://127.0.0.1:11434/v1`。M1 Pro 16GB 的第一轮延迟测试以量化 Qwen 7B 指令模型为基线；模型服务与名称可在应用的“模型设置”中替换。
