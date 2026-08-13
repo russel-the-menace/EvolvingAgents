@@ -151,9 +151,6 @@ button:disabled { cursor: not-allowed; opacity: .45; }
 .daily-composer.expanded { padding: 12px 14px 46px; }
 .plus-button { left: 10px; width: 28px; height: 28px; color: #666; border: 0; background: transparent; transition: top .18s ease, color .16s ease; }
 .plus-button:hover, .plus-button.open { color: var(--mc-ink); background: transparent; }
-.video-entry-button { position: absolute; left: 39px; top: 50%; display: grid; place-items: center; width: 28px; height: 28px; padding: 0; border: 0; border-radius: 50%; color: #666; background: transparent; transform: translateY(-50%); }
-.video-entry-button:hover { color: var(--mc-ink); background: var(--mc-panel-muted); }
-.daily-composer.expanded .video-entry-button { top: calc(100% - 23px); }
 .send-icon { right: 10px; width: 28px; height: 28px; color: #fff; background: var(--mc-action); border-color: var(--mc-action); transition: top .18s ease, background .18s ease; }
 .daily-model-picker { position: absolute; right: 48px; top: 50%; transform: translateY(-50%); color: var(--mc-muted); }
 .daily-model-picker > button { display: inline-flex; align-items: center; gap: 3px; border: 0; border-radius: 7px; padding: 5px 7px; color: inherit; background: transparent; font-size: 12px; line-height: 1; white-space: nowrap; }
