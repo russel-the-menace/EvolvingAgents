@@ -1,42 +1,90 @@
 # EvolvingAgents
 
-EvolvingAgents is a monorepo for knowledge-driven agents that share an evidence-grounded learning engine while keeping product cognition, data, policy, and action boundaries separate.
+中文版本：[README.zh-CN.md](README.zh-CN.md)
 
-## Workspaces
+This repository is home to a few agents that are still learning how to grow up.
 
-| Workspace | Purpose |
-| --- | --- |
-| [`apps/mind-clone`](apps/mind-clone) | MindClone, a longitudinal personal agent with identity, internalization, style, and interview-scene controls. |
-| [`apps/campus-atlas`](apps/campus-atlas) | CampusAtlas, a campus knowledge agent for authenticated policies, documents, and evidence-backed answers. |
-| [`apps/crypto-agent`](apps/crypto-agent) | CryptoAgent, a planned financial research and constrained automation agent; currently a knowledge adapter and implementation record. |
-| [`packages/learning-engine`](packages/learning-engine) | Domain-neutral ingestion, claim/evidence persistence, retrieval, validity, and citation contracts. |
+They have different personalities and different jobs, but they share one learning workshop: read a source, keep its evidence, and retrieve the useful parts when a real question arrives. We call that workshop **Learning Engine**.
 
-The three products are npm workspaces, not nested product repositories. The root is the only product Git repository, and every application imports the same learning-engine workspace package.
+Learning Engine is not trying to pretend it knows everything. It is more like a slightly fussy librarian: every piece of knowledge should have a source, a time window, and a reason it is allowed in the current context.
 
-## Commands
+## How The Engine Works
 
-```bash
-npm install
-npm run dev -- mind-clone
-npm run desktop -- mind-clone
-npm test
-npm run check
-npm run build
+```mermaid
+flowchart LR
+    A[Chats / web pages / papers / transcripts] --> B[Learning Engine]
+    B --> C[Chunk the material]
+    C --> D[Extract claims]
+    D --> E[Keep source evidence]
+    E --> F[Retrieve by time, scope, and source]
+    F --> G[Citation-ready context]
+    G --> H[The application writes the answer]
 ```
 
-The root has no default application. `npm run dev -- mind-clone` (or `npm run dev -- mindclone`) explicitly starts MindClone. Running `npm run dev` without an application only prints the available names. CampusAtlas and CryptoAgent currently contain their learning-domain foundations and tests; unfinished acquisition, answer, research, risk, and execution systems are documented rather than presented as implemented.
+The core rule is simple: **a claim can be understood before it becomes a person's experience, opinion, or decision.**
 
-Run an individual workspace with:
-
-```bash
-npm test --workspace @evolving-agents/campus-atlas
-npm test --workspace @evolving-agents/crypto-agent
-npm test --workspace @evolving-agents/learning-engine
-cd apps/mind-clone && npm run dev
+```mermaid
+flowchart TB
+    L[Learning Engine] --> M[MindClone adapter]
+    L --> C[CampusAtlas adapter]
+    M --> M1[External knowledge for reasoning]
+    M --> M2[Personal experience with authorization]
+    M --> M3[Scene-aware expression]
+    C --> C1[Campus policies and documents]
+    C --> C2[Publisher and access scope]
+    C --> C3[Validity and citations]
 ```
 
-Research papers and reference implementations belong to their application. MindClone's existing corpus is under `apps/mind-clone`; CryptoAgent has empty project-specific directories ready for future curation. Only cross-application architecture documents remain at the root.
+## Learning Engine: The Shared Foundation
 
-See [`docs/monorepo.md`](docs/monorepo.md) for dependency direction, code ownership, shared-engine change rules, and the criteria for eventually extracting the engine into its own repository.
+Learning Engine turns a pile of material that “might be useful someday” into knowledge that can be searched, traced, challenged, and cited.
 
-提交必须遵守 scope 规范，校验器会根据暂存文件自动拒绝错误范围。详见 [`docs/commit-conventions.md`](docs/commit-conventions.md)。
+It handles:
+
+- checksum deduplication, so the same article does not get “learned” three times;
+- semantic chunking with offsets back to the original source;
+- structured claim extraction with supporting evidence;
+- source updates, stale derivations, validity windows, and provenance;
+- lightweight retrieval today, with vector retrievers and rerankers available later;
+- compact contexts with `E1`, `E2`, and other source citations;
+- rejection of cookies, passwords, tokens, and API keys in learning metadata.
+
+It is deliberately not a chatbot, crawler, document parser, or universal context blender. Its job is narrower and more useful: make learning traceable, bounded, and reusable.
+
+## First Resident: MindClone
+
+MindClone is a long-term personal agent. It is not a chatbot that pours your entire chat history into a black box and announces, “I understand you now.”
+
+It listens, remembers where things came from, learns external material without stealing its authors' biographies, and only turns a learned idea into a personal view after discussion, agreement, or real use. It can make an answer clearer and more professional, but it cannot quietly turn someone else's experience into yours.
+
+MindClone uses Learning Engine for the neutral question: **what is this claim, where did it come from, and what supports it?** Its own cognition adapter handles the personal question: **may I say this as myself, in this scene?**
+
+Interviewing is the first acceptance scenario, not the final product boundary. A submitted resume can take precedence inside one interview without rewriting the long-term identity after the interview ends.
+
+## Second Resident: CampusAtlas
+
+CampusAtlas deals with a different kind of mess: many campus websites, frequently changing policies, pages that require login, and rules that were valid last year but are not valid today.
+
+It reuses the same Learning Engine with a campus policy adapter that tracks who published a rule, who it applies to, when it is valid, and whether the current user may retrieve it. Scholarship policies, graduate recommendations, administrative procedures, and internal documents can all travel through the same evidence chain.
+
+Learning Engine does not need to know what a scholarship is. It provides sources, evidence, claims, time, and retrieval; CampusAtlas translates those capabilities into campus rules.
+
+## Repository Map
+
+```text
+apps/mind-clone/       MindClone, its paper, and its research corpus
+apps/campus-atlas/     CampusAtlas policy adapter
+packages/learning-engine/
+                       shared source-to-evidence foundation
+docs/                  cross-application architecture and contribution rules
+```
+
+There will be more agents later. They should reuse the foundation before building another one from scratch.
+
+## Further Reading
+
+- [Learning Engine](packages/learning-engine/README.md)
+- [MindClone](apps/mind-clone/README.md)
+- [CampusAtlas](apps/campus-atlas/README.md)
+- [Monorepo boundaries](docs/monorepo.md)
+- [Commit conventions](docs/commit-conventions.md)
