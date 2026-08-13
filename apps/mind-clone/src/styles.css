@@ -273,14 +273,3 @@ button:disabled { cursor: not-allowed; opacity: .45; }
 .daily-history .daily-nav > button { height: 28px; min-height: 28px; padding: 3px 10px; gap: 7px; border-radius: 8px; font-size: 12px; line-height: normal; }
 .daily-history .recents-toggle, .daily-history .session-item span { font-size: 12px; }
 .daily-history .daily-nav > button > svg { width: 16px; height: 16px; }
-
-/* Recents keeps the spacious conversation-card treatment. */
-.daily-history .recents-panel { margin-top: 28px; }
-.daily-history .recents-toggle { padding: 0 10px 14px; font-size: 28px; font-weight: 650; }
-.daily-history .session-list { gap: 16px; padding: 0 0 18px; }
-.daily-history .session-item { display: block; min-height: 96px; padding: 0; border-radius: 16px; background: var(--mc-panel-muted); overflow: hidden; }
-.daily-history .session-item:hover, .daily-history .session-item.active { background: var(--mc-panel-muted); }
-.daily-history .session-item > button:first-child { display: block; width: 100%; min-height: 96px; padding: 22px 20px; border-radius: 16px; color: var(--mc-ink); font-size: 17px; line-height: 1.45; white-space: normal; }
-.daily-history .session-item > button:first-child span { display: block; font-size: inherit; line-height: inherit; white-space: normal; overflow: visible; text-overflow: clip; }
-.daily-history .session-item:hover > button:first-child, .daily-history .session-item.active > button:first-child { color: var(--mc-ink); background: var(--mc-panel-muted); }
-.daily-history .session-more { position: absolute; top: 8px; right: 8px; }
