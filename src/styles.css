@@ -61,7 +61,10 @@ button:disabled { cursor: not-allowed; opacity: .45; }
     --mc-user-bubble: #303030; --mc-user-bubble-border: #454545;
   }
 }
-html, body { background: var(--mc-bg); color: var(--mc-ink); }
+:root, body { background: var(--mc-bg); color: var(--mc-ink); }
+:root[data-theme="dark"] { color-scheme: dark; }
+:root[data-theme="light"] { color-scheme: light; }
+@media (prefers-color-scheme: dark) { :root[data-theme="system"] { color-scheme: dark; } }
 .sidebar, .daily-history { background: var(--mc-sidebar); color: var(--mc-sidebar-ink); border-color: #373737; }
 .brand, .daily-brand { color: var(--mc-sidebar-ink); }
 .brand svg, .daily-brand svg { color: var(--mc-sidebar-ink); }
@@ -240,6 +243,6 @@ html, body { background: var(--mc-bg); color: var(--mc-ink); }
 
 /* Fixed navigation and recent rows share the same item geometry. */
 .daily-history .daily-nav { gap: 1px; margin: 0 0 12px; padding: 0 0 12px; }
-.daily-history .daily-nav > button { height: 28px; min-height: 28px; padding: 3px 10px; gap: 5px; border-radius: 8px; font-size: 12px; line-height: normal; }
+.daily-history .daily-nav > button { height: 28px; min-height: 28px; padding: 3px 10px; gap: 7px; border-radius: 8px; font-size: 12px; line-height: normal; }
 .daily-history .recents-toggle, .daily-history .session-item span { font-size: 12px; }
-.daily-history .daily-nav > button > svg { width: 12px; height: 12px; }
+.daily-history .daily-nav > button > svg { width: 16px; height: 16px; }
