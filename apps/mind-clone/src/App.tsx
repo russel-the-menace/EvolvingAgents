@@ -91,6 +91,11 @@ export function App() {
     return saved === 'deepseek-reasoner' ? 'deepseek-medium' : 'deepseek-light';
   });
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [dailyNewChatActive, setDailyNewChatActive] = useState(false);
+  const [sidebarWidth, setSidebarWidth] = useState(() => {
+    const saved = Number(window.localStorage.getItem('mindclone-sidebar-width'));
+    return Number.isFinite(saved) ? Math.min(420, Math.max(240, saved)) : 280;
+  });
   const abortRef = useRef<AbortController | null>(null);
   const generationRef = useRef(0);
   const transcriptRef = useRef<HTMLDivElement>(null);
@@ -293,42 +298,26 @@ export function App() {
   }
 
   return (
-    <main className={`app-shell ${sidebarCollapsed ? 'sidebar-collapsed' : ''} ${mode === 'daily' ? 'daily-mode' : ''}`}>
-      <aside className="sidebar">
-        <div className="brand"><Sparkles size={20} /><span>MindClone</span></div>
-        <nav>
-          <button className={mode === 'daily' ? 'nav-item active' : 'nav-item'} onClick={() => setMode('daily')}>
-            <MessageCircle size={18} /> Daily chat
-          </button>
-          <button className={mode === 'prepare' ? 'nav-item active' : 'nav-item'} onClick={() => setMode('prepare')}>
-            <FileText size={18} /> Interview prep
-          </button>
-          <button className={mode === 'memory' ? 'nav-item active' : 'nav-item'} onClick={() => { setMode('memory'); void refreshMemory(); }}>
-            <MessageSquarePlus size={18} /> Memory inbox
-          </button>
-          <button className={mode === 'formal' ? 'nav-item active' : 'nav-item'} onClick={() => packet && setMode('formal')} disabled={!packet}>
-            <BotMessageSquare size={18} /> Live interview
-          </button>
-        </nav>
-        <div className="sidebar-foot">
-          <div className="local-status"><span /> Local engine</div>
-          <button className="icon-button" title="Model settings" onClick={() => setShowSettings(true)}><Settings2 size={18} /></button>
-        </div>
-      </aside>
-
+    <main className={`app-shell ${sidebarCollapsed ? 'sidebar-collapsed' : ''}`} style={{ '--app-sidebar-width': `${sidebarWidth}px` } as CSSProperties}>
+      <AppSidebar sessions={dailySessions} activeSessionId={dailySessionId} newChatActive={dailyNewChatActive} mode={mode} hasPacket={Boolean(packet)}
+        sidebarCollapsed={sidebarCollapsed} sidebarWidth={sidebarWidth} onSidebarWidthChange={setSidebarWidth}
+        onToggleSidebar={() => setSidebarCollapsed((current) => !current)} onModeChange={setMode} onOpenSettings={() => setShowSettings(true)}
+        onNewChat={() => { setDailyNewChatActive(true); setDailySessionId(null); setDailyInput(''); setDailyError(''); setMode('daily'); }}
+        onSelectSession={(id) => { setDailyNewChatActive(false); setDailySessionId(id); setMode('daily'); }}
+        onRefresh={() => void refreshSessions()} onError={setDailyError} />
+      {sidebarCollapsed && <button className="sidebar-reopen" title="Expand sidebar" onClick={() => setSidebarCollapsed(false)}><PanelLeftOpen size={19} /></button>}
       <section className="workspace">
-        {mode === 'prepare' ? (
+        {mode === 'daily' ? (
+          <DailyChatView sessions={dailySessions} activeSessionId={dailySessionId} input={dailyInput} streaming={dailyStreaming} error={dailyError} model={dailyModel} newChatActive={dailyNewChatActive}
+            onModelChange={(model) => { setDailyModel(model); window.localStorage.setItem('mindclone.daily-model', model); }}
+            onInputChange={setDailyInput} onNewSession={newDailySession} onRefresh={() => void refreshSessions()}
+            onError={setDailyError} onStreamChange={setDailyStreaming} onImport={importChatGPTToInbox} onNewChatActiveChange={setDailyNewChatActive} />
+        ) : mode === 'prepare' ? (
           <PrepareView
             jd={jd} resume={resume} packet={packet} ready={ready}
             onJdChange={setJd} onResumeChange={setResume} onPrepare={() => void prepare()}
             onEnter={enterFormal} onUseExample={() => { setJd(exampleJD); setResume(exampleResume); }}
           />
-        ) : mode === 'daily' ? (
-          <DailyChatView sessions={dailySessions} activeSessionId={dailySessionId} input={dailyInput} streaming={dailyStreaming} error={dailyError} model={dailyModel} onModelChange={(model) => { setDailyModel(model); window.localStorage.setItem('mindclone.daily-model', model); }}
-            onInputChange={setDailyInput} onSelectSession={setDailySessionId} onNewSession={newDailySession} onRefresh={() => void refreshSessions()}
-            onError={setDailyError} onStreamChange={setDailyStreaming} onImport={importChatGPTToInbox} sidebarCollapsed={sidebarCollapsed}
-            onToggleSidebar={() => setSidebarCollapsed((current) => !current)} mode={mode} hasPacket={Boolean(packet)} onModeChange={setMode}
-            onOpenSettings={() => setShowSettings(true)} />
         ) : mode === 'memory' ? (
           <MemoryView documents={memoryDocuments} candidates={memoryCandidates} error={memoryError} onRefresh={refreshMemory} />
         ) : packet ? (
@@ -364,13 +353,27 @@ function extractChatGPTConversations(value: unknown) {
   });
 }
 
-function DailyChatView({ sessions, activeSessionId, input, streaming, error, model, onModelChange, onInputChange, onSelectSession, onNewSession, onRefresh, onError, onStreamChange, onImport, sidebarCollapsed, onToggleSidebar, mode, hasPacket, onModeChange, onOpenSettings }: {
+function AppSidebar({ sessions, activeSessionId, newChatActive, mode, hasPacket, sidebarCollapsed, sidebarWidth, onSidebarWidthChange, onToggleSidebar, onModeChange, onOpenSettings, onNewChat, onSelectSession, onRefresh, onError }: {
+  sessions: DailySession[]; activeSessionId: string | null; newChatActive: boolean; mode: Mode; hasPacket: boolean; sidebarCollapsed: boolean; sidebarWidth: number;
+  onSidebarWidthChange: (width: number) => void; onToggleSidebar: () => void; onModeChange: (mode: Mode) => void; onOpenSettings: () => void; onNewChat: () => void; onSelectSession: (id: string) => void; onRefresh: () => void; onError: (value: string) => void;
+}) {
+  const [sessionMenuId, setSessionMenuId] = useState<string | null>(null);
+  const resizeRef = useRef<{ startX: number; startWidth: number } | null>(null);
+  function resizeStart(event: React.PointerEvent<HTMLDivElement>) { if (sidebarCollapsed) return; resizeRef.current = { startX: event.clientX, startWidth: sidebarWidth }; event.currentTarget.setPointerCapture(event.pointerId); }
+  function resizeMove(event: React.PointerEvent<HTMLDivElement>) { if (resizeRef.current) onSidebarWidthChange(Math.min(420, Math.max(240, resizeRef.current.startWidth + event.clientX - resizeRef.current.startX))); }
+  function resizeEnd(event: React.PointerEvent<HTMLDivElement>) { resizeRef.current = null; window.localStorage.setItem('mindclone-sidebar-width', String(sidebarWidth)); if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId); }
+  async function updateSession(session: DailySession, update: Partial<Pick<DailySession, 'title' | 'pinned'>>) { try { await memoryApi.updateSession(session.id, update); setSessionMenuId(null); onRefresh(); } catch (caught) { onError((caught as Error).message); } }
+  async function deleteSession(session: DailySession) { if (!window.confirm(`Delete “${session.title}” and all messages in it? Linked candidate memories will also be removed.`)) return; try { await memoryApi.deleteSession(session.id); if (session.id === activeSessionId) onNewChat(); onRefresh(); } catch (caught) { onError((caught as Error).message); } }
+  function renameSession(session: DailySession) { const title = window.prompt('Rename conversation', session.title)?.trim(); if (title && title !== session.title) void updateSession(session, { title }); }
+  return <aside className="daily-history" style={{ width: sidebarCollapsed ? 0 : sidebarWidth }}><div className="daily-brand"><Sparkles size={21} /><span>MindClone</span><button className="icon-button sidebar-close" title="Collapse sidebar" onClick={onToggleSidebar}><PanelLeftClose size={19} /></button></div><nav className="daily-nav"><button className={mode === 'daily' && (newChatActive || !activeSessionId) ? 'active' : ''} onClick={onNewChat}><Plus size={14} /> New Chat</button><button className={mode === 'prepare' ? 'active' : ''} onClick={() => onModeChange('prepare')}><FileText size={14} /> Interview prep</button><button className={mode === 'memory' ? 'active' : ''} onClick={() => onModeChange('memory')}><MessageSquarePlus size={14} /> Memory inbox</button><button className={mode === 'formal' ? 'active' : ''} disabled={!hasPacket} onClick={() => hasPacket && onModeChange('formal')}><BotMessageSquare size={14} /> Live interview</button></nav><div className="recents-panel"><div className="daily-history-top recents-toggle"><span>Recents</span></div><div className="session-list">{sessions.length === 0 ? <p>Start a conversation. MindClone keeps your record on this device.</p> : [...sessions].sort((left, right) => Number(Boolean(right.pinned)) - Number(Boolean(left.pinned)) || new Date(right.updatedAt).getTime() - new Date(left.updatedAt).getTime()).map((session) => <div key={session.id} className={mode === 'daily' && session.id === activeSessionId && !newChatActive ? 'session-item active' : 'session-item'}><button onClick={() => { setSessionMenuId(null); onSelectSession(session.id); }}><span>{session.pinned && <Pin size={12} fill="currentColor" />} {session.title}</span></button><div className="session-more"><button className="session-more-trigger" title="Conversation options" onClick={(event) => { event.stopPropagation(); setSessionMenuId((current) => current === session.id ? null : session.id); }}><MoreHorizontal size={17} /></button>{sessionMenuId === session.id && <div className="session-context-menu"><button onClick={() => void updateSession(session, { pinned: !session.pinned })}><Pin size={15} /> {session.pinned ? 'Unpin' : 'Pin'}</button><button onClick={() => renameSession(session)}><Pencil size={15} /> Rename</button><button className="danger" onClick={() => void deleteSession(session)}><Trash2 size={15} /> Delete</button></div>}</div></div>)}</div></div><div className="daily-sidebar-footer"><div className="local-status"><span /> Local engine</div><button className="icon-button light" title="Settings" onClick={onOpenSettings}><Settings2 size={18} /></button></div><div className="sidebar-resize-handle" role="separator" aria-orientation="vertical" aria-label="Resize sidebar" onPointerDown={resizeStart} onPointerMove={resizeMove} onPointerUp={resizeEnd} onPointerCancel={resizeEnd} /></aside>;
+}
+
+function DailyChatView({ sessions, activeSessionId, input, streaming, error, model, newChatActive, onModelChange, onInputChange, onNewSession, onRefresh, onError, onStreamChange, onImport, onNewChatActiveChange }: {
   sessions: DailySession[]; activeSessionId: string | null; input: string; streaming: boolean; error: string;
   model: DailyModel; onModelChange: (model: DailyModel) => void;
-  onInputChange: (value: string) => void; onSelectSession: (id: string) => void; onNewSession: () => Promise<string | null>; onRefresh: () => void;
+  newChatActive: boolean; onInputChange: (value: string) => void; onNewSession: () => Promise<string | null>; onRefresh: () => void;
   onError: (value: string) => void; onStreamChange: (value: boolean) => void; onImport: (file: File) => Promise<void>;
-  sidebarCollapsed: boolean; onToggleSidebar: () => void;
-  mode: Mode; hasPacket: boolean; onModeChange: (mode: Mode) => void; onOpenSettings: () => void;
+  onNewChatActiveChange: (value: boolean) => void;
 }) {
   const [attachmentOpen, setAttachmentOpen] = useState(false);
   const [attachmentNote, setAttachmentNote] = useState('');
@@ -379,22 +382,13 @@ function DailyChatView({ sessions, activeSessionId, input, streaming, error, mod
   const [thinkingVisible, setThinkingVisible] = useState(false);
   const [editingMessage, setEditingMessage] = useState<{ id: string; content: string } | null>(null);
   const [draftMessages, setDraftMessages] = useState<DailyMessage[]>([]);
-  const [recentsCollapsed, setRecentsCollapsed] = useState(false);
   const [composerExpanded, setComposerExpanded] = useState(false);
   const [modelMenuOpen, setModelMenuOpen] = useState(false);
-  const [sessionMenuId, setSessionMenuId] = useState<string | null>(null);
-  const [newChatActive, setNewChatActive] = useState(false);
   const [showScrollButton, setShowScrollButton] = useState(false);
-  const [sidebarWidth, setSidebarWidth] = useState(() => {
-    const saved = Number(window.localStorage.getItem('mindclone-sidebar-width'));
-    return Number.isFinite(saved) ? Math.min(420, Math.max(240, saved)) : 280;
-  });
   const listRef = useRef<HTMLDivElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const dailyInputRef = useRef<HTMLTextAreaElement>(null);
   const modelMenuRef = useRef<HTMLDivElement>(null);
-  const resizeRef = useRef<{ startX: number; startWidth: number } | null>(null);
-  const sidebarWidthRef = useRef(sidebarWidth);
   const thinkingTimerRef = useRef<number | null>(null);
   const followingRef = useRef(true);
   const scrollTimerRef = useRef<number | null>(null);
@@ -425,47 +419,9 @@ function DailyChatView({ sessions, activeSessionId, input, streaming, error, mod
     return () => document.removeEventListener('mousedown', closeMenu);
   }, []);
 
-  function startSidebarResize(event: React.PointerEvent<HTMLDivElement>) {
-    if (sidebarCollapsed) return;
-    resizeRef.current = { startX: event.clientX, startWidth: sidebarWidth };
-    event.currentTarget.setPointerCapture(event.pointerId);
-    document.body.classList.add('sidebar-resizing');
-  }
-
-  function resizeSidebar(event: React.PointerEvent<HTMLDivElement>) {
-    if (!resizeRef.current) return;
-    const next = Math.min(420, Math.max(240, resizeRef.current.startWidth + event.clientX - resizeRef.current.startX));
-    sidebarWidthRef.current = next;
-    setSidebarWidth(next);
-  }
-
-  function endSidebarResize(event: React.PointerEvent<HTMLDivElement>) {
-    if (!resizeRef.current) return;
-    resizeRef.current = null;
-    document.body.classList.remove('sidebar-resizing');
-    window.localStorage.setItem('mindclone-sidebar-width', String(sidebarWidthRef.current));
-    if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
-  }
-
   function updateDailyInput(value: string) {
     if (!value) setComposerExpanded(false);
     onInputChange(value);
-  }
-
-  function startNewChat() {
-    setNewChatActive(true);
-    setSessionMenuId(null);
-    setEditingMessage(null);
-    setDraftMessages([]);
-    onInputChange('');
-    onError('');
-    onSelectSession('');
-  }
-
-  function selectSession(sessionId: string) {
-    setNewChatActive(false);
-    setSessionMenuId(null);
-    onSelectSession(sessionId);
   }
 
   async function send(contentOverride?: string, replaceFromMessageId?: string) {
@@ -475,7 +431,7 @@ function DailyChatView({ sessions, activeSessionId, input, streaming, error, mod
     if (!sessionId) {
       sessionId = await onNewSession();
       if (!sessionId) return;
-      setNewChatActive(false);
+      onNewChatActiveChange(false);
     }
     const userMessage: DailyMessage = { id: crypto.randomUUID(), role: 'user', content, createdAt: new Date().toISOString() };
     const answerMessage: DailyMessage = { id: crypto.randomUUID(), role: 'assistant', content: '', createdAt: new Date().toISOString() };
@@ -522,24 +478,6 @@ function DailyChatView({ sessions, activeSessionId, input, streaming, error, mod
     try { await onImport(file); setAttachmentStatus('ChatGPT history imported to the local inbox.'); } catch (caught) { setAttachmentStatus((caught as Error).message); } finally { setAttachmentBusy(false); }
   }
 
-  async function deleteSession(session: DailySession) {
-    if (!window.confirm(`Delete “${session.title}” and all messages in it? Linked candidate memories will also be removed.`)) return;
-    try {
-      await memoryApi.deleteSession(session.id);
-      if (session.id === activeSessionId) onSelectSession('');
-      onRefresh();
-    } catch (caught) { onError((caught as Error).message); }
-  }
-
-  async function updateSession(session: DailySession, update: Partial<Pick<DailySession, 'title' | 'pinned'>>) {
-    try { await memoryApi.updateSession(session.id, update); setSessionMenuId(null); onRefresh(); } catch (caught) { onError((caught as Error).message); }
-  }
-
-  function renameSession(session: DailySession) {
-    const title = window.prompt('Rename conversation', session.title)?.trim();
-    if (title && title !== session.title) void updateSession(session, { title });
-  }
-
   function editMessage(message: DailyMessage) {
     setEditingMessage({ id: message.id, content: message.content });
   }
@@ -575,13 +513,10 @@ function DailyChatView({ sessions, activeSessionId, input, streaming, error, mod
     setShowScrollButton(false);
   }
 
-  return <div className="daily-layout" style={{ '--daily-sidebar-width': `${sidebarWidth}px` } as CSSProperties}>
-    <aside className="daily-history"><div className="daily-brand"><Sparkles size={21} /><span>MindClone</span><button className="icon-button sidebar-close" title="Collapse sidebar" onClick={onToggleSidebar}><PanelLeftClose size={19} /></button></div><nav className="daily-nav"><button className={newChatActive || !activeSessionId ? 'active' : ''} onClick={startNewChat}><Plus size={14} /> New Chat</button><button onClick={() => onModeChange('prepare')}><FileText size={14} /> Interview prep</button><button onClick={() => onModeChange('memory')}><MessageSquarePlus size={14} /> Memory inbox</button><button disabled={!hasPacket} onClick={() => hasPacket && onModeChange('formal')}><BotMessageSquare size={14} /> Live interview</button></nav><div className="recents-panel"><button className={recentsCollapsed ? 'daily-history-top recents-toggle collapsed' : 'daily-history-top recents-toggle'} onClick={() => setRecentsCollapsed((collapsed) => !collapsed)}><span>Recents</span><ChevronDown size={17} /></button>{!recentsCollapsed && <div className="session-list">{sessions.length === 0 ? <p>Start a conversation. MindClone keeps your record on this device.</p> : [...sessions].sort((left, right) => Number(Boolean(right.pinned)) - Number(Boolean(left.pinned)) || new Date(right.updatedAt).getTime() - new Date(left.updatedAt).getTime()).map((session) => <div key={session.id} className={session.id === activeSessionId && !newChatActive ? 'session-item active' : 'session-item'}><button onClick={() => selectSession(session.id)}><span>{session.pinned && <Pin size={12} fill="currentColor" />} {session.title}</span></button><div className="session-more"><button className="session-more-trigger" title="Conversation options" onClick={(event) => { event.stopPropagation(); setSessionMenuId((current) => current === session.id ? null : session.id); }}><MoreHorizontal size={17} /></button>{sessionMenuId === session.id && <div className="session-context-menu"><button onClick={() => void updateSession(session, { pinned: !session.pinned })}><Pin size={15} /> {session.pinned ? 'Unpin' : 'Pin'}</button><button onClick={() => renameSession(session)}><Pencil size={15} /> Rename</button><button className="danger" onClick={() => void deleteSession(session)}><Trash2 size={15} /> Delete</button></div>}</div></div>)}</div>}</div><div className="daily-sidebar-footer"><div className="local-status"><span /> Local engine</div><button className="icon-button light" title="Settings" onClick={onOpenSettings}><Settings2 size={18} /></button></div><div className="sidebar-resize-handle" role="separator" aria-orientation="vertical" aria-label="Resize sidebar" onPointerDown={startSidebarResize} onPointerMove={resizeSidebar} onPointerUp={endSidebarResize} onPointerCancel={endSidebarResize} /></aside>{sidebarCollapsed && <button className="sidebar-reopen" title="Expand sidebar" onClick={onToggleSidebar}><PanelLeftOpen size={19} /></button>}
-    <section className="daily-conversation"><div className="daily-transcript" ref={listRef} onScroll={updateScrollPosition}>{messages.length === 0 ? <div className="daily-empty"><Sparkles size={32} /><h2>Start with what is on your mind</h2><p>Every conversation is saved locally. Important material is added to candidate memories asynchronously for your review.</p></div> : messages.map((message) => <article className={`daily-message ${message.role}`} key={message.id}>{editingMessage?.id === message.id ? <div className="inline-message-editor"><textarea autoFocus value={editingMessage.content} onChange={(event) => setEditingMessage({ ...editingMessage, content: event.target.value })} onKeyDown={(event) => { if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') void send(editingMessage.content, message.id); if (event.key === 'Escape') setEditingMessage(null); }} /><div><button className="edit-cancel-button" onClick={() => setEditingMessage(null)}>Cancel</button><button className="edit-send-button" disabled={!editingMessage.content.trim() || streaming} onClick={() => void send(editingMessage.content, message.id)}>Send</button></div></div> : <><div className="message-body">{message.content ? <MarkdownText content={message.content} /> : streaming && message.role === 'assistant' ? <ThinkingIndicator /> : null}{thinkingVisible && message.id === messages.at(-1)?.id && message.role === 'assistant' && message.content && <ThinkingIndicator />}</div>{message.content && <div className="message-actions"><button title="Copy message" aria-label="Copy message" onClick={() => void copyMessage(message)}><Copy size={16} /></button>{message.role === 'user' && <button title="Edit message" aria-label="Edit message" onClick={() => editMessage(message)}><Pencil size={16} /></button>}</div>}</>}</article>)}{error && <div className="error-note">{error}</div>}</div>
+  return <section className="daily-conversation"><div className="daily-transcript" ref={listRef} onScroll={updateScrollPosition}>{messages.length === 0 ? <div className="daily-empty"><Sparkles size={32} /><h2>Start with what is on your mind</h2><p>Every conversation is saved locally. Important material is added to candidate memories asynchronously for your review.</p></div> : messages.map((message) => <article className={`daily-message ${message.role}`} key={message.id}>{editingMessage?.id === message.id ? <div className="inline-message-editor"><textarea autoFocus value={editingMessage.content} onChange={(event) => setEditingMessage({ ...editingMessage, content: event.target.value })} onKeyDown={(event) => { if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') void send(editingMessage.content, message.id); if (event.key === 'Escape') setEditingMessage(null); }} /><div><button className="edit-cancel-button" onClick={() => setEditingMessage(null)}>Cancel</button><button className="edit-send-button" disabled={!editingMessage.content.trim() || streaming} onClick={() => void send(editingMessage.content, message.id)}>Send</button></div></div> : <><div className="message-body">{message.content ? <MarkdownText content={message.content} /> : streaming && message.role === 'assistant' ? <ThinkingIndicator /> : null}{thinkingVisible && message.id === messages.at(-1)?.id && message.role === 'assistant' && message.content && <ThinkingIndicator />}</div>{message.content && <div className="message-actions"><button title="Copy message" aria-label="Copy message" onClick={() => void copyMessage(message)}><Copy size={16} /></button>{message.role === 'user' && <button title="Edit message" aria-label="Edit message" onClick={() => editMessage(message)}><Pencil size={16} /></button>}</div>}</>}</article>)}{error && <div className="error-note">{error}</div>}</div>
       <button className={showScrollButton ? 'scroll-to-latest is-visible' : 'scroll-to-latest'} title="Back to latest message" aria-label="Back to latest message" aria-hidden={!showScrollButton} disabled={!showScrollButton} onClick={scrollToLatest}><ArrowDown size={18} /></button>
       <div className={composerExpanded ? 'daily-composer expanded' : 'daily-composer'}><div className="attachment-area">{attachmentOpen && <div className="attachment-menu"><div className="attachment-menu-title">Add context</div><button onClick={() => fileRef.current?.click()}><FileUp size={17} /> Import ChatGPT history</button><button onClick={() => setAttachmentStatus('Paste Markdown or notes below.')}><Paperclip size={17} /> Add text / Markdown</button><textarea value={attachmentNote} onChange={(event) => setAttachmentNote(event.target.value)} placeholder="Paste supplementary material..." /><button className="primary-button compact" disabled={attachmentBusy} onClick={() => void saveAttachmentNote()}>{attachmentBusy ? 'Processing...' : 'Save to inbox'}</button>{attachmentStatus && <p>{attachmentStatus}</p>}</div>}<input ref={fileRef} className="hidden-input" type="file" accept="application/json,.json" onChange={(event) => { const file = event.target.files?.[0]; if (file) void importFile(file); event.currentTarget.value = ''; }} /><button className={attachmentOpen ? 'plus-button open' : 'plus-button'} title="Add material" onClick={() => setAttachmentOpen((current) => !current)}><Plus size={21} /></button></div><textarea ref={dailyInputRef} rows={1} value={input} onChange={(event) => updateDailyInput(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); void send(); } }} placeholder="Message MindClone..." /><div ref={modelMenuRef} className={modelMenuOpen ? 'daily-model-picker open' : 'daily-model-picker'}><button type="button" aria-haspopup="menu" aria-expanded={modelMenuOpen} onClick={() => setModelMenuOpen((open) => !open)}>{({ 'deepseek-light': 'DeepSeek Light', 'deepseek-medium': 'DeepSeek Medium', 'deepseek-high': 'DeepSeek High', 'deepseek-ultra': 'DeepSeek Ultra' } as const)[model]}<ChevronDown size={16} /></button>{modelMenuOpen && <div className="daily-model-menu" role="menu">{([{ id: 'deepseek-light', name: 'DeepSeek Light', detail: 'deepseek-v4-flash · non-thinking' }, { id: 'deepseek-medium', name: 'DeepSeek Medium', detail: 'deepseek-v4-flash · thinking' }, { id: 'deepseek-high', name: 'DeepSeek High', detail: 'deepseek-v4-pro · non-thinking' }, { id: 'deepseek-ultra', name: 'DeepSeek Ultra', detail: 'deepseek-v4-pro · thinking' }] as const).map((option) => <button key={option.id} role="menuitem" className={model === option.id ? 'selected' : ''} onClick={() => { onModelChange(option.id); setModelMenuOpen(false); }}><strong>{option.name}</strong><span>{option.detail}</span></button>)}</div>}</div><button className="send-icon" disabled={!input.trim() || streaming} title="Send" onClick={() => void send()}><SendHorizontal size={19} /></button></div>
-    </section>
-  </div>;
+    </section>;
 }
 
 function MemoryView({ documents, candidates, error, onRefresh }: {
