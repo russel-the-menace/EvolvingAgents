@@ -19,10 +19,13 @@ Interviewing is the first acceptance scenario, not the product boundary.
 
 MindClone is a local modular monolith. The browser/Electron client owns interaction and local-model streaming. The Express service owns cognition state, provenance, scene compilation, and audits. SQLite is the sole structured source of truth.
 
+The domain-neutral write/retrieval path lives in `packages/learning-engine`. It owns source persistence, text chunking, extractor orchestration, claim/evidence provenance, FTS retrieval, validity filtering, and citation-ready evidence. `server/adapters/mindclone-learning.mjs` supplies MindClone's extraction prompt and epistemic authorization policy. This dependency direction allows another application to reuse the engine with a different policy without importing interview or personal-identity code.
+
 ```text
 Imported source / daily dialogue / transcript
                     |
                     v
+     Reusable learning engine
          Source + evidence units
                     |
                     v
@@ -80,11 +83,13 @@ On first open, the repository migrates `data/memory-store.json` once and records
 ## 6. Write Path
 
 1. Save the source locally before model extraction.
-2. Extract atomic claims and evidence through the configured cloud model.
-3. Classify source ownership before assigning authorization.
-4. External learning becomes `understood/reasoning_use` and may create a deferred inquiry.
-5. Personal material remains `observed/none` until reviewed.
-6. Discussion-based adoption creates a new `user/endorsed/personal_view` claim and an `internalized_as` edge.
+2. Split the full source into bounded, offset-preserving chunks.
+3. Extract atomic claims and evidence from every chunk through the configured extractor.
+4. Merge exact duplicate proposals while retaining every supporting evidence fragment.
+5. Classify source ownership before assigning authorization.
+6. External learning becomes `understood/reasoning_use` and may create a deferred inquiry.
+7. Personal material remains `observed/none` until reviewed.
+8. Discussion-based adoption creates a new `user/endorsed/personal_view` claim and an `internalized_as` edge.
 
 Short-video ingestion resolves the supplied link through TiKHub, downloads temporary media, extracts audio, runs local Whisper, and deletes temporary files. Only speech text enters cognition; video frames are outside the current scope.
 
@@ -97,7 +102,7 @@ Preparation submits the job description, exact resume, audience, and goal to `/a
 - authorized personal evidence and views;
 - user-owned expression examples.
 
-For every question, `/api/scenes/:id/plan` ranks relevant claims without merging their ownership. The local model renders from that plan. `/api/scenes/:id/complete` records the answer and currently audits unsupported numeric claims, first-person evidence availability, and scene write-back. The next audit increment will add clause-level provenance and semantic contradiction checking.
+For every question, the learning engine performs FTS candidate retrieval and domain-policy filtering before `/api/scenes/:id/plan` ranks relevant claims without merging their ownership. Vector retrievers and rerankers can be injected without changing the engine. The local model renders from that plan. `/api/scenes/:id/complete` records the answer and currently audits unsupported numeric claims, first-person evidence availability, and scene write-back. The next audit increment will add clause-level provenance and semantic contradiction checking.
 
 ## 8. Model Boundary
 
@@ -114,6 +119,8 @@ Implemented in the first refactor:
 - bounded interview scene snapshots;
 - separated answer plans and post-answer audit records;
 - local Whisper short-video speech ingestion;
+- reusable source/chunk/claim/evidence learning engine with FTS, validity filters, and pluggable retrieval;
+- a second-domain campus-policy proof covering access scopes, policy expiry, abstention, and citations;
 - deterministic domain, repository, and HTTP integration tests.
 
 Next research increments are hybrid FTS/embedding retrieval, contradiction confirmation with tombstones, clause-level citations, inquiry scheduling, learned expression features from `Recents`, and the preregistered longitudinal evaluation.

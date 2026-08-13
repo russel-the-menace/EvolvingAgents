@@ -4,9 +4,10 @@ import { join } from 'node:path';
 import express from 'express';
 import { allowedAuthorization, assertOwnershipNonEscalation, assertTransition, defaultAuthorization } from './domain/cognition.mjs';
 import { auditAnswer } from './domain/answer-audit.mjs';
-import { compileSceneView, makeAnswerPlan, relevance, tokenize } from './domain/scenes.mjs';
+import { compileSceneView, makeAnswerPlan } from './domain/scenes.mjs';
 import { openDatabase } from './infrastructure/database.mjs';
 import { extractDouyinShare, resolveDouyinLink, transcribeShortVideo } from './infrastructure/video-transcription.mjs';
+import { createMindCloneLearningEngine } from './adapters/mindclone-learning.mjs';
 
 const app = express();
 const port = Number(process.env.PORT || 5270);
@@ -14,15 +15,12 @@ const repository = openDatabase(
   process.env.MINDCLONE_DB_PATH || join(process.cwd(), 'data', 'mindclone.sqlite'),
   process.env.MINDCLONE_LEGACY_STORE_PATH || join(process.cwd(), 'data', 'memory-store.json'),
 );
+const learningEngine = createMindCloneLearningEngine(repository);
 app.use(express.json({ limit: '50mb' }));
 
 function clip(value, length = 720) {
   const text = String(value || '').trim().replace(/\s+/g, ' ');
   return text.length > length ? `${text.slice(0, length)}...` : text;
-}
-
-function sourceIsExternal(source) {
-  return ['short_video', 'article', 'paper', 'podcast'].includes(source.sourceType);
 }
 
 function mapClaimToLegacy(claim) {
@@ -45,75 +43,8 @@ function mapClaimToLegacy(claim) {
   };
 }
 
-async function proposeWithDeepSeek(source) {
-  const apiKey = process.env.DEEPSEEK_API_KEY;
-  if (!apiKey) throw new Error('DEEPSEEK_API_KEY is not configured. Set it in the local .env file and restart the service.');
-  const external = sourceIsExternal(source);
-  const prompt = external
-    ? `Extract atomic, reusable claims from external learning material. Never attribute the source author's experience or opinion to the user. Return strict JSON: {"claims":[{"kind":"knowledge|example","owner":"external|third_party","title":"short title","proposition":"clear reusable claim in the source language","tags":["tag"],"sourceQuote":"direct supporting quote","confidence":0.0}]}. Use owner=third_party for cases or speaker-specific viewpoints. Every item initially represents understanding, not user endorsement. Return at most 12 items. Source:\n${source.content.slice(0, 24000)}`
-    : `Extract atomic claims from user-owned material. Use only supported information and distinguish experience, viewpoint, preference, value, knowledge, and expression samples. In conversation records, extract personal claims only from text explicitly labeled User; assistant text is context and must never become a user claim. Return strict JSON: {"claims":[{"kind":"experience|viewpoint|preference|value|knowledge|expression","owner":"user","title":"short title","proposition":"complete candidate claim","tags":["tag"],"sourceQuote":"direct supporting quote from the user","confidence":0.0}]}. These are observed candidates and require user endorsement before first-person use. Return at most 12 items. Source:\n${source.content.slice(0, 24000)}`;
-  const response = await fetch(`${(process.env.DEEPSEEK_BASE_URL || 'https://api.deepseek.com').replace(/\/$/, '')}/chat/completions`, {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      model: process.env.DEEPSEEK_MODEL || 'deepseek-chat',
-      temperature: 0.1,
-      response_format: { type: 'json_object' },
-      messages: [{ role: 'user', content: prompt }],
-    }),
-  });
-  if (!response.ok) throw new Error(`DeepSeek extraction request failed (${response.status}).`);
-  const payload = await response.json();
-  const parsed = JSON.parse(payload.choices?.[0]?.message?.content || '{}');
-  return Array.isArray(parsed.claims) ? parsed.claims : [];
-}
-
-function persistProposals(source, proposals) {
-  repository.deleteClaimsForSource(source.id);
-  const claims = proposals.map((proposal, ordinal) => {
-    const external = sourceIsExternal(source);
-    const owner = external ? (proposal.owner === 'third_party' ? 'third_party' : 'external') : 'user';
-    const kind = String(proposal.kind || (external ? 'knowledge' : 'experience'));
-    const epistemicStatus = external ? 'understood' : 'observed';
-    const evidenceId = repository.addEvidence({
-      sourceId: source.id,
-      ordinal,
-      text: String(proposal.sourceQuote || proposal.proposition || '').slice(0, 1200),
-      speaker: external ? 'source_author' : 'user',
-      owner,
-    });
-    return repository.addClaim({
-      title: String(proposal.title || 'Untitled claim').slice(0, 120),
-      proposition: String(proposal.proposition || '').slice(0, 1600),
-      kind,
-      owner,
-      epistemicStatus,
-      authorizationScope: defaultAuthorization({ owner, kind, status: epistemicStatus }),
-      tags: Array.isArray(proposal.tags) ? proposal.tags.map(String).slice(0, 12) : [],
-      confidence: Math.max(0, Math.min(Number(proposal.confidence || 0.6), 1)),
-    }, evidenceId);
-  }).filter((claim) => claim.proposition);
-  if (sourceIsExternal(source)) {
-    for (const claim of claims.filter((item) => item.kind === 'knowledge').slice(0, 3)) {
-      repository.addInquiry({
-        claimId: claim.id,
-        question: `你怎么看“${clip(claim.proposition, 120)}”？这只是你理解的新知识，还是也代表你的判断？`,
-        reason: 'External knowledge requires user deliberation before it can represent a personal viewpoint.',
-        priority: 0.5 + claim.confidence * 0.3,
-      });
-    }
-  }
-  return claims;
-}
-
-function relevantContext(query) {
-  const queryTokens = tokenize(query);
-  const ranked = repository.listClaims()
-    .filter((claim) => claim.authorizationScope !== 'none' && !['rejected', 'superseded', 'contested'].includes(claim.epistemicStatus))
-    .map((claim) => ({ claim, score: relevance(queryTokens, claim) }))
-    .filter((item) => item.score > 0)
-    .sort((left, right) => right.score - left.score)
-    .slice(0, 12);
+async function relevantContext(query) {
+  const ranked = await learningEngine.retrieve(query, { limit: 12 });
   const personal = ranked.filter(({ claim }) => claim.owner === 'user').map(({ claim }) => `- [${claim.id}] ${claim.kind}: ${clip(claim.proposition, 360)}`);
   const knowledge = ranked.filter(({ claim }) => claim.owner !== 'user').map(({ claim }) => `- [${claim.id}] ${claim.kind}: ${clip(claim.proposition, 360)}`);
   const inquiries = repository.listInquiries().slice(0, 2).map((item) => `- ${item.question}`);
@@ -127,7 +58,7 @@ function relevantContext(query) {
 async function streamDailyChat(session, response, query, model) {
   const apiKey = process.env.DEEPSEEK_API_KEY;
   if (!apiKey) throw new Error('DEEPSEEK_API_KEY is not configured. Set it in the local .env file and restart the service.');
-  const context = relevantContext(query);
+  const context = await relevantContext(query);
   const system = `You are MindClone, a long-term conversational partner. Help the user think, challenge weak assumptions when warranted, and express conclusions naturally. Distinguish source knowledge from the user's position. An understood external claim is available for reasoning but is not the user's belief. Never turn external or third-party material into the user's experience. Match the user's language.\n\n${context || 'No authorized long-term context is relevant yet.'}`;
   const options = {
     'deepseek-light': { model: 'deepseek-v4-flash', thinking: false },
@@ -165,13 +96,16 @@ app.get('/api/memory', (_, response) => {
   response.json({ documents: repository.listSources(), claims, memories: claims.map(mapClaimToLegacy), inquiries: repository.listInquiries() });
 });
 
-app.post('/api/memory/documents', (request, response, next) => {
+app.post('/api/memory/documents', async (request, response, next) => {
   try {
     const { title, sourceType, content, sourceUri, sourceActor } = request.body;
     if (!title || !content || !['chatgpt_export', 'note', 'conversation', 'short_video', 'resume', 'job_description', 'article', 'paper', 'podcast'].includes(sourceType)) {
       return response.status(400).json({ error: 'The imported material is incomplete or has an invalid source type.' });
     }
-    const document = repository.addSource({ id: randomUUID(), title: String(title).slice(0, 160), sourceType, content: String(content).slice(0, 2_000_000), sourceUri, sourceActor, createdAt: new Date().toISOString() });
+    const { source: document } = await learningEngine.ingest({
+      id: randomUUID(), title: String(title).slice(0, 160), sourceType,
+      content: String(content).slice(0, 2_000_000), sourceUri, sourceActor, createdAt: new Date().toISOString(),
+    }, { deduplicate: false });
     response.status(201).json({ document });
   } catch (error) { next(error); }
 });
@@ -180,8 +114,7 @@ app.post('/api/memory/extract', async (request, response, next) => {
   try {
     const source = repository.getSource(request.body.documentId);
     if (!source) return response.status(404).json({ error: 'Source material was not found.' });
-    const claims = persistProposals(source, await proposeWithDeepSeek(source));
-    repository.markSourceExtracted(source.id);
+    const { claims } = await learningEngine.learn(source.id);
     response.json({ claims, memories: claims.map(mapClaimToLegacy) });
   } catch (error) { next(error); }
 });
@@ -252,11 +185,14 @@ app.patch('/api/memory/candidates/:id', (request, response, next) => {
   } catch (error) { next(error); }
 });
 
-app.post('/api/scenes/compile', (request, response, next) => {
+app.post('/api/scenes/compile', async (request, response, next) => {
   try {
     const { jd, resume, audience = 'interviewer', goal = 'perform faithfully in the target interview', sceneType = 'interview' } = request.body;
     if (!jd?.trim() || !resume?.trim()) return response.status(400).json({ error: 'A job description and the submitted resume are required.' });
-    const scene = compileSceneView({ sceneId: randomUUID(), sceneType, audience, goal, jd, resume, claims: repository.listClaims() });
+    const retrieved = await learningEngine.retrieve(`${sceneType} ${audience} ${goal} ${jd}`, { limit: 24 });
+    const retrievedIds = new Set(retrieved.map((item) => item.claim.id));
+    const claims = repository.listClaims().filter((claim) => retrievedIds.has(claim.id) || claim.kind === 'expression');
+    const scene = compileSceneView({ sceneId: randomUUID(), sceneType, audience, goal, jd, resume, claims });
     repository.addScene(scene);
     response.status(201).json({ scene });
   } catch (error) { next(error); }
@@ -322,9 +258,13 @@ app.post('/api/chat/sessions/:id/stream', async (request, response, next) => {
     response.setHeader('Content-Type', 'text/event-stream'); response.setHeader('Cache-Control', 'no-cache'); response.setHeader('Connection', 'keep-alive'); response.flushHeaders();
     const answer = await streamDailyChat(repository.getSession(session.id), response, content, request.body.model);
     if (answer) repository.addMessage(session.id, { role: 'assistant', content: answer });
-    const source = repository.addSource({ id: randomUUID(), title: `Daily chat: ${repository.getSession(session.id).title}`, sourceType: 'conversation', content: `User: ${content}\n\nMindClone: ${answer}`, sourceActor: 'user_and_mindclone', createdAt: new Date().toISOString() });
+    const { source } = await learningEngine.ingest({
+      id: randomUUID(), title: `Daily chat: ${repository.getSession(session.id).title}`,
+      sourceType: 'conversation', content: `User: ${content}\n\nMindClone: ${answer}`,
+      sourceActor: 'user_and_mindclone', createdAt: new Date().toISOString(),
+    }, { deduplicate: false });
     response.write('data: [DONE]\n\n'); response.end();
-    void proposeWithDeepSeek(source).then((proposals) => { persistProposals(source, proposals); repository.markSourceExtracted(source.id); }).catch((error) => console.error('Daily claim extraction failed:', error.message));
+    void learningEngine.learn(source.id).catch((error) => console.error('Daily claim extraction failed:', error.message));
   } catch (error) { next(error); }
 });
 

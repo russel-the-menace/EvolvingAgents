@@ -53,6 +53,10 @@ npm run sync:reference
 
 它会从 `https://github.com/russel-the-menace/JD2Resume` 的 `master` 分支快进同步。详见 [参考同步说明](docs/reference-sync.md)。
 
+## 可复用学习引擎
+
+领域无关的来源、分块、命题、证据、检索和引用能力已抽到 [`packages/learning-engine`](packages/learning-engine)。MindClone 通过人格认知适配器使用它；校园政策示例通过发布机构、有效期和访问权限策略使用同一引擎。爬虫、Cookie、文档解析和回答 UI 不属于该包。
+
 ## 设计文档
 
 - [总体架构](docs/architecture.md)
@@ -63,3 +67,4 @@ npm run sync:reference
 - [日常对话](docs/modules/daily-conversation.md)
 - [论文第一版](docs/paper/MindClone_manuscript.md)
 - [文献新颖性审计](docs/paper/MindClone_novelty_audit.md)
+- [学习引擎抽离评估](docs/learning-engine-extraction-assessment.md)

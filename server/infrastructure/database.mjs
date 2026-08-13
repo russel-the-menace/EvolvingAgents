@@ -1,15 +1,12 @@
-import { createHash, randomUUID } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
 import { mkdirSync, readFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { legacyCandidateToClaim } from '../domain/cognition.mjs';
+import { createSqliteLearningStore } from '../../packages/learning-engine/src/index.mjs';
 
 function json(value, fallback = []) {
   try { return value ? JSON.parse(value) : fallback; } catch { return fallback; }
-}
-
-function checksum(value) {
-  return createHash('sha256').update(String(value || '')).digest('hex');
 }
 
 export function openDatabase(path, legacyPath) {
@@ -18,33 +15,6 @@ export function openDatabase(path, legacyPath) {
   db.exec('PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;');
   db.exec(`
     CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
-    CREATE TABLE IF NOT EXISTS sources (
-      id TEXT PRIMARY KEY, title TEXT NOT NULL, source_type TEXT NOT NULL, content TEXT NOT NULL,
-      source_uri TEXT, source_actor TEXT, checksum TEXT NOT NULL, metadata_json TEXT NOT NULL DEFAULT '{}',
-      created_at TEXT NOT NULL, extracted_at TEXT
-    );
-    CREATE TABLE IF NOT EXISTS evidence_units (
-      id TEXT PRIMARY KEY, source_id TEXT NOT NULL REFERENCES sources(id) ON DELETE CASCADE,
-      ordinal INTEGER NOT NULL DEFAULT 0, text TEXT NOT NULL, speaker TEXT, owner TEXT NOT NULL,
-      start_offset INTEGER, end_offset INTEGER, created_at TEXT NOT NULL
-    );
-    CREATE TABLE IF NOT EXISTS claims (
-      id TEXT PRIMARY KEY, title TEXT NOT NULL, proposition TEXT NOT NULL, kind TEXT NOT NULL,
-      owner TEXT NOT NULL, epistemic_status TEXT NOT NULL, authorization_scope TEXT NOT NULL DEFAULT 'none',
-      context_scope_json TEXT NOT NULL DEFAULT '[]', tags_json TEXT NOT NULL DEFAULT '[]', confidence REAL NOT NULL DEFAULT 0.5,
-      valid_from TEXT, valid_to TEXT, superseded_by TEXT, scene_id TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
-    );
-    CREATE TABLE IF NOT EXISTS claim_evidence (
-      claim_id TEXT NOT NULL REFERENCES claims(id) ON DELETE CASCADE,
-      evidence_id TEXT NOT NULL REFERENCES evidence_units(id) ON DELETE CASCADE,
-      relation TEXT NOT NULL DEFAULT 'supports', PRIMARY KEY (claim_id, evidence_id, relation)
-    );
-    CREATE TABLE IF NOT EXISTS claim_relations (
-      from_claim_id TEXT NOT NULL REFERENCES claims(id) ON DELETE CASCADE,
-      to_claim_id TEXT NOT NULL REFERENCES claims(id) ON DELETE CASCADE,
-      relation TEXT NOT NULL, created_at TEXT NOT NULL,
-      PRIMARY KEY (from_claim_id, to_claim_id, relation)
-    );
     CREATE TABLE IF NOT EXISTS authorization_events (
       id TEXT PRIMARY KEY, claim_id TEXT NOT NULL REFERENCES claims(id) ON DELETE CASCADE,
       from_status TEXT NOT NULL, to_status TEXT NOT NULL, from_scope TEXT NOT NULL, to_scope TEXT NOT NULL,
@@ -71,32 +41,33 @@ export function openDatabase(path, legacyPath) {
       id TEXT PRIMARY KEY, session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
       role TEXT NOT NULL, content TEXT NOT NULL, created_at TEXT NOT NULL, ordinal INTEGER NOT NULL
     );
-    CREATE VIRTUAL TABLE IF NOT EXISTS claim_search USING fts5(claim_id UNINDEXED, title, proposition, tags);
   `);
+  const learningStore = createSqliteLearningStore(db);
 
   const migrated = db.prepare("SELECT value FROM meta WHERE key = 'legacy_json_migrated_v1'").get();
-  if (!migrated && legacyPath) migrateLegacy(db, legacyPath);
-  return createRepository(db);
+  if (!migrated && legacyPath) migrateLegacy(db, legacyPath, learningStore);
+  return createRepository(db, learningStore);
 }
 
-function migrateLegacy(db, legacyPath) {
+function migrateLegacy(db, legacyPath, learningStore) {
   let store;
   try { store = JSON.parse(readFileSync(legacyPath, 'utf8')); } catch { store = null; }
   db.exec('BEGIN IMMEDIATE');
   try {
     if (store) {
       for (const document of store.documents || []) {
-        insertSource(db, { ...document, sourceType: document.sourceType || 'note' });
+        learningStore.addSource({ ...document, sourceType: document.sourceType || 'note' });
       }
       for (const candidate of store.memories || []) {
         const claim = legacyCandidateToClaim(candidate);
         const source = db.prepare('SELECT id FROM sources WHERE id = ?').get(candidate.documentId);
         if (!source) continue;
-        const evidenceId = randomUUID();
-        db.prepare(`INSERT OR IGNORE INTO evidence_units
-          (id, source_id, ordinal, text, speaker, owner, created_at) VALUES (?, ?, 0, ?, ?, ?, ?)`)
-          .run(evidenceId, candidate.documentId, candidate.sourceQuote || candidate.content, claim.owner === 'user' ? 'user' : 'source_author', claim.owner, candidate.createdAt || new Date().toISOString());
-        insertClaim(db, claim, evidenceId);
+        const evidenceId = learningStore.addEvidence({
+          sourceId: candidate.documentId, ordinal: 0, text: candidate.sourceQuote || candidate.content,
+          speaker: claim.owner === 'user' ? 'user' : 'source_author', owner: claim.owner,
+          createdAt: candidate.createdAt || new Date().toISOString(),
+        });
+        learningStore.addClaim(claim, evidenceId);
       }
       for (const session of store.sessions || []) {
         db.prepare('INSERT OR IGNORE INTO sessions (id, title, pinned, created_at, updated_at) VALUES (?, ?, ?, ?, ?)')
@@ -115,50 +86,10 @@ function migrateLegacy(db, legacyPath) {
   }
 }
 
-function insertSource(db, source) {
-  const now = source.createdAt || new Date().toISOString();
-  const id = source.id || randomUUID();
-  db.prepare(`INSERT OR IGNORE INTO sources
-    (id, title, source_type, content, source_uri, source_actor, checksum, metadata_json, created_at, extracted_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-    .run(id, String(source.title).slice(0, 160), source.sourceType, source.content, source.sourceUri || null,
-      source.sourceActor || null, checksum(source.content), JSON.stringify(source.metadata || {}), now, source.extractedAt || null);
-  return getSource(db, id);
-}
-
-function getSource(db, id) {
-  const row = db.prepare('SELECT * FROM sources WHERE id = ?').get(id);
-  return row && mapSource(row);
-}
-
-function insertClaim(db, claim, evidenceId) {
-  const now = claim.createdAt || new Date().toISOString();
-  const id = claim.id || randomUUID();
-  db.prepare(`INSERT OR REPLACE INTO claims
-    (id, title, proposition, kind, owner, epistemic_status, authorization_scope, context_scope_json, tags_json,
-     confidence, valid_from, valid_to, superseded_by, scene_id, created_at, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-    .run(id, claim.title || 'Untitled claim', claim.proposition, claim.kind, claim.owner,
-      claim.epistemicStatus, claim.authorizationScope || 'none', JSON.stringify(claim.contextScope || []),
-      JSON.stringify(claim.tags || []), claim.confidence ?? 0.5, claim.validFrom || null, claim.validTo || null,
-      claim.supersededBy || null, claim.sceneId || null, now, now);
-  if (evidenceId) db.prepare('INSERT OR IGNORE INTO claim_evidence (claim_id, evidence_id, relation) VALUES (?, ?, ?)').run(id, evidenceId, 'supports');
-  const saved = db.prepare('SELECT * FROM claims WHERE id = ?').get(id);
-  db.prepare('DELETE FROM claim_search WHERE claim_id = ?').run(id);
-  db.prepare('INSERT INTO claim_search (claim_id, title, proposition, tags) VALUES (?, ?, ?, ?)')
-    .run(id, saved.title, saved.proposition, saved.tags_json);
-  return mapClaim(saved);
-}
-
-function mapSource(row) {
-  return { id: row.id, title: row.title, sourceType: row.source_type, content: row.content, sourceUri: row.source_uri,
-    sourceActor: row.source_actor, createdAt: row.created_at, extractedAt: row.extracted_at, metadata: json(row.metadata_json, {}) };
-}
-
 function mapClaim(row) {
   return { id: row.id, title: row.title, proposition: row.proposition, kind: row.kind, owner: row.owner,
     epistemicStatus: row.epistemic_status, authorizationScope: row.authorization_scope,
-    contextScope: json(row.context_scope_json), tags: json(row.tags_json), confidence: row.confidence,
+    contextScope: json(row.context_scope_json), tags: json(row.tags_json), attributes: json(row.attributes_json, {}), confidence: row.confidence,
     validFrom: row.valid_from, validTo: row.valid_to, supersededBy: row.superseded_by, sceneId: row.scene_id,
     createdAt: row.created_at, updatedAt: row.updated_at };
 }
@@ -169,46 +100,32 @@ function mapSession(db, row) {
   return { id: row.id, title: row.title, pinned: Boolean(row.pinned), createdAt: row.created_at, updatedAt: row.updated_at, messages };
 }
 
-function createRepository(db) {
+function createRepository(db, learningStore) {
   return {
+    ...learningStore,
     db,
-    listSources: () => db.prepare('SELECT * FROM sources ORDER BY created_at DESC').all().map(mapSource),
-    getSource: (id) => getSource(db, id),
-    addSource: (source) => insertSource(db, source),
-    markSourceExtracted: (id) => db.prepare('UPDATE sources SET extracted_at = ? WHERE id = ?').run(new Date().toISOString(), id),
+    deleteInquiriesForSource: (sourceId) => db.prepare(`DELETE FROM inquiry_items WHERE claim_id IN (
+      SELECT claim_id FROM claim_evidence JOIN evidence_units ON evidence_units.id = claim_evidence.evidence_id
+      WHERE evidence_units.source_id = ?
+    )`).run(sourceId),
     deleteClaimsForSource: (sourceId) => {
       const claimIds = db.prepare(`SELECT DISTINCT claim_id FROM claim_evidence
         JOIN evidence_units ON evidence_units.id = claim_evidence.evidence_id
         WHERE evidence_units.source_id = ?`).all(sourceId).map((row) => row.claim_id);
+      const deleteLearningClaims = learningStore.deleteClaimsForSource;
       db.exec('BEGIN IMMEDIATE');
       try {
-        const deleteSearch = db.prepare('DELETE FROM claim_search WHERE claim_id = ?');
         const deleteInquiry = db.prepare('DELETE FROM inquiry_items WHERE claim_id = ?');
-        const deleteClaim = db.prepare('DELETE FROM claims WHERE id = ?');
         for (const claimId of claimIds) {
-          deleteSearch.run(claimId);
           deleteInquiry.run(claimId);
-          deleteClaim.run(claimId);
         }
         db.exec('COMMIT');
-        return claimIds.length;
       } catch (error) {
         db.exec('ROLLBACK');
         throw error;
       }
+      return deleteLearningClaims(sourceId);
     },
-    addEvidence: ({ sourceId, text, speaker, owner, ordinal = 0 }) => {
-      const id = randomUUID();
-      db.prepare('INSERT INTO evidence_units (id, source_id, ordinal, text, speaker, owner, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)')
-        .run(id, sourceId, ordinal, text, speaker || null, owner, new Date().toISOString());
-      return id;
-    },
-    addClaim: (claim, evidenceId) => insertClaim(db, { ...claim, id: claim.id || randomUUID() }, evidenceId),
-    addClaimRelation: (fromClaimId, toClaimId, relation) => db.prepare(
-      'INSERT OR IGNORE INTO claim_relations (from_claim_id, to_claim_id, relation, created_at) VALUES (?, ?, ?, ?)',
-    ).run(fromClaimId, toClaimId, relation, new Date().toISOString()),
-    getClaim: (id) => { const row = db.prepare('SELECT * FROM claims WHERE id = ?').get(id); return row && mapClaim(row); },
-    listClaims: () => db.prepare('SELECT * FROM claims ORDER BY updated_at DESC').all().map(mapClaim),
     updateClaim: (id, values) => {
       db.prepare(`UPDATE claims SET epistemic_status = ?, authorization_scope = ?, updated_at = ?, superseded_by = COALESCE(?, superseded_by) WHERE id = ?`)
         .run(values.epistemicStatus, values.authorizationScope, new Date().toISOString(), values.supersededBy || null, id);
