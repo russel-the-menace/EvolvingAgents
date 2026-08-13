@@ -209,13 +209,6 @@ button:disabled { cursor: not-allowed; opacity: .45; }
 .app-shell.sidebar-collapsed .daily-layout { grid-template-columns: minmax(0, 1fr); }
 .app-shell.sidebar-collapsed .daily-history { display: none; }
 
-/* The app shell owns one persistent navigation sidebar in every mode. */
-.app-shell.daily-mode { grid-template-columns: 224px minmax(0, 1fr); }
-.app-shell.daily-mode > .sidebar { display: flex; }
-.app-shell.daily-mode .workspace { width: auto; }
-.app-shell.daily-mode .daily-layout { grid-template-columns: minmax(0, 1fr); }
-.app-shell.daily-mode .daily-history { display: none; }
-
 /* Formal interview conversation uses the same neutral theme in both modes. */
 .formal-layout, .formal-body { background: var(--mc-bg); color: var(--mc-ink); }
 .conversation { position: relative; background: var(--mc-panel); border-color: var(--mc-border); }
