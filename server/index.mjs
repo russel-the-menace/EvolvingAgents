@@ -30,17 +30,20 @@ async function saveStore(store) {
 }
 
 function cleanCandidate(candidate, documentId, sourceMessageIds = []) {
-  const kinds = new Set(['experience', 'skill', 'preference', 'viewpoint', 'language_sample']);
+  const personalKinds = new Set(['experience', 'skill', 'preference', 'viewpoint', 'language_sample']);
+  const learningKinds = new Set(['concept', 'framework', 'answer_pattern', 'case_example']);
+  const scope = candidate.scope === 'learning' ? 'learning' : 'personal';
   return {
     id: randomUUID(),
     documentId,
-    kind: kinds.has(candidate.kind) ? candidate.kind : 'experience',
+    kind: (scope === 'learning' ? learningKinds : personalKinds).has(candidate.kind) ? candidate.kind : scope === 'learning' ? 'concept' : 'experience',
+    scope,
     title: String(candidate.title || 'Untitled memory').slice(0, 80),
     content: String(candidate.content || '').slice(0, 800),
     tags: Array.isArray(candidate.tags) ? candidate.tags.map(String).slice(0, 8) : [],
     sourceQuote: String(candidate.sourceQuote || '').slice(0, 500),
     sourceMessageIds,
-    status: 'pending',
+    status: scope === 'learning' ? 'approved' : 'pending',
     createdAt: new Date().toISOString(),
   };
 }
@@ -49,7 +52,10 @@ async function proposeWithDeepSeek(document) {
   const apiKey = process.env.DEEPSEEK_API_KEY;
   if (!apiKey) throw new Error('DEEPSEEK_API_KEY is not configured. Set it in the local .env file and restart the service.');
 
-  const prompt = `You extract candidate memories from personal source material. Use only facts supported by the source; never invent details. Return strict JSON in this format: {"memories":[{"kind":"experience|skill|preference|viewpoint|language_sample","title":"short title","content":"clear complete candidate memory","tags":["tag"],"sourceQuote":"short direct source quote"}]}. Return at most 12 items. Return an empty array when no reliable information exists. Source material:\n${document.content.slice(0, 24000)}`;
+  const learningSource = document.sourceType === 'short_video';
+  const prompt = learningSource
+    ? `You extract reusable learning knowledge from a video transcript. This is not the user's personal history. Never describe a speaker's experience, claims, preferences, or cases as the user's experience. Return strict JSON in this format: {"memories":[{"scope":"learning","kind":"concept|framework|answer_pattern|case_example","title":"short title","content":"clear, reusable knowledge in Chinese","tags":["tag"],"sourceQuote":"short direct source quote"}]}. Capture core concepts, reasoning frameworks, and answer patterns. When the speaker gives a case, label it as a third-party example. Return at most 10 items. Source material:\n${document.content.slice(0, 24000)}`
+    : `You extract candidate memories from personal source material. Use only facts supported by the source; never invent details. Return strict JSON in this format: {"memories":[{"scope":"personal","kind":"experience|skill|preference|viewpoint|language_sample","title":"short title","content":"clear complete candidate memory","tags":["tag"],"sourceQuote":"short direct source quote"}]}. Return at most 12 items. Return an empty array when no reliable information exists. Source material:\n${document.content.slice(0, 24000)}`;
   const response = await fetch(`${(process.env.DEEPSEEK_BASE_URL || 'https://api.deepseek.com').replace(/\/$/, '')}/chat/completions`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
@@ -190,14 +196,15 @@ async function transcribeShortVideo(shareText) {
 
 function relevantMemoryContext(store, currentSession, query) {
   const queryTokens = tokenize(query);
-  const trusted = store.memories
+  const approved = store.memories
     .filter((memory) => memory.status === 'approved')
     .sort((left, right) => relevance(queryTokens, `${right.title} ${right.content} ${right.tags.join(' ')}`) - relevance(queryTokens, `${left.title} ${left.content} ${left.tags.join(' ')}`))
-    .slice(0, 10)
-    .map((memory) => `- ${memory.kind}: ${clip(memory.content, 360)}`);
+    .slice(0, 10);
 
+  const personalMemories = approved.filter((memory) => memory.scope !== 'learning').map((memory) => `- ${memory.kind}: ${clip(memory.content, 360)}`);
+  const learnedKnowledge = approved.filter((memory) => memory.scope === 'learning').map((memory) => `- ${memory.kind}: ${clip(memory.content, 360)}`);
   const candidates = store.memories
-    .filter((memory) => memory.status === 'pending')
+    .filter((memory) => memory.status === 'pending' && memory.scope !== 'learning')
     .map((memory) => ({
       score: relevance(queryTokens, `${memory.title} ${memory.content} ${memory.tags.join(' ')}`),
       text: `- ${memory.kind}: ${clip(memory.content, 360)}`,
@@ -232,7 +239,8 @@ function relevantMemoryContext(store, currentSession, query) {
     .map((turn) => `- ${turn.text}`);
 
   const sections = [];
-  if (trusted.length) sections.push(`Reliable long-term memories:\n${trusted.join('\n')}`);
+  if (personalMemories.length) sections.push(`Reliable personal memories. These are facts about the user:\n${personalMemories.join('\n')}`);
+  if (learnedKnowledge.length) sections.push(`Learned knowledge. Use this to reason and explain, but do not present its source author's experience as the user's own:\n${learnedKnowledge.join('\n')}`);
   if (candidates.length) sections.push(`Unverified extracted memories. Use these only as leads; do not present them as established facts without support from the conversation:\n${candidates.join('\n')}`);
   if (documents.length) sections.push(`Relevant imported material:\n${documents.join('\n')}`);
   if (pastTurns.length) sections.push(`Relevant past conversation turns:\n${pastTurns.join('\n')}`);
@@ -350,6 +358,7 @@ app.post('/api/memory/extract', async (request, response, next) => {
     const document = store.documents.find((item) => item.id === request.body.documentId);
     if (!document) return response.status(404).json({ error: 'Source material was not found.' });
     const proposed = await proposeWithDeepSeek(document);
+    store.memories = store.memories.filter((memory) => memory.documentId !== document.id);
     const memories = proposed.map((candidate) => cleanCandidate(candidate, document.id)).filter((candidate) => candidate.content);
     store.memories.unshift(...memories);
     document.extractedAt = new Date().toISOString();

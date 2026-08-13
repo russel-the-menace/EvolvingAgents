@@ -8,6 +8,13 @@ Initial local vertical slice implemented. The current UI supports ChatGPT `conve
 
 Accept Markdown notes, resumes, chat exports, interview debriefs, and guided conversations. Convert raw material into reviewable memories: experience facts, evidence, skills, preferences, viewpoints, language examples, and uncertainty notes.
 
+The knowledge base has two distinct scopes:
+
+- Personal memory: the user's own experience, skills, preferences, and viewpoints. These candidates require explicit approval before they are treated as facts about the user.
+- Learned knowledge: frameworks, concepts, answer patterns, and clearly attributed third-party examples from learning materials. Short-video imports enter this scope and become available to help reason about an answer immediately. They must never be represented as the user's personal history.
+
+When answering, MindClone combines learned knowledge for the reasoning with approved personal memory for the user's own evidence, judgment, and expression.
+
 For short video sources, MindClone stores the original Douyin share message and link alongside the spoken transcript. It learns from the transcript only: no video frames, OCR, or visual subtitles are processed. The local server uses TiKHub's hybrid video parsing API to obtain media, extracts a temporary audio-only WAV with `ffmpeg`, and runs the local `whisper.cpp` model. Both source media and audio are deleted after transcription.
 
 ## Proposed flow

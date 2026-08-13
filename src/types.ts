@@ -38,7 +38,8 @@ export type MemoryDocument = {
 export type MemoryCandidate = {
   id: string;
   documentId: string;
-  kind: 'experience' | 'skill' | 'preference' | 'viewpoint' | 'language_sample';
+  kind: 'experience' | 'skill' | 'preference' | 'viewpoint' | 'language_sample' | 'concept' | 'framework' | 'answer_pattern' | 'case_example';
+  scope?: 'personal' | 'learning';
   title: string;
   content: string;
   tags: string[];
