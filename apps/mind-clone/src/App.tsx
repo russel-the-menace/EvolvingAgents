@@ -1,14 +1,14 @@
 import { Fragment, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import {
   ArrowDown, ArrowRight, BotMessageSquare, CheckCircle2, ChevronDown, CircleStop, FileText,
-  FileUp, ListChecks, MessageCircle, MessageSquarePlus, Mic, Paperclip, Play,
+  FileUp, ListChecks, Mic, Paperclip, Play,
   Copy, MoreHorizontal, PanelLeftClose, PanelLeftOpen, Pencil, Pin, Plus, SendHorizontal, Settings2,
-  Sparkles, Trash2, Upload, Video, Volume2, X,
+  Sparkles, Trash2, Video, Volume2,
 } from 'lucide-react';
 import { streamCandidateAnswer } from './interview';
 import { memoryApi } from './memory-api';
 import { loadPacket, loadSettings, savePacket, saveSettings } from './storage';
-import type { DailyMessage, DailyModel, DailySession, InterviewPacket, MemoryCandidate, MemoryDocument, Message, Mode, Settings, ThemeMode } from './types';
+import type { DailyMessage, DailyModel, DailySession, InterviewPacket, Message, Mode, Settings, ThemeMode } from './types';
 
 const exampleJD = `Remote Backend Engineer
 Own server-side APIs, database design, performance tuning, and production reliability. Comfortable with a mainstream backend language, SQL, Redis, Docker, and distributed systems fundamentals; able to clarify requirements and deliver independently.`;
@@ -77,9 +77,6 @@ export function App() {
   const [input, setInput] = useState('');
   const [streaming, setStreaming] = useState(false);
   const [error, setError] = useState('');
-  const [memoryDocuments, setMemoryDocuments] = useState<MemoryDocument[]>([]);
-  const [memoryCandidates, setMemoryCandidates] = useState<MemoryCandidate[]>([]);
-  const [memoryError, setMemoryError] = useState('');
   const [dailySessions, setDailySessions] = useState<DailySession[]>([]);
   const [dailySessionId, setDailySessionId] = useState<string | null>(null);
   const [dailyInput, setDailyInput] = useState('');
@@ -90,7 +87,7 @@ export function App() {
     if (saved === 'deepseek-medium' || saved === 'deepseek-high' || saved === 'deepseek-ultra') return saved;
     return saved === 'deepseek-reasoner' ? 'deepseek-medium' : 'deepseek-light';
   });
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => window.matchMedia('(max-width: 780px)').matches);
   const [dailyNewChatActive, setDailyNewChatActive] = useState(false);
   const [sidebarWidth, setSidebarWidth] = useState(() => {
     const saved = Number(window.localStorage.getItem('mindclone-sidebar-width'));
@@ -117,19 +114,6 @@ export function App() {
     document.documentElement.dataset.theme = theme;
     window.localStorage.setItem('mindclone-theme', theme);
   }, [theme]);
-
-  async function refreshMemory() {
-    try {
-      const store = await memoryApi.list();
-      setMemoryDocuments(store.documents);
-      setMemoryCandidates(store.memories);
-      setMemoryError('');
-    } catch (caught) {
-      setMemoryError((caught as Error).message);
-    }
-  }
-
-  useEffect(() => { void refreshMemory(); }, []);
 
   async function refreshSessions() {
     try {
@@ -290,11 +274,24 @@ export function App() {
     } catch (caught) { setDailyError((caught as Error).message); return null; }
   }
 
-  async function importChatGPTToInbox(file: File) {
+  async function importChatGPT(file: File) {
     const contents = extractChatGPTConversations(JSON.parse(await file.text()));
     if (!contents.length) throw new Error('No readable user/assistant conversations were found in this export.');
-    for (const item of contents) await memoryApi.importDocument({ ...item, sourceType: 'chatgpt_export' });
-    await refreshMemory();
+    const batches: string[] = [];
+    let current = '';
+    for (const item of contents) {
+      const section = `# ${item.title}\n\n${item.content}\n\n`;
+      if (current && current.length + section.length > 1_800_000) { batches.push(current); current = ''; }
+      current += section;
+    }
+    if (current) batches.push(current);
+    for (const [index, content] of batches.entries()) {
+      await memoryApi.importDocument({
+        title: batches.length === 1 ? `ChatGPT history (${contents.length} conversations)` : `ChatGPT history ${index + 1}/${batches.length}`,
+        content,
+        sourceType: 'chatgpt_export',
+      });
+    }
   }
 
   return (
@@ -311,16 +308,13 @@ export function App() {
           <DailyChatView sessions={dailySessions} activeSessionId={dailySessionId} input={dailyInput} streaming={dailyStreaming} error={dailyError} model={dailyModel} newChatActive={dailyNewChatActive}
             onModelChange={(model) => { setDailyModel(model); window.localStorage.setItem('mindclone.daily-model', model); }}
             onInputChange={setDailyInput} onNewSession={newDailySession} onRefresh={() => void refreshSessions()}
-            onError={setDailyError} onStreamChange={setDailyStreaming} onImport={importChatGPTToInbox} onNewChatActiveChange={setDailyNewChatActive}
-            onOpenMemory={() => setMode('memory')} />
+            onError={setDailyError} onStreamChange={setDailyStreaming} onImport={importChatGPT} onNewChatActiveChange={setDailyNewChatActive} />
         ) : mode === 'prepare' ? (
           <PrepareView
             jd={jd} resume={resume} packet={packet} ready={ready}
             onJdChange={setJd} onResumeChange={setResume} onPrepare={() => void prepare()}
             onEnter={enterFormal} onUseExample={() => { setJd(exampleJD); setResume(exampleResume); }}
           />
-        ) : mode === 'memory' ? (
-          <MemoryView documents={memoryDocuments} candidates={memoryCandidates} error={memoryError} onRefresh={refreshMemory} />
         ) : packet ? (
           <FormalView
             packet={packet} messages={messages} input={input} error={error} streaming={streaming}
@@ -364,21 +358,24 @@ function AppSidebar({ sessions, activeSessionId, newChatActive, mode, hasPacket,
   function resizeMove(event: React.PointerEvent<HTMLDivElement>) { if (resizeRef.current) onSidebarWidthChange(Math.min(420, Math.max(240, resizeRef.current.startWidth + event.clientX - resizeRef.current.startX))); }
   function resizeEnd(event: React.PointerEvent<HTMLDivElement>) { resizeRef.current = null; window.localStorage.setItem('mindclone-sidebar-width', String(sidebarWidth)); if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId); }
   async function updateSession(session: DailySession, update: Partial<Pick<DailySession, 'title' | 'pinned'>>) { try { await memoryApi.updateSession(session.id, update); setSessionMenuId(null); onRefresh(); } catch (caught) { onError((caught as Error).message); } }
-  async function deleteSession(session: DailySession) { if (!window.confirm(`Delete “${session.title}” and all messages in it? Linked candidate memories will also be removed.`)) return; try { await memoryApi.deleteSession(session.id); if (session.id === activeSessionId) onNewChat(); onRefresh(); } catch (caught) { onError((caught as Error).message); } }
+  async function deleteSession(session: DailySession) { if (!window.confirm(`Delete “${session.title}” and all messages in it? Learned claims remain available unless explicitly superseded in conversation.`)) return; try { await memoryApi.deleteSession(session.id); if (session.id === activeSessionId) onNewChat(); onRefresh(); } catch (caught) { onError((caught as Error).message); } }
   function renameSession(session: DailySession) { const title = window.prompt('Rename conversation', session.title)?.trim(); if (title && title !== session.title) void updateSession(session, { title }); }
-  return <aside className="daily-history" style={{ width: sidebarCollapsed ? 0 : sidebarWidth }}><div className="daily-brand"><Sparkles size={21} /><span>MindClone</span><button className="icon-button sidebar-close" title="Collapse sidebar" onClick={onToggleSidebar}><PanelLeftClose size={19} /></button></div><nav className="daily-nav"><button className={mode === 'daily' && (newChatActive || !activeSessionId) ? 'active' : ''} onClick={onNewChat}><Plus size={14} /> New Chat</button><button className={mode === 'prepare' ? 'active' : ''} onClick={() => onModeChange('prepare')}><FileText size={14} /> Interview prep</button><button className={mode === 'memory' ? 'active' : ''} onClick={() => onModeChange('memory')}><MessageSquarePlus size={14} /> Memory inbox</button><button className={mode === 'formal' ? 'active' : ''} disabled={!hasPacket} onClick={() => hasPacket && onModeChange('formal')}><BotMessageSquare size={14} /> Live interview</button></nav><div className="recents-panel"><div className="daily-history-top recents-toggle"><span>Recents</span></div><div className="session-list">{sessions.length === 0 ? <p>Start a conversation. MindClone keeps your record on this device.</p> : [...sessions].sort((left, right) => Number(Boolean(right.pinned)) - Number(Boolean(left.pinned)) || new Date(right.updatedAt).getTime() - new Date(left.updatedAt).getTime()).map((session) => <div key={session.id} className={mode === 'daily' && session.id === activeSessionId && !newChatActive ? 'session-item active' : 'session-item'}><button onClick={() => { setSessionMenuId(null); onSelectSession(session.id); }}><span>{session.pinned && <Pin size={12} fill="currentColor" />} {session.title}</span></button><div className="session-more"><button className="session-more-trigger" title="Conversation options" onClick={(event) => { event.stopPropagation(); setSessionMenuId((current) => current === session.id ? null : session.id); }}><MoreHorizontal size={17} /></button>{sessionMenuId === session.id && <div className="session-context-menu"><button onClick={() => void updateSession(session, { pinned: !session.pinned })}><Pin size={15} /> {session.pinned ? 'Unpin' : 'Pin'}</button><button onClick={() => renameSession(session)}><Pencil size={15} /> Rename</button><button className="danger" onClick={() => void deleteSession(session)}><Trash2 size={15} /> Delete</button></div>}</div></div>)}</div></div><div className="daily-sidebar-footer"><div className="local-status"><span /> Local engine</div><button className="icon-button light" title="Settings" onClick={onOpenSettings}><Settings2 size={18} /></button></div><div className="sidebar-resize-handle" role="separator" aria-orientation="vertical" aria-label="Resize sidebar" onPointerDown={resizeStart} onPointerMove={resizeMove} onPointerUp={resizeEnd} onPointerCancel={resizeEnd} /></aside>;
+  return <aside className="daily-history" style={{ width: sidebarCollapsed ? 0 : sidebarWidth }}><div className="daily-brand"><Sparkles size={21} /><span>MindClone</span><button className="icon-button sidebar-close" title="Collapse sidebar" onClick={onToggleSidebar}><PanelLeftClose size={19} /></button></div><nav className="daily-nav"><button className={mode === 'daily' && (newChatActive || !activeSessionId) ? 'active' : ''} onClick={onNewChat}><Plus size={14} /> New Chat</button><button className={mode === 'prepare' ? 'active' : ''} onClick={() => onModeChange('prepare')}><FileText size={14} /> Interview prep</button><button className={mode === 'formal' ? 'active' : ''} disabled={!hasPacket} onClick={() => hasPacket && onModeChange('formal')}><BotMessageSquare size={14} /> Live interview</button></nav><div className="recents-panel"><div className="daily-history-top recents-toggle"><span>Recents</span></div><div className="session-list">{sessions.length === 0 ? <p>Start a conversation. MindClone keeps your record on this device.</p> : [...sessions].sort((left, right) => Number(Boolean(right.pinned)) - Number(Boolean(left.pinned)) || new Date(right.updatedAt).getTime() - new Date(left.updatedAt).getTime()).map((session) => <div key={session.id} className={mode === 'daily' && session.id === activeSessionId && !newChatActive ? 'session-item active' : 'session-item'}><button onClick={() => { setSessionMenuId(null); onSelectSession(session.id); }}><span>{session.pinned && <Pin size={12} fill="currentColor" />} {session.title}</span></button><div className="session-more"><button className="session-more-trigger" title="Conversation options" onClick={(event) => { event.stopPropagation(); setSessionMenuId((current) => current === session.id ? null : session.id); }}><MoreHorizontal size={17} /></button>{sessionMenuId === session.id && <div className="session-context-menu"><button onClick={() => void updateSession(session, { pinned: !session.pinned })}><Pin size={15} /> {session.pinned ? 'Unpin' : 'Pin'}</button><button onClick={() => renameSession(session)}><Pencil size={15} /> Rename</button><button className="danger" onClick={() => void deleteSession(session)}><Trash2 size={15} /> Delete</button></div>}</div></div>)}</div></div><div className="daily-sidebar-footer"><div className="local-status"><span /> Local engine</div><button className="icon-button light" title="Settings" onClick={onOpenSettings}><Settings2 size={18} /></button></div><div className="sidebar-resize-handle" role="separator" aria-orientation="vertical" aria-label="Resize sidebar" onPointerDown={resizeStart} onPointerMove={resizeMove} onPointerUp={resizeEnd} onPointerCancel={resizeEnd} /></aside>;
 }
 
-function DailyChatView({ sessions, activeSessionId, input, streaming, error, model, newChatActive, onModelChange, onInputChange, onNewSession, onRefresh, onError, onStreamChange, onImport, onNewChatActiveChange, onOpenMemory }: {
+function DailyChatView({ sessions, activeSessionId, input, streaming, error, model, newChatActive, onModelChange, onInputChange, onNewSession, onRefresh, onError, onStreamChange, onImport, onNewChatActiveChange }: {
   sessions: DailySession[]; activeSessionId: string | null; input: string; streaming: boolean; error: string;
   model: DailyModel; onModelChange: (model: DailyModel) => void;
   newChatActive: boolean; onInputChange: (value: string) => void; onNewSession: () => Promise<string | null>; onRefresh: () => void;
   onError: (value: string) => void; onStreamChange: (value: boolean) => void; onImport: (file: File) => Promise<void>;
   onNewChatActiveChange: (value: boolean) => void;
-  onOpenMemory: () => void;
 }) {
   const [attachmentOpen, setAttachmentOpen] = useState(false);
+  const [attachmentMode, setAttachmentMode] = useState<'note' | 'video' | null>(null);
   const [attachmentNote, setAttachmentNote] = useState('');
+  const [shortVideoShare, setShortVideoShare] = useState('');
+  const [shortVideoTitle, setShortVideoTitle] = useState('');
+  const [shortVideoContent, setShortVideoContent] = useState('');
   const [attachmentBusy, setAttachmentBusy] = useState(false);
   const [attachmentStatus, setAttachmentStatus] = useState('');
   const [thinkingVisible, setThinkingVisible] = useState(false);
@@ -472,12 +469,40 @@ function DailyChatView({ sessions, activeSessionId, input, streaming, error, mod
   async function saveAttachmentNote() {
     if (attachmentNote.trim().length < 10) { setAttachmentStatus('Please enter at least one complete piece of source material.'); return; }
     setAttachmentBusy(true);
-    try { await memoryApi.importDocument({ title: 'Conversation supplement', sourceType: 'note', content: attachmentNote.trim() }); setAttachmentNote(''); setAttachmentStatus('Saved to the local memory inbox.'); } catch (caught) { setAttachmentStatus((caught as Error).message); } finally { setAttachmentBusy(false); }
+    try {
+      const { claims } = await memoryApi.importDocument({ title: 'Conversation supplement', sourceType: 'note', content: attachmentNote.trim() });
+      setAttachmentNote('');
+      setAttachmentStatus(`Learned ${claims.length} claims. MindClone will discuss anything uncertain with you in chat.`);
+    } catch (caught) { setAttachmentStatus((caught as Error).message); } finally { setAttachmentBusy(false); }
   }
 
   async function importFile(file: File) {
     setAttachmentBusy(true);
-    try { await onImport(file); setAttachmentStatus('ChatGPT history imported to the local inbox.'); } catch (caught) { setAttachmentStatus((caught as Error).message); } finally { setAttachmentBusy(false); }
+    try { await onImport(file); setAttachmentStatus('ChatGPT history learned. Questions will appear naturally in future chats.'); } catch (caught) { setAttachmentStatus((caught as Error).message); } finally { setAttachmentBusy(false); }
+  }
+
+  async function prepareShortVideo(transcribe: boolean) {
+    if (!shortVideoShare.trim()) { setAttachmentStatus('Paste a Douyin share message first.'); return; }
+    setAttachmentBusy(true);
+    setAttachmentStatus(transcribe ? 'Transcribing speech locally...' : 'Reading the share link...');
+    try {
+      const prepared = transcribe
+        ? await memoryApi.transcribeShortVideo(shortVideoShare)
+        : await memoryApi.prepareShortVideo(shortVideoShare);
+      setShortVideoTitle(prepared.title);
+      setShortVideoContent(prepared.content);
+      setAttachmentStatus(transcribe ? 'Transcript ready. Review it, then teach MindClone.' : 'Add or correct the spoken transcript below.');
+    } catch (caught) { setAttachmentStatus((caught as Error).message); } finally { setAttachmentBusy(false); }
+  }
+
+  async function learnShortVideo() {
+    if (shortVideoContent.trim().length < 10) { setAttachmentStatus('Transcribe the video or add its spoken transcript first.'); return; }
+    setAttachmentBusy(true);
+    try {
+      const { claims } = await memoryApi.importDocument({ title: shortVideoTitle.trim() || 'Douyin learning material', sourceType: 'short_video', content: shortVideoContent.trim() });
+      setShortVideoShare(''); setShortVideoTitle(''); setShortVideoContent('');
+      setAttachmentStatus(`Learned ${claims.length} knowledge claims from the video audio. It has not analyzed any frames.`);
+    } catch (caught) { setAttachmentStatus((caught as Error).message); } finally { setAttachmentBusy(false); }
   }
 
   function editMessage(message: DailyMessage) {
@@ -515,120 +540,10 @@ function DailyChatView({ sessions, activeSessionId, input, streaming, error, mod
     setShowScrollButton(false);
   }
 
-  return <section className="daily-conversation"><div className="daily-transcript" ref={listRef} onScroll={updateScrollPosition}>{messages.length === 0 ? <div className="daily-empty"><Sparkles size={32} /><h2>Start with what is on your mind</h2><p>Every conversation is saved locally. Important material is added to candidate memories asynchronously for your review.</p></div> : messages.map((message) => <article className={`daily-message ${message.role}`} key={message.id}>{editingMessage?.id === message.id ? <div className="inline-message-editor"><textarea autoFocus value={editingMessage.content} onChange={(event) => setEditingMessage({ ...editingMessage, content: event.target.value })} onKeyDown={(event) => { if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') void send(editingMessage.content, message.id); if (event.key === 'Escape') setEditingMessage(null); }} /><div><button className="edit-cancel-button" onClick={() => setEditingMessage(null)}>Cancel</button><button className="edit-send-button" disabled={!editingMessage.content.trim() || streaming} onClick={() => void send(editingMessage.content, message.id)}>Send</button></div></div> : <><div className="message-body">{message.content ? <MarkdownText content={message.content} /> : streaming && message.role === 'assistant' ? <ThinkingIndicator /> : null}{thinkingVisible && message.id === messages.at(-1)?.id && message.role === 'assistant' && message.content && <ThinkingIndicator />}</div>{message.content && <div className="message-actions"><button title="Copy message" aria-label="Copy message" onClick={() => void copyMessage(message)}><Copy size={16} /></button>{message.role === 'user' && <button title="Edit message" aria-label="Edit message" onClick={() => editMessage(message)}><Pencil size={16} /></button>}</div>}</>}</article>)}{error && <div className="error-note">{error}</div>}</div>
+  return <section className="daily-conversation"><div className="daily-transcript" ref={listRef} onScroll={updateScrollPosition}>{messages.length === 0 ? <div className="daily-empty"><Sparkles size={32} /><h2>Start with what is on your mind</h2><p>MindClone learns from your conversations and asks for clarification here when imported material needs your judgment.</p></div> : messages.map((message) => <article className={`daily-message ${message.role}`} key={message.id}>{editingMessage?.id === message.id ? <div className="inline-message-editor"><textarea autoFocus value={editingMessage.content} onChange={(event) => setEditingMessage({ ...editingMessage, content: event.target.value })} onKeyDown={(event) => { if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') void send(editingMessage.content, message.id); if (event.key === 'Escape') setEditingMessage(null); }} /><div><button className="edit-cancel-button" onClick={() => setEditingMessage(null)}>Cancel</button><button className="edit-send-button" disabled={!editingMessage.content.trim() || streaming} onClick={() => void send(editingMessage.content, message.id)}>Send</button></div></div> : <><div className="message-body">{message.content ? <MarkdownText content={message.content} /> : streaming && message.role === 'assistant' ? <ThinkingIndicator /> : null}{thinkingVisible && message.id === messages.at(-1)?.id && message.role === 'assistant' && message.content && <ThinkingIndicator />}</div>{message.content && <div className="message-actions"><button title="Copy message" aria-label="Copy message" onClick={() => void copyMessage(message)}><Copy size={16} /></button>{message.role === 'user' && <button title="Edit message" aria-label="Edit message" onClick={() => editMessage(message)}><Pencil size={16} /></button>}</div>}</>}</article>)}{error && <div className="error-note">{error}</div>}</div>
       <button className={showScrollButton ? 'scroll-to-latest is-visible' : 'scroll-to-latest'} title="Back to latest message" aria-label="Back to latest message" aria-hidden={!showScrollButton} disabled={!showScrollButton} onClick={scrollToLatest}><ArrowDown size={18} /></button>
-      <div className={composerExpanded ? 'daily-composer expanded' : 'daily-composer'}><div className="attachment-area">{attachmentOpen && <div className="attachment-menu"><div className="attachment-menu-title">Add context</div><button onClick={() => fileRef.current?.click()}><FileUp size={17} /> Import ChatGPT history</button><button onClick={() => setAttachmentStatus('Paste Markdown or notes below.')}><Paperclip size={17} /> Add text / Markdown</button><button onClick={onOpenMemory}><Video size={17} /> Feed a Douyin video</button><textarea value={attachmentNote} onChange={(event) => setAttachmentNote(event.target.value)} placeholder="Paste supplementary material..." /><button className="primary-button compact" disabled={attachmentBusy} onClick={() => void saveAttachmentNote()}>{attachmentBusy ? 'Processing...' : 'Save to inbox'}</button>{attachmentStatus && <p>{attachmentStatus}</p>}</div>}<input ref={fileRef} className="hidden-input" type="file" accept="application/json,.json" onChange={(event) => { const file = event.target.files?.[0]; if (file) void importFile(file); event.currentTarget.value = ''; }} /><button className={attachmentOpen ? 'plus-button open' : 'plus-button'} title="Add material" onClick={() => setAttachmentOpen((current) => !current)}><Plus size={21} /></button></div><textarea ref={dailyInputRef} rows={1} value={input} onChange={(event) => updateDailyInput(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); void send(); } }} placeholder="Message MindClone..." /><div ref={modelMenuRef} className={modelMenuOpen ? 'daily-model-picker open' : 'daily-model-picker'}><button type="button" aria-haspopup="menu" aria-expanded={modelMenuOpen} onClick={() => setModelMenuOpen((open) => !open)}>{({ 'deepseek-light': 'DeepSeek Light', 'deepseek-medium': 'DeepSeek Medium', 'deepseek-high': 'DeepSeek High', 'deepseek-ultra': 'DeepSeek Ultra' } as const)[model]}<ChevronDown size={16} /></button>{modelMenuOpen && <div className="daily-model-menu" role="menu">{([{ id: 'deepseek-light', name: 'DeepSeek Light', detail: 'deepseek-v4-flash · non-thinking' }, { id: 'deepseek-medium', name: 'DeepSeek Medium', detail: 'deepseek-v4-flash · thinking' }, { id: 'deepseek-high', name: 'DeepSeek High', detail: 'deepseek-v4-pro · non-thinking' }, { id: 'deepseek-ultra', name: 'DeepSeek Ultra', detail: 'deepseek-v4-pro · thinking' }] as const).map((option) => <button key={option.id} role="menuitem" className={model === option.id ? 'selected' : ''} onClick={() => { onModelChange(option.id); setModelMenuOpen(false); }}><strong>{option.name}</strong><span>{option.detail}</span></button>)}</div>}</div><button className="send-icon" disabled={!input.trim() || streaming} title="Send" onClick={() => void send()}><SendHorizontal size={19} /></button></div>
+      <div className={composerExpanded ? 'daily-composer expanded' : 'daily-composer'}><div className="attachment-area">{attachmentOpen && <div className="attachment-menu"><div className="attachment-menu-title">Teach MindClone</div><button onClick={() => fileRef.current?.click()}><FileUp size={17} /> Import ChatGPT history</button><button onClick={() => { setAttachmentMode('note'); setAttachmentStatus(''); }}><Paperclip size={17} /> Add text / Markdown</button><button onClick={() => { setAttachmentMode('video'); setAttachmentStatus(''); }}><Video size={17} /> Learn from Douyin audio</button>{attachmentMode === 'note' && <div className="attachment-editor"><textarea value={attachmentNote} onChange={(event) => setAttachmentNote(event.target.value)} placeholder="Paste notes or source material..." /><button className="primary-button compact" disabled={attachmentBusy} onClick={() => void saveAttachmentNote()}>{attachmentBusy ? 'Learning...' : 'Learn this text'}</button></div>}{attachmentMode === 'video' && <div className="attachment-editor video-editor"><textarea value={shortVideoShare} onChange={(event) => setShortVideoShare(event.target.value)} placeholder="Paste the Douyin share message or v.douyin.com link..." /><div className="attachment-actions"><button className="primary-button compact" disabled={attachmentBusy} onClick={() => void prepareShortVideo(true)}>{attachmentBusy ? 'Working...' : 'Transcribe audio'}</button><button className="ghost-button compact" disabled={attachmentBusy} onClick={() => void prepareShortVideo(false)}>Add transcript manually</button></div>{shortVideoContent && <><input value={shortVideoTitle} onChange={(event) => setShortVideoTitle(event.target.value)} placeholder="Video title" /><textarea className="transcript-editor" value={shortVideoContent} onChange={(event) => setShortVideoContent(event.target.value)} placeholder="Review the spoken transcript..." /><button className="primary-button compact" disabled={attachmentBusy} onClick={() => void learnShortVideo()}>{attachmentBusy ? 'Learning...' : 'Learn this transcript'}</button></>}</div>}{attachmentStatus && <p>{attachmentStatus}</p>}</div>}<input ref={fileRef} className="hidden-input" type="file" accept="application/json,.json" onChange={(event) => { const file = event.target.files?.[0]; if (file) void importFile(file); event.currentTarget.value = ''; }} /><button className={attachmentOpen ? 'plus-button open' : 'plus-button'} title="Add material" onClick={() => setAttachmentOpen((current) => !current)}><Plus size={21} /></button></div><textarea ref={dailyInputRef} rows={1} value={input} onChange={(event) => updateDailyInput(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); void send(); } }} placeholder="Message MindClone..." /><div ref={modelMenuRef} className={modelMenuOpen ? 'daily-model-picker open' : 'daily-model-picker'}><button type="button" aria-haspopup="menu" aria-expanded={modelMenuOpen} onClick={() => setModelMenuOpen((open) => !open)}>{({ 'deepseek-light': 'DeepSeek Light', 'deepseek-medium': 'DeepSeek Medium', 'deepseek-high': 'DeepSeek High', 'deepseek-ultra': 'DeepSeek Ultra' } as const)[model]}<ChevronDown size={16} /></button>{modelMenuOpen && <div className="daily-model-menu" role="menu">{([{ id: 'deepseek-light', name: 'DeepSeek Light', detail: 'deepseek-v4-flash · non-thinking' }, { id: 'deepseek-medium', name: 'DeepSeek Medium', detail: 'deepseek-v4-flash · thinking' }, { id: 'deepseek-high', name: 'DeepSeek High', detail: 'deepseek-v4-pro · non-thinking' }, { id: 'deepseek-ultra', name: 'DeepSeek Ultra', detail: 'deepseek-v4-pro · thinking' }] as const).map((option) => <button key={option.id} role="menuitem" className={model === option.id ? 'selected' : ''} onClick={() => { onModelChange(option.id); setModelMenuOpen(false); }}><strong>{option.name}</strong><span>{option.detail}</span></button>)}</div>}</div><button className="send-icon" disabled={!input.trim() || streaming} title="Send" onClick={() => void send()}><SendHorizontal size={19} /></button></div>
     </section>;
-}
-
-function MemoryView({ documents, candidates, error, onRefresh }: {
-  documents: MemoryDocument[]; candidates: MemoryCandidate[]; error: string; onRefresh: () => Promise<void>;
-}) {
-  const [note, setNote] = useState('');
-  const [title, setTitle] = useState('Quick note');
-  const [interviewNote, setInterviewNote] = useState('');
-  const [shortVideoShare, setShortVideoShare] = useState('');
-  const [shortVideoTitle, setShortVideoTitle] = useState('');
-  const [shortVideoContent, setShortVideoContent] = useState('');
-  const [busyDocument, setBusyDocument] = useState<string | null>(null);
-  const [localError, setLocalError] = useState('');
-  const fileInputRef = useRef<HTMLInputElement>(null);
-  const pending = candidates.filter((item) => item.status === 'pending');
-  const approved = candidates.filter((item) => item.status === 'approved');
-  const learned = candidates.filter((item) => item.scope === 'learning' && item.epistemicStatus === 'understood');
-
-  async function saveText(sourceType: 'note' | 'conversation', value: string, nextTitle: string) {
-    if (value.trim().length < 10) { setLocalError('Please enter at least one complete piece of source material.'); return; }
-    setBusyDocument('new');
-    try {
-      await memoryApi.importDocument({ title: nextTitle.trim() || 'Untitled material', sourceType, content: value.trim() });
-      if (sourceType === 'note') setNote(''); else setInterviewNote('');
-      setLocalError('');
-      await onRefresh();
-    } catch (caught) { setLocalError((caught as Error).message); } finally { setBusyDocument(null); }
-  }
-
-  async function importChatGPT(file: File) {
-    setBusyDocument('file');
-    try {
-      const contents = extractChatGPTConversations(JSON.parse(await file.text()));
-      if (!contents.length) throw new Error('No readable user/assistant conversations were found in this export.');
-      for (const item of contents) await memoryApi.importDocument({ ...item, sourceType: 'chatgpt_export' });
-      setLocalError('');
-      await onRefresh();
-    } catch (caught) { setLocalError((caught as Error).message); } finally { setBusyDocument(null); }
-  }
-
-  async function prepareShortVideo() {
-    if (!shortVideoShare.trim()) { setLocalError('Paste a Douyin share message first.'); return; }
-    setBusyDocument('short-video-prepare');
-    try {
-      const prepared = await memoryApi.prepareShortVideo(shortVideoShare);
-      setShortVideoTitle(prepared.title);
-      setShortVideoContent(prepared.content);
-      setLocalError('');
-    } catch (caught) { setLocalError((caught as Error).message); } finally { setBusyDocument(null); }
-  }
-
-  async function transcribeShortVideo() {
-    if (!shortVideoShare.trim()) { setLocalError('Paste a Douyin share message first.'); return; }
-    setBusyDocument('short-video-transcribe');
-    try {
-      const prepared = await memoryApi.transcribeShortVideo(shortVideoShare);
-      setShortVideoTitle(prepared.title);
-      setShortVideoContent(prepared.content);
-      setLocalError('');
-    } catch (caught) { setLocalError((caught as Error).message); } finally { setBusyDocument(null); }
-  }
-
-  async function saveShortVideo() {
-    if (shortVideoContent.trim().length < 10) { setLocalError('Prepare the share link, then add a spoken transcript.'); return; }
-    setBusyDocument('short-video-save');
-    try {
-      await memoryApi.importDocument({ title: shortVideoTitle.trim() || 'Douyin learning material', sourceType: 'short_video', content: shortVideoContent.trim() });
-      setShortVideoShare(''); setShortVideoTitle(''); setShortVideoContent(''); setLocalError(''); await onRefresh();
-    } catch (caught) { setLocalError((caught as Error).message); } finally { setBusyDocument(null); }
-  }
-
-  async function extract(documentId: string) {
-    setBusyDocument(documentId);
-    try { await memoryApi.extract(documentId); setLocalError(''); await onRefresh(); } catch (caught) { setLocalError((caught as Error).message); } finally { setBusyDocument(null); }
-  }
-
-  async function review(id: string, status: MemoryCandidate['status']) {
-    try { await memoryApi.setStatus(id, status); await onRefresh(); } catch (caught) { setLocalError((caught as Error).message); }
-  }
-
-  async function internalize(candidate: MemoryCandidate) {
-    const interpretation = window.prompt('把这条知识改写成你真正认同、愿意代表自己表达的观点：', candidate.content);
-    if (!interpretation?.trim()) return;
-    const reason = window.prompt('你为什么认同它？请写下讨论后的理由或实际应用：');
-    if (!reason?.trim()) return;
-    try {
-      await memoryApi.internalizeClaim(candidate.id, { proposition: interpretation.trim(), reason: reason.trim() });
-      await onRefresh();
-    } catch (caught) { setLocalError((caught as Error).message); }
-  }
-
-  return <div className="memory-layout">
-    <header className="page-header"><div><p className="eyebrow">COGNITIVE INBOX</p><h1>Knowledge and self model</h1><p className="subtle">External material becomes understood knowledge. Only your confirmation authorizes a claim to represent your viewpoint or experience.</p></div><button className="ghost-button" onClick={() => void onRefresh()}>Refresh</button></header>
-    <div className="memory-grid">
-      <section className="memory-imports">
-        <article className="memory-card"><div className="card-heading"><FileUp size={19} /><div><h2>ChatGPT history</h2><p>Import <code>conversations.json</code> from an official export.</p></div></div><input ref={fileInputRef} className="hidden-input" type="file" accept="application/json,.json" onChange={(event) => { const file = event.target.files?.[0]; if (file) void importChatGPT(file); event.currentTarget.value = ''; }} /><button className="ghost-button full-width" disabled={busyDocument === 'file'} onClick={() => fileInputRef.current?.click()}><Upload size={16} /> {busyDocument === 'file' ? 'Importing...' : 'Choose conversations.json'}</button></article>
-        <article className="memory-card"><div className="card-heading"><FileText size={19} /><div><h2>Notes / Markdown</h2><p>Views, experience, learning notes, or chat excerpts.</p></div></div><input className="memory-title" value={title} onChange={(event) => setTitle(event.target.value)} placeholder="Material title" /><textarea className="memory-textarea" value={note} onChange={(event) => setNote(event.target.value)} placeholder="Paste any text or Markdown..." /><button className="primary-button full-width" disabled={busyDocument === 'new'} onClick={() => void saveText('note', note, title)}><Upload size={16} /> Save source material</button></article>
-        <article className="memory-card short-video-card"><div className="card-heading"><Video size={19} /><div><h2>Douyin voice transcript</h2><p>Paste a full share message to transcribe its speech. Video frames are not analyzed.</p></div></div><textarea className="memory-textarea short" value={shortVideoShare} onChange={(event) => setShortVideoShare(event.target.value)} placeholder="Paste the Douyin share message or v.douyin.com link..." /><div className="short-video-actions"><button className="primary-button full-width" disabled={busyDocument === 'short-video-transcribe'} onClick={() => void transcribeShortVideo()}><Video size={16} /> {busyDocument === 'short-video-transcribe' ? 'Transcribing audio...' : 'Transcribe audio'}</button><button className="ghost-button full-width" disabled={busyDocument === 'short-video-prepare'} onClick={() => void prepareShortVideo()}>{busyDocument === 'short-video-prepare' ? 'Reading link...' : 'Add transcript manually'}</button></div>{shortVideoContent && <div className="short-video-editor"><input className="memory-title" value={shortVideoTitle} onChange={(event) => setShortVideoTitle(event.target.value)} placeholder="Video title" /><textarea className="memory-textarea" value={shortVideoContent} onChange={(event) => setShortVideoContent(event.target.value)} placeholder="Paste or correct the spoken transcript..." /><button className="primary-button full-width" disabled={busyDocument === 'short-video-save'} onClick={() => void saveShortVideo()}><Upload size={16} /> {busyDocument === 'short-video-save' ? 'Saving...' : 'Save transcript to inbox'}</button></div>}</article>
-        <article className="memory-card"><div className="card-heading"><BotMessageSquare size={19} /><div><h2>Conversation intake</h2><p>Archive this conversation first; guided intake can be added later.</p></div></div><textarea className="memory-textarea short" value={interviewNote} onChange={(event) => setInterviewNote(event.target.value)} placeholder="What have you done lately? What changed? What are you working through?" /><button className="ghost-button full-width" disabled={busyDocument === 'new'} onClick={() => void saveText('conversation', interviewNote, 'Conversation intake')}>Save this conversation</button></article>
-      </section>
-      <section className="memory-review">
-        <div className="memory-summary"><div><p className="eyebrow">IMMUTABLE EVIDENCE</p><h2>{documents.length} <span>source items</span></h2></div><div><p className="eyebrow">UNDERSTOOD</p><h2>{learned.length} <span>reasoning claims</span></h2></div></div>
-        {(error || localError) && <div className="error-note">{error || localError}</div>}
-        <div className="document-list"><h3>Ready to extract</h3>{documents.length === 0 ? <p className="empty-inline">Imported source material will wait here for extraction.</p> : documents.map((document) => <article className="document-row" key={document.id}><div><strong>{document.title}</strong><span>{document.sourceType === 'chatgpt_export' ? 'ChatGPT history' : document.sourceType === 'note' ? 'Text note' : document.sourceType === 'short_video' ? 'Douyin voice transcript' : 'Conversation intake'} · {new Date(document.createdAt).toLocaleDateString('en-US')}</span></div><button className="ghost-button" disabled={busyDocument === document.id} onClick={() => void extract(document.id)}>{busyDocument === document.id ? 'DeepSeek is extracting...' : document.extractedAt ? 'Extract again' : 'Extract candidate memories'}</button></article>)}</div>
-        <div className="candidate-list"><h3>Understood knowledge <span>{learned.length}</span></h3>{learned.length === 0 ? <p className="empty-inline">External material will become reasoning knowledge here, without becoming your viewpoint.</p> : learned.map((candidate) => <article className="candidate-card" key={candidate.id}><div className="candidate-kind">{candidate.kind} · reasoning only</div><h4>{candidate.title}</h4><p>{candidate.content}</p>{candidate.tags.length > 0 && <div className="chip-row">{candidate.tags.map((tag) => <span className="chip" key={tag}>{tag}</span>)}</div>}<blockquote>{candidate.sourceQuote}</blockquote><div className="candidate-actions"><button className="primary-button compact" onClick={() => void internalize(candidate)}><MessageCircle size={15} /> Discuss and adopt</button></div></article>)}</div>
-        <div className="candidate-list"><h3>Personal claim review <span>{pending.length}</span></h3>{pending.length === 0 ? <p className="empty-inline">No user-owned claims are waiting for authorization.</p> : pending.map((candidate) => <article className="candidate-card" key={candidate.id}><div className="candidate-kind">{candidate.kind} · {candidate.owner || 'user'} · {candidate.epistemicStatus || 'observed'}</div><h4>{candidate.title}</h4><p>{candidate.content}</p>{candidate.tags.length > 0 && <div className="chip-row">{candidate.tags.map((tag) => <span className="chip" key={tag}>{tag}</span>)}</div>}<blockquote>{candidate.sourceQuote}</blockquote><div className="candidate-actions"><button className="reject-button" onClick={() => void review(candidate.id, 'rejected')}><X size={15} /> Reject claim</button><button className="primary-button compact" onClick={() => void review(candidate.id, 'approved')}><CheckCircle2 size={15} /> Authorize as mine</button></div></article>)}</div>
-        <div className="candidate-list"><h3>Authorized self <span>{approved.filter((item) => item.scope !== 'learning').length}</span></h3>{approved.filter((item) => item.scope !== 'learning').length === 0 ? <p className="empty-inline">Confirmed experiences and viewpoints will appear here.</p> : approved.filter((item) => item.scope !== 'learning').map((candidate) => <article className="candidate-card" key={candidate.id}><div className="candidate-kind">{candidate.kind} · {candidate.authorizationScope || 'authorized'}</div><h4>{candidate.title}</h4><p>{candidate.content}</p></article>)}</div>
-      </section>
-    </div>
-  </div>;
 }
 
 function PrepareView(props: {

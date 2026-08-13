@@ -5,16 +5,22 @@ function sourceIsExternal(source) {
   return ['short_video', 'article', 'paper', 'podcast'].includes(source.sourceType);
 }
 
-function extractionPrompt(source, chunk) {
+function extractionPrompt(source, chunk, context = {}) {
   if (sourceIsExternal(source)) {
     return `Extract atomic, reusable claims from this chunk of external learning material. Never attribute the source author's experience or opinion to the user. Return strict JSON: {"claims":[{"kind":"knowledge|example","owner":"external|third_party","title":"short title","proposition":"clear reusable claim in the source language","tags":["tag"],"sourceQuote":"direct supporting quote from this chunk","confidence":0.0}]}. Use owner=third_party for cases or speaker-specific viewpoints. Every item represents understanding, not user endorsement. Return at most 12 items. Chunk:\n${chunk.text}`;
   }
-  return `Extract atomic claims from this chunk of user-owned material. Use only supported information and distinguish experience, viewpoint, preference, value, knowledge, and expression samples. In conversation records, extract personal claims only from text explicitly labeled User; assistant text is context and must never become a user claim. Return strict JSON: {"claims":[{"kind":"experience|viewpoint|preference|value|knowledge|expression","owner":"user","title":"short title","proposition":"complete candidate claim","tags":["tag"],"sourceQuote":"direct supporting quote from the user","confidence":0.0}]}. These are observed candidates and require user endorsement before first-person use. Return at most 12 items. Chunk:\n${chunk.text}`;
+  const authority = source.metadata.directConversation
+    ? 'The User statements are direct first-person evidence and may be mapped to endorsed user cognition. Do not extract the assistant text.'
+    : 'These are observed candidates and require conversational confirmation before first-person use.';
+  const resolution = context.resolvedInquiryClaimId
+    ? `Do not extract the user's answer to inquiry claim ${context.resolvedInquiryClaimId}; it was already persisted through the inquiry-resolution path.`
+    : '';
+  return `Extract atomic claims from this chunk of user-owned material. Use only supported information and distinguish experience, viewpoint, preference, value, knowledge, and expression samples. In conversation records, extract personal claims only from text explicitly labeled User; assistant text is context and must never become a user claim. Return strict JSON: {"claims":[{"kind":"experience|viewpoint|preference|value|knowledge|expression","owner":"user","title":"short title","proposition":"complete candidate claim","tags":["tag"],"sourceQuote":"direct supporting quote from the user","confidence":0.0}]}. ${authority} ${resolution} Return at most 12 items. Chunk:\n${chunk.text}`;
 }
 
 function createDeepSeekExtractor() {
   return {
-    async extract({ source, chunk }) {
+    async extract({ source, chunk, context }) {
       const apiKey = process.env.DEEPSEEK_API_KEY;
       if (!apiKey) throw new Error('DEEPSEEK_API_KEY is not configured. Set it in the local .env file and restart the service.');
       const response = await fetch(`${(process.env.DEEPSEEK_BASE_URL || 'https://api.deepseek.com').replace(/\/$/, '')}/chat/completions`, {
@@ -22,7 +28,7 @@ function createDeepSeekExtractor() {
         headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({
           model: process.env.DEEPSEEK_MODEL || 'deepseek-chat', temperature: 0.1,
-          response_format: { type: 'json_object' }, messages: [{ role: 'user', content: extractionPrompt(source, chunk) }],
+          response_format: { type: 'json_object' }, messages: [{ role: 'user', content: extractionPrompt(source, chunk, context) }],
         }),
       });
       if (!response.ok) throw new Error(`DeepSeek extraction request failed (${response.status}).`);
@@ -43,7 +49,7 @@ export function createMindCloneLearningEngine(repository) {
         const external = sourceIsExternal(source);
         const owner = external ? (proposal.owner === 'third_party' ? 'third_party' : 'external') : 'user';
         const kind = String(proposal.kind || (external ? 'knowledge' : 'experience'));
-        const epistemicStatus = external ? 'understood' : 'observed';
+        const epistemicStatus = external ? 'understood' : source.metadata.directConversation ? 'endorsed' : 'observed';
         return {
           claim: {
             title: String(proposal.title || 'Untitled claim').slice(0, 120),
@@ -62,12 +68,18 @@ export function createMindCloneLearningEngine(repository) {
         && !['rejected', 'superseded', 'contested'].includes(claim.epistemicStatus),
       beforeReplaceSource: ({ source, store }) => store.deleteInquiriesForSource(source.id),
       afterLearn: ({ source, claims, store }) => {
-        if (!sourceIsExternal(source)) return;
-        for (const claim of claims.filter((item) => item.kind === 'knowledge').slice(0, 3)) {
+        const candidates = sourceIsExternal(source)
+          ? claims.filter((item) => item.kind === 'knowledge')
+          : claims.filter((item) => item.epistemicStatus === 'observed');
+        for (const claim of candidates.slice(0, 3)) {
           store.addInquiry({
             claimId: claim.id,
-            question: `你怎么看“${claim.proposition.slice(0, 120)}”？这只是你理解的新知识，还是也代表你的判断？`,
-            reason: 'External knowledge requires user deliberation before it can represent a personal viewpoint.',
+            question: sourceIsExternal(source)
+              ? `你怎么看“${claim.proposition.slice(0, 120)}”？这只是你理解的新知识，还是也代表你的判断？`
+              : `我从导入材料里理解到“${claim.proposition.slice(0, 120)}”。我应该把它当作你现在认可的经历或观点吗？`,
+            reason: sourceIsExternal(source)
+              ? 'External knowledge requires user deliberation before it can represent a personal viewpoint.'
+              : 'Imported personal material requires conversational confirmation.',
             priority: 0.5 + claim.confidence * 0.3,
           });
         }

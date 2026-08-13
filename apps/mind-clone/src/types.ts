@@ -1,4 +1,4 @@
-export type Mode = 'daily' | 'prepare' | 'formal' | 'memory';
+export type Mode = 'daily' | 'prepare' | 'formal';
 
 export type Settings = {
   baseUrl: string;

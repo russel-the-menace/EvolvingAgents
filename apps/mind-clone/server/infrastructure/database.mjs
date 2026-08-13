@@ -27,7 +27,8 @@ export function openDatabase(path, legacyPath) {
     );
     CREATE TABLE IF NOT EXISTS inquiry_items (
       id TEXT PRIMARY KEY, claim_id TEXT, question TEXT NOT NULL, reason TEXT NOT NULL,
-      priority REAL NOT NULL DEFAULT 0, status TEXT NOT NULL DEFAULT 'queued', created_at TEXT NOT NULL, resolved_at TEXT
+      priority REAL NOT NULL DEFAULT 0, status TEXT NOT NULL DEFAULT 'queued', created_at TEXT NOT NULL, resolved_at TEXT,
+      session_id TEXT, presented_at TEXT, response_text TEXT, resolution TEXT
     );
     CREATE TABLE IF NOT EXISTS answer_runs (
       id TEXT PRIMARY KEY, scene_id TEXT REFERENCES scenes(id), question TEXT NOT NULL,
@@ -42,6 +43,11 @@ export function openDatabase(path, legacyPath) {
       role TEXT NOT NULL, content TEXT NOT NULL, created_at TEXT NOT NULL, ordinal INTEGER NOT NULL
     );
   `);
+  const inquiryColumns = new Set(db.prepare('PRAGMA table_info(inquiry_items)').all().map((row) => row.name));
+  if (!inquiryColumns.has('session_id')) db.exec('ALTER TABLE inquiry_items ADD COLUMN session_id TEXT');
+  if (!inquiryColumns.has('presented_at')) db.exec('ALTER TABLE inquiry_items ADD COLUMN presented_at TEXT');
+  if (!inquiryColumns.has('response_text')) db.exec('ALTER TABLE inquiry_items ADD COLUMN response_text TEXT');
+  if (!inquiryColumns.has('resolution')) db.exec('ALTER TABLE inquiry_items ADD COLUMN resolution TEXT');
   const learningStore = createSqliteLearningStore(db);
 
   const migrated = db.prepare("SELECT value FROM meta WHERE key = 'legacy_json_migrated_v1'").get();
@@ -148,8 +154,31 @@ function createRepository(db, learningStore) {
         .run(record.id, record.claimId || null, record.question, record.reason, record.priority || 0, record.status, record.createdAt);
       return record;
     },
-    listInquiries: () => db.prepare("SELECT * FROM inquiry_items WHERE status = 'queued' ORDER BY priority DESC, created_at").all(),
-    resolveInquiry: (id, status = 'resolved') => db.prepare('UPDATE inquiry_items SET status = ?, resolved_at = ? WHERE id = ?').run(status, new Date().toISOString(), id),
+    listInquiries: (statuses = ['queued', 'presented', 'deferred']) => {
+      const values = Array.isArray(statuses) ? statuses : [statuses];
+      if (!values.length) return [];
+      return db.prepare(`SELECT * FROM inquiry_items WHERE status IN (${values.map(() => '?').join(',')})
+        ORDER BY priority DESC, created_at`).all(...values);
+    },
+    activeInquiryForSession: (sessionId) => db.prepare(
+      "SELECT * FROM inquiry_items WHERE session_id = ? AND status = 'presented' ORDER BY presented_at DESC LIMIT 1",
+    ).get(sessionId),
+    presentNextInquiry: (sessionId) => {
+      const active = db.prepare("SELECT * FROM inquiry_items WHERE session_id = ? AND status = 'presented' LIMIT 1").get(sessionId);
+      if (active) return active;
+      const retryBefore = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+      const next = db.prepare(`SELECT * FROM inquiry_items
+        WHERE status = 'queued' OR (status = 'deferred' AND resolved_at <= ?)
+        ORDER BY priority DESC, created_at LIMIT 1`).get(retryBefore);
+      if (!next) return null;
+      const now = new Date().toISOString();
+      db.prepare("UPDATE inquiry_items SET status = 'presented', session_id = ?, presented_at = ? WHERE id = ?")
+        .run(sessionId, now, next.id);
+      return db.prepare('SELECT * FROM inquiry_items WHERE id = ?').get(next.id);
+    },
+    resolveInquiry: (id, resolution = 'resolved', responseText = '') => db.prepare(`UPDATE inquiry_items
+      SET status = ?, resolution = ?, response_text = ?, resolved_at = ? WHERE id = ?`)
+      .run(resolution === 'deferred' ? 'deferred' : 'resolved', resolution, responseText, new Date().toISOString(), id),
     addAnswerRun: (run) => {
       const id = randomUUID();
       db.prepare('INSERT INTO answer_runs (id, scene_id, question, plan_json, answer, audit_json, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)')

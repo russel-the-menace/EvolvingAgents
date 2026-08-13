@@ -6,6 +6,6 @@ export default defineConfig({
   server: {
     port: 5269,
     strictPort: true,
-    proxy: { '/api': 'http://127.0.0.1:5270' },
+    proxy: { '/api': process.env.VITE_API_PROXY || 'http://127.0.0.1:5270' },
   },
 });

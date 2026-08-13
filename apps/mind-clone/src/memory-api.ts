@@ -15,7 +15,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 export const memoryApi = {
   list: () => request<{ documents: MemoryDocument[]; memories: MemoryCandidate[]; claims: Claim[] }>('/memory'),
   importDocument: (payload: Pick<MemoryDocument, 'title' | 'sourceType' | 'content'>) =>
-    request<{ document: MemoryDocument }>('/memory/documents', { method: 'POST', body: JSON.stringify(payload) }),
+    request<{ document: MemoryDocument; claims: Claim[] }>('/memory/documents', { method: 'POST', body: JSON.stringify(payload) }),
   prepareShortVideo: (shareText: string) =>
     request<{ title: string; content: string; sourceUrl: string }>('/memory/short-videos/prepare', { method: 'POST', body: JSON.stringify({ shareText }) }),
   transcribeShortVideo: (shareText: string) =>

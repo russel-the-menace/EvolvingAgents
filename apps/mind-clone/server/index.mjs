@@ -8,6 +8,7 @@ import { compileSceneView, makeAnswerPlan } from './domain/scenes.mjs';
 import { openDatabase } from './infrastructure/database.mjs';
 import { extractDouyinShare, resolveDouyinLink, transcribeShortVideo } from './infrastructure/video-transcription.mjs';
 import { createMindCloneLearningEngine } from './adapters/mindclone-learning.mjs';
+import { applyInquiryReply, classifyInquiryReply, inquiryDialogueContext } from './domain/inquiry-dialogue.mjs';
 
 const app = express();
 const port = Number(process.env.PORT || 5270);
@@ -47,19 +48,17 @@ async function relevantContext(query) {
   const ranked = await learningEngine.retrieve(query, { limit: 12 });
   const personal = ranked.filter(({ claim }) => claim.owner === 'user').map(({ claim }) => `- [${claim.id}] ${claim.kind}: ${clip(claim.proposition, 360)}`);
   const knowledge = ranked.filter(({ claim }) => claim.owner !== 'user').map(({ claim }) => `- [${claim.id}] ${claim.kind}: ${clip(claim.proposition, 360)}`);
-  const inquiries = repository.listInquiries().slice(0, 2).map((item) => `- ${item.question}`);
   const sections = [];
   if (personal.length) sections.push(`User-owned authorized cognition:\n${personal.join('\n')}`);
   if (knowledge.length) sections.push(`External understood knowledge for reasoning only. Never claim its experiences as the user's:\n${knowledge.join('\n')}`);
-  if (inquiries.length) sections.push(`Deferred discussion candidates. Address the user's request first; then ask at most one if natural:\n${inquiries.join('\n')}`);
   return sections.join('\n\n');
 }
 
-async function streamDailyChat(session, response, query, model) {
+async function streamDailyChat(session, response, query, model, dialogueContext = '') {
   const apiKey = process.env.DEEPSEEK_API_KEY;
   if (!apiKey) throw new Error('DEEPSEEK_API_KEY is not configured. Set it in the local .env file and restart the service.');
   const context = await relevantContext(query);
-  const system = `You are MindClone, a long-term conversational partner. Help the user think, challenge weak assumptions when warranted, and express conclusions naturally. Distinguish source knowledge from the user's position. An understood external claim is available for reasoning but is not the user's belief. Never turn external or third-party material into the user's experience. Match the user's language.\n\n${context || 'No authorized long-term context is relevant yet.'}`;
+  const system = `You are MindClone, a long-term conversational partner. Help the user think, challenge weak assumptions when warranted, and express conclusions naturally. Distinguish source knowledge from the user's position. An understood external claim is available for reasoning but is not the user's belief. Never turn external or third-party material into the user's experience. Match the user's language.\n\n${dialogueContext}\n\n${context || 'No authorized long-term context is relevant yet.'}`;
   const options = {
     'deepseek-light': { model: 'deepseek-v4-flash', thinking: false },
     'deepseek-medium': { model: 'deepseek-v4-flash', thinking: true },
@@ -106,7 +105,8 @@ app.post('/api/memory/documents', async (request, response, next) => {
       id: randomUUID(), title: String(title).slice(0, 160), sourceType,
       content: String(content).slice(0, 2_000_000), sourceUri, sourceActor, createdAt: new Date().toISOString(),
     }, { deduplicate: false });
-    response.status(201).json({ document });
+    const { claims } = await learningEngine.learn(document.id);
+    response.status(201).json({ document: repository.getSource(document.id), claims });
   } catch (error) { next(error); }
 });
 
@@ -252,19 +252,34 @@ app.post('/api/chat/sessions/:id/stream', async (request, response, next) => {
     let session = repository.getSession(request.params.id);
     if (!session) return response.status(404).json({ error: 'Conversation was not found.' });
     if (request.body.replaceFromMessageId && !repository.truncateSession(session.id, request.body.replaceFromMessageId)) return response.status(404).json({ error: 'The message to edit was not found.' });
+    const activeInquiry = repository.activeInquiryForSession(session.id);
+    const inquiryReply = activeInquiry ? classifyInquiryReply(content) : null;
     repository.addMessage(session.id, { role: 'user', content });
     session = repository.getSession(session.id);
     if (session.messages.filter((message) => message.role === 'user').length === 1) repository.updateSession(session.id, { title: content.slice(0, 28) });
     response.setHeader('Content-Type', 'text/event-stream'); response.setHeader('Cache-Control', 'no-cache'); response.setHeader('Connection', 'keep-alive'); response.flushHeaders();
-    const answer = await streamDailyChat(repository.getSession(session.id), response, content, request.body.model);
-    if (answer) repository.addMessage(session.id, { role: 'assistant', content: answer });
+    let answer = await streamDailyChat(
+      repository.getSession(session.id), response, content, request.body.model,
+      activeInquiry ? inquiryDialogueContext(activeInquiry, inquiryReply) : '',
+    );
     const { source } = await learningEngine.ingest({
       id: randomUUID(), title: `Daily chat: ${repository.getSession(session.id).title}`,
       sourceType: 'conversation', content: `User: ${content}\n\nMindClone: ${answer}`,
-      sourceActor: 'user_and_mindclone', createdAt: new Date().toISOString(),
+      sourceActor: 'user_and_mindclone', metadata: { directConversation: true }, createdAt: new Date().toISOString(),
     }, { deduplicate: false });
+    if (activeInquiry) applyInquiryReply({ repository, inquiry: activeInquiry, reply: inquiryReply, evidenceSourceId: source.id });
+    if (!activeInquiry) {
+      const inquiry = repository.presentNextInquiry(session.id);
+      if (inquiry) {
+        const followUp = `\n\n顺便问你一个我在学习时留下的问题：${inquiry.question}`;
+        answer += followUp;
+        response.write(`data: ${JSON.stringify({ delta: followUp })}\n\n`);
+      }
+    }
+    if (answer) repository.addMessage(session.id, { role: 'assistant', content: answer });
     response.write('data: [DONE]\n\n'); response.end();
-    void learningEngine.learn(source.id).catch((error) => console.error('Daily claim extraction failed:', error.message));
+    void learningEngine.learn(source.id, { context: { resolvedInquiryClaimId: activeInquiry?.claim_id } })
+      .catch((error) => console.error('Daily claim extraction failed:', error.message));
   } catch (error) { next(error); }
 });
 
