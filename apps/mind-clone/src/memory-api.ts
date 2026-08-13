@@ -13,8 +13,15 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export const memoryApi = {
-  importDocument: (payload: Pick<MemoryDocument, 'title' | 'sourceType' | 'content'>) =>
-    request<{ document: MemoryDocument; claims: Claim[] }>('/memory/documents', { method: 'POST', body: JSON.stringify(payload) }),
+  importDocument: async (payload: Pick<MemoryDocument, 'title' | 'sourceType' | 'content'>) => {
+    const result = await request<{ document: MemoryDocument; claims: Claim[] }>('/memory/documents', {
+      method: 'POST', body: JSON.stringify(payload),
+    });
+    if (!result.document || !Array.isArray(result.claims)) {
+      throw new Error('The memory service returned an incompatible learning response. Restart the local API and try again.');
+    }
+    return result;
+  },
   prepareShortVideo: (shareText: string) =>
     request<{ title: string; content: string; sourceUrl: string }>('/memory/short-videos/prepare', { method: 'POST', body: JSON.stringify({ shareText }) }),
   transcribeShortVideo: (shareText: string) =>
