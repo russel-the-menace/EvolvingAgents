@@ -28,11 +28,34 @@ function InlineMarkdown({ text }: { text: string }) {
 }
 
 function MarkdownText({ content }: { content: string }) {
-  return <div className="rich-text">{content.split('\n\n').map((paragraph, paragraphIndex) =>
-    <p key={paragraphIndex}>{paragraph.split('\n').map((line, lineIndex) =>
-      <Fragment key={lineIndex}><InlineMarkdown text={line} />{lineIndex < paragraph.split('\n').length - 1 && <br />}</Fragment>,
-    )}</p>,
-  )}</div>;
+  const blocks: React.ReactNode[] = [];
+  let paragraph: string[] = [];
+
+  function flushParagraph() {
+    if (!paragraph.length) return;
+    blocks.push(<p key={`paragraph-${blocks.length}`}>{paragraph.map((line, lineIndex) =>
+      <Fragment key={lineIndex}><InlineMarkdown text={line} />{lineIndex < paragraph.length - 1 && <br />}</Fragment>,
+    )}</p>);
+    paragraph = [];
+  }
+
+  content.split('\n').forEach((line) => {
+    const heading = line.match(/^ {0,3}###\s+(.+)\s*$/);
+    if (/^ {0,3}(?:---+|\*\s*\*\s*\*+)\s*$/.test(line)) {
+      flushParagraph();
+      blocks.push(<hr key={`rule-${blocks.length}`} />);
+    } else if (heading) {
+      flushParagraph();
+      blocks.push(<h3 key={`heading-${blocks.length}`}><InlineMarkdown text={heading[1]} /></h3>);
+    } else if (!line.trim()) {
+      flushParagraph();
+    } else {
+      paragraph.push(line);
+    }
+  });
+  flushParagraph();
+
+  return <div className="rich-text">{blocks}</div>;
 }
 
 function ThinkingIndicator() {

@@ -243,6 +243,11 @@ button:disabled { cursor: not-allowed; opacity: .45; }
 .message .message-body { background: transparent; }
 .message.interviewer .message-body { background: var(--mc-user-bubble); border-color: var(--mc-user-bubble-border); border-radius: 18px; padding: 10px 15px; width: fit-content; max-width: 88%; margin-left: auto; }
 
+/* Markdown blocks shared by daily chat and formal interview answers. */
+.rich-text > h3 { margin: 22px 0 8px; color: var(--mc-ink); font-size: 16px; font-weight: 650; line-height: 1.45; }
+.rich-text > :first-child { margin-top: 0; }
+.rich-text > hr { height: 0; margin: 22px 0; border: 0; border-top: 1px solid var(--mc-border); }
+
 /* Fixed navigation and recent rows share the same item geometry. */
 .daily-history .daily-nav { gap: 1px; margin: 0 0 12px; padding: 0 0 12px; }
 .daily-history .daily-nav > button { height: 28px; min-height: 28px; padding: 3px 10px; gap: 7px; border-radius: 8px; font-size: 12px; line-height: normal; }
