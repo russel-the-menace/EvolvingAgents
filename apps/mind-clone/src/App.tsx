@@ -24,7 +24,16 @@ function formatPreparedAt(value: string) {
 function MarkdownText({ content }: { content: string }) {
   return <div className="rich-text"><ReactMarkdown
     remarkPlugins={[remarkGfm]}
-    components={{ table: ({ children }) => <div className="table-scroll"><table>{children}</table></div> }}
+    components={{
+      p: ({ node, children }) => {
+        const meaningfulChildren = node?.children.filter((child) => child.type !== 'text' || child.value.trim()) ?? [];
+        const standaloneStrong = meaningfulChildren.length === 1
+          && meaningfulChildren[0].type === 'element'
+          && meaningfulChildren[0].tagName === 'strong';
+        return <p className={standaloneStrong ? 'standalone-strong' : undefined}>{children}</p>;
+      },
+      table: ({ children }) => <div className="table-scroll"><table>{children}</table></div>,
+    }}
   >{content}</ReactMarkdown></div>;
 }
 
