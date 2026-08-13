@@ -1,0 +1,42 @@
+group	filename	title	url
+00-surveys	2023_CoALA_Cognitive_Architectures_for_Language_Agents.pdf	Cognitive Architectures for Language Agents	https://arxiv.org/pdf/2309.02427
+00-surveys	2024_Two_Tales_of_Persona_in_LLMs.pdf	Two Tales of Persona in LLMs	https://aclanthology.org/2024.findings-emnlp.969.pdf
+00-surveys	2024_Survey_Memory_Mechanism_LLM_Agents.pdf	A Survey on the Memory Mechanism of Large Language Model based Agents	https://arxiv.org/pdf/2404.13501
+00-surveys	2025_Survey_Personalized_Alignment.pdf	A Survey on Personalized Alignment	https://arxiv.org/pdf/2503.17003
+00-surveys	2026_Toward_Personalized_LLM_Powered_Agents.pdf	Toward Personalized LLM-Powered Agents	https://arxiv.org/pdf/2602.22680
+00-surveys	2026_From_Storage_to_Experience.pdf	From Storage to Experience	https://arxiv.org/pdf/2605.06716
+01-memory-provenance	2022_BEGIN_Attribution_in_Dialogue.pdf	Evaluating Attribution in Dialogue Systems: The BEGIN Benchmark	https://aclanthology.org/2022.tacl-1.62.pdf
+01-memory-provenance	2023_MemGPT.pdf	MemGPT: Towards LLMs as Operating Systems	https://arxiv.org/pdf/2310.08560
+01-memory-provenance	2024_LoCoMo.pdf	Evaluating Very Long-Term Conversational Memory of LLM Agents	https://aclanthology.org/2024.acl-long.747.pdf
+01-memory-provenance	2024_LongMemEval.pdf	LongMemEval: Benchmarking Chat Assistants on Long-Term Interactive Memory	https://arxiv.org/pdf/2410.10813
+01-memory-provenance	2025_Zep_Temporal_Knowledge_Graph.pdf	Zep: A Temporal Knowledge Graph Architecture for Agent Memory	https://arxiv.org/pdf/2501.13956
+01-memory-provenance	2025_Mem0.pdf	Mem0: Building Production-Ready AI Agents with Scalable Long-Term Memory	https://arxiv.org/pdf/2504.19413
+01-memory-provenance	2025_Reflective_Memory_Management.pdf	In Prospect and Retrospect: Reflective Memory Management	https://aclanthology.org/2025.acl-long.413.pdf
+01-memory-provenance	2026_Inside_Out_PersonaTree.pdf	Inside Out: Evolving User-Centric Core Memory Trees	https://aclanthology.org/2026.acl-long.614.pdf
+01-memory-provenance	2026_PersonaAgent.pdf	PersonaAgent: Bridging Memory and Action	https://aclanthology.org/2026.findings-acl.1315.pdf
+01-memory-provenance	2026_KnowMe_Bench.pdf	KnowMe-Bench: Benchmarking Person Understanding	https://aclanthology.org/2026.acl-long.1394.pdf
+01-memory-provenance	2026_CloneMem.pdf	CloneMem: Benchmarking Long-Term Memory for AI Clones	https://aclanthology.org/2026.acl-long.1549.pdf
+01-memory-provenance	2026_LoCoMo_Plus.pdf	LoCoMo-Plus: Beyond-Factual Cognitive Memory Evaluation	https://aclanthology.org/2026.acl-long.1150.pdf
+01-memory-provenance	2026_Memory_Provenance_Laundering.pdf	Memory Provenance Laundering in LLM Agents	https://arxiv.org/pdf/2607.29167
+02-digital-clone-persona	2024_AI_PERSONA.pdf	AI PERSONA: Towards Life-long Personalization of LLMs	https://arxiv.org/pdf/2412.13103
+02-digital-clone-persona	2024_Generative_Agent_Simulations_1000_People.pdf	Generative Agent Simulations of 1,000 People	https://arxiv.org/pdf/2411.10109
+02-digital-clone-persona	2025_BehaviorChain_Digital_Twins.pdf	How Far are LLMs from Being Our Digital Twins?	https://aclanthology.org/2025.findings-acl.813.pdf
+02-digital-clone-persona	2025_PersonaTwin.pdf	PersonaTwin: A Multi-Tier Prompt Conditioning Framework	https://aclanthology.org/2025.gem-1.66.pdf
+02-digital-clone-persona	2025_Talking_to_an_AI_Mirror.pdf	Talking to an AI Mirror: Designing Self-Clone Chatbots	https://arxiv.org/pdf/2509.06393
+02-digital-clone-persona	2025_PersonaMem_v2.pdf	PersonaMem-v2: Learning Implicit User Personas and Agentic Memory	https://arxiv.org/pdf/2512.06688
+02-digital-clone-persona	2025_Talk_Less_Call_Right.pdf	Talk Less, Call Right: Enhancing Role-Play LLM Agents with Automatic Prompt Optimization and Role Prompting	https://arxiv.org/pdf/2509.00482
+02-digital-clone-persona	2026_TwinVoice.pdf	TwinVoice: A Multi-dimensional Benchmark Towards Digital Twins	https://aclanthology.org/2026.findings-acl.981.pdf
+02-digital-clone-persona	2026_Persona_Conflict.pdf	I Know, but I Don't Know! How Persona Conflict Undermines LLMs	https://aclanthology.org/2026.findings-eacl.24.pdf
+02-digital-clone-persona	2026_PersonaVLM.pdf	PersonaVLM: Long-Term Personalized Multimodal LLMs	https://openaccess.thecvf.com/content/CVPR2026/papers/Nie_PersonaVLM_Long-Term_Personalized_Multimodal_LLMs_CVPR_2026_paper.pdf
+03-active-inquiry	2023_Active_Preference_Inference.pdf	Active Preference Inference using Language Models and Probabilistic Reasoning	https://arxiv.org/pdf/2312.12009
+03-active-inquiry	2024_STaR_GATE.pdf	STaR-GATE: Teaching Language Models to Ask Clarifying Questions	https://arxiv.org/pdf/2403.19154
+03-active-inquiry	2025_CPER_From_Guessing_to_Asking.pdf	From Guessing to Asking: Resolving Persona Knowledge Gaps	https://aclanthology.org/2025.naacl-srw.42.pdf
+03-active-inquiry	2025_Training_Proactive_Personalized_Agents.pdf	Training Proactive and Personalized LLM Agents	https://arxiv.org/pdf/2511.02208
+03-active-inquiry	2026_VitaBench_2.pdf	VitaBench 2.0: Personalized and Proactive Agents	https://arxiv.org/pdf/2605.27141
+03-active-inquiry	2026_DECISIVE.pdf	DECISIVE: Guiding User Decisions with Optimal Preference Elicitation	https://aclanthology.org/2026.acl-long.1465.pdf
+04-style-evaluation	2025_Catch_Me_Style_Imitation.pdf	Catch Me If You Can? LLM Style Imitation	https://aclanthology.org/2025.findings-emnlp.532.pdf
+04-style-evaluation	2025_ExPerT_Personalized_Generation_Evaluation.pdf	ExPerT: Evaluation of Personalized Long-Form Text Generation	https://aclanthology.org/2025.findings-acl.900.pdf
+04-style-evaluation	2025_PPlug.pdf	LLMs + Persona-Plug = Personalized LLMs	https://aclanthology.org/2025.acl-long.461.pdf
+04-style-evaluation	2025_Whose_Story_Author_Styles.pdf	Whose story is it? Inferring Author Styles	https://aclanthology.org/2025.ijcnlp-long.82.pdf
+05-chinese	2026_人格化对齐与道德判断.pdf	大语言模型的人格化对齐及其对道德判断的影响	https://journal.psych.ac.cn/xlxb/CN/article/downloadArticleFile.do?attachType=PDF&id=16379
+05-chinese	2025_AI人格与道德判断.pdf	当AI具有人格：善恶人格角色对大语言模型道德判断的影响	https://journal.psych.ac.cn/xlxb/CN/article/downloadArticleFile.do?attachType=PDF&id=16061
