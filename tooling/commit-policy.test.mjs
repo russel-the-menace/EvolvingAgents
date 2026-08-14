@@ -16,6 +16,14 @@ test('accepts style commits', () => {
   }).valid, true);
 });
 
+test('accepts only the eleven allowed commit types', () => {
+  const paths = ['apps/mind-clone/src/App.tsx'];
+  for (const type of ['feat', 'fix', 'style', 'refactor', 'perf', 'test', 'docs', 'chore', 'build', 'ci', 'revert']) {
+    assert.equal(validateCommit({ header: `${type}(mind-clone): verify allowed type`, paths }).valid, true);
+  }
+  assert.match(validateCommit({ header: 'release(mind-clone): reject unsupported type', paths }).error, /Unknown commit type/);
+});
+
 test('accepts an application plus learning-engine scope', () => {
   assert.deepEqual(expectedScopes(['apps/crypto-agent/src/learning.mjs', 'packages/learning-engine/src/engine.mjs']), ['crypto-agent', 'learning-engine']);
   assert.equal(validateCommit({

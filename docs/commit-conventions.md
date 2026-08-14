@@ -6,7 +6,7 @@ Every commit must identify the product or shared package it changes. The reposit
 <type>(<scope>[,<scope>...]): <subject>
 ```
 
-Allowed types are `feat`, `fix`, `style`, `refactor`, `perf`, `test`, `docs`, `chore`, `build`, `ci`, and `revert`. The subject is required and must be no longer than 100 characters.
+Allowed types are `feat`, `fix`, `style`, `refactor`, `perf`, `test`, `docs`, `chore`, `build`, `ci`, and `revert`. Every other type is rejected. The subject is required and must be no longer than 100 characters.
 
 ## Scopes
 
