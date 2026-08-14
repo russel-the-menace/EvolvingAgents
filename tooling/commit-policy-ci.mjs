@@ -11,4 +11,6 @@ if (!result.valid) {
   console.error(`Commit rejected: ${result.error}`);
   process.exit(1);
 }
-console.log(`Commit scope accepted: ${result.parsed.scopes.join(',')}`);
+console.log(result.parsed.type === 'revert'
+  ? 'Commit type accepted: revert'
+  : `Commit scope accepted: ${result.parsed.scopes.join(',')}`);

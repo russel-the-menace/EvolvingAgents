@@ -16,7 +16,7 @@ test('accepts style commits', () => {
   }).valid, true);
 });
 
-test('accepts only the eleven allowed commit types across the monorepo', () => {
+test('accepts only the ten scoped commit types across the monorepo', () => {
   const scopeCases = [
     ['mind-clone', 'apps/mind-clone/src/App.tsx'],
     ['campus-atlas', 'apps/campus-atlas/src/App.tsx'],
@@ -24,12 +24,28 @@ test('accepts only the eleven allowed commit types across the monorepo', () => {
     ['learning-engine', 'packages/learning-engine/src/engine.mjs'],
     ['monorepo', 'package.json'],
   ];
-  for (const type of ['feat', 'fix', 'style', 'refactor', 'perf', 'test', 'docs', 'chore', 'build', 'ci', 'revert']) {
+  for (const type of ['feat', 'fix', 'style', 'refactor', 'perf', 'test', 'docs', 'chore', 'build', 'ci']) {
     for (const [scope, path] of scopeCases) {
       assert.equal(validateCommit({ header: `${type}(${scope}): verify allowed type`, paths: [path] }).valid, true);
     }
   }
   assert.match(validateCommit({ header: 'release(monorepo): reject unsupported type', paths: ['package.json'] }).error, /Unknown commit type/);
+});
+
+test('accepts revert without a scope for any changed paths', () => {
+  const result = validateCommit({
+    header: 'revert: restore the previous retrieval behavior',
+    paths: ['apps/mind-clone/src/App.tsx', 'packages/learning-engine/src/engine.mjs'],
+  });
+  assert.equal(result.valid, true);
+  assert.deepEqual(result.parsed.scopes, []);
+});
+
+test('requires scopes for every type except revert', () => {
+  for (const type of ['feat', 'fix', 'style', 'refactor', 'perf', 'test', 'docs', 'chore', 'build', 'ci']) {
+    assert.match(parseCommitHeader(`${type}: missing scope`).error, /type\(scope\)/);
+  }
+  assert.match(parseCommitHeader('revert(monorepo): scoped revert').error, /must not include a scope/);
 });
 
 test('accepts an application plus learning-engine scope', () => {
@@ -70,6 +86,7 @@ test('deleted files still determine their application scope', () => {
 
 test('rejects malformed headers, unknown scopes, and duplicate scopes', () => {
   assert.match(parseCommitHeader('update things').error, /type\(scope\)/);
+  assert.match(parseCommitHeader('Feat(mind-clone): wrong case').error, /type\(scope\)/);
   assert.match(parseCommitHeader('fix(unknown): bad scope').error, /Scope/);
   assert.match(parseCommitHeader('fix(mind-clone,mind-clone): duplicate').error, /repeat/);
 });

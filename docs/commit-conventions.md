@@ -1,12 +1,13 @@
 # Commit Conventions
 
-Every commit must identify the product or shared package it changes. The repository uses this format:
+Except for reverts, every commit must identify the product or shared package it changes. The repository uses these formats:
 
 ```text
 <type>(<scope>[,<scope>...]): <subject>
+revert: <subject>
 ```
 
-Allowed types are `feat`, `fix`, `style`, `refactor`, `perf`, `test`, `docs`, `chore`, `build`, `ci`, and `revert`. Every other type is rejected. The subject is required and must be no longer than 100 characters.
+Allowed types are `feat`, `fix`, `style`, `refactor`, `perf`, `test`, `docs`, `chore`, `build`, `ci`, and `revert`. Every other type, including case variants, is rejected. All types except `revert` require parentheses containing one or more valid scopes. `revert` must not include parentheses or a scope. The subject is required and must be no longer than 100 characters.
 
 ## Scopes
 
@@ -28,6 +29,7 @@ feat(crypto-agent,learning-engine): add known-at retrieval filtering
 docs(mind-clone): update research corpus notes
 refactor(monorepo): align shared retrieval contracts across agents
 chore(monorepo): update workspace scripts
+revert: restore the previous retrieval behavior
 ```
 
 ## Scope Derivation Rules

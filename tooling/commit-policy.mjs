@@ -2,14 +2,24 @@ import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 
 const TYPES = new Set(['feat', 'fix', 'style', 'refactor', 'perf', 'test', 'docs', 'chore', 'build', 'ci', 'revert']);
+const SCOPED_TYPES = new Set([...TYPES].filter((type) => type !== 'revert'));
 const SCOPES = new Set(['mind-clone', 'campus-atlas', 'crypto-agent', 'learning-engine', 'monorepo']);
 const APP_SCOPES = new Set(['mind-clone', 'campus-atlas', 'crypto-agent']);
 
 export function parseCommitHeader(header) {
-  const match = String(header || '').trim().match(/^([a-z]+)\(([^)]+)\):\s+(.+)$/);
-  if (!match) return { error: 'Commit must use `type(scope): subject` format.' };
+  const normalized = String(header || '').trim();
+  const revertMatch = normalized.match(/^revert:\s+(.+)$/);
+  if (revertMatch) {
+    const [, subject] = revertMatch;
+    if (subject.length > 100) return { error: 'Commit subject must be 1-100 characters.' };
+    return { type: 'revert', scopes: [], subject };
+  }
+
+  const match = normalized.match(/^([a-z]+)\(([^)]+)\):\s+(.+)$/);
+  if (!match) return { error: 'Commit must use `type(scope): subject`, or `revert: subject`.' };
   const [, type, rawScope, subject] = match;
   if (!TYPES.has(type)) return { error: `Unknown commit type "${type}".` };
+  if (!SCOPED_TYPES.has(type)) return { error: '`revert` must not include a scope; use `revert: subject`.' };
   const scopes = rawScope.split(',').map((scope) => scope.trim());
   if (!scopes.length || scopes.some((scope) => !SCOPES.has(scope))) {
     return { error: `Scope must be one or more of: ${[...SCOPES].join(', ')}.` };
@@ -40,6 +50,7 @@ export function expectedScopes(paths) {
 export function validateCommit({ header, paths }) {
   const parsed = parseCommitHeader(header);
   if (parsed.error) return { valid: false, error: parsed.error };
+  if (parsed.type === 'revert') return { valid: true, parsed, expected: [] };
   const expected = expectedScopes(paths);
   const actual = [...parsed.scopes].sort();
   if (expected.length === 1 && expected[0] === 'monorepo') {
@@ -67,5 +78,7 @@ if (process.argv[1]?.endsWith('commit-policy.mjs')) {
     console.error(`Staged paths imply: ${expectedScopes(stagedPaths()).join(',')}`);
     process.exit(1);
   }
-  console.log(`Commit scope accepted: ${result.parsed.scopes.join(',')}`);
+  console.log(result.parsed.type === 'revert'
+    ? 'Commit type accepted: revert'
+    : `Commit scope accepted: ${result.parsed.scopes.join(',')}`);
 }
