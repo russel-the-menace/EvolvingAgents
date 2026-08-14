@@ -16,12 +16,20 @@ test('accepts style commits', () => {
   }).valid, true);
 });
 
-test('accepts only the eleven allowed commit types', () => {
-  const paths = ['apps/mind-clone/src/App.tsx'];
+test('accepts only the eleven allowed commit types across the monorepo', () => {
+  const scopeCases = [
+    ['mind-clone', 'apps/mind-clone/src/App.tsx'],
+    ['campus-atlas', 'apps/campus-atlas/src/App.tsx'],
+    ['crypto-agent', 'apps/crypto-agent/src/index.mjs'],
+    ['learning-engine', 'packages/learning-engine/src/engine.mjs'],
+    ['monorepo', 'package.json'],
+  ];
   for (const type of ['feat', 'fix', 'style', 'refactor', 'perf', 'test', 'docs', 'chore', 'build', 'ci', 'revert']) {
-    assert.equal(validateCommit({ header: `${type}(mind-clone): verify allowed type`, paths }).valid, true);
+    for (const [scope, path] of scopeCases) {
+      assert.equal(validateCommit({ header: `${type}(${scope}): verify allowed type`, paths: [path] }).valid, true);
+    }
   }
-  assert.match(validateCommit({ header: 'release(mind-clone): reject unsupported type', paths }).error, /Unknown commit type/);
+  assert.match(validateCommit({ header: 'release(monorepo): reject unsupported type', paths: ['package.json'] }).error, /Unknown commit type/);
 });
 
 test('accepts an application plus learning-engine scope', () => {
