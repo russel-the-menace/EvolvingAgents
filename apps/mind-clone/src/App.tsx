@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { ChatConversation, ChatSidebar } from '@evolving-agents/chat-ui';
+import { ChatConversation, ChatSidebar, useChatController, type ChatAdapter, type ChatMessage } from '@evolving-agents/chat-ui';
 import {
   ArrowDown, ArrowRight, BotMessageSquare, CheckCircle2, CircleStop, FileText,
   FileUp, ListChecks, Mic, Paperclip, Play,
@@ -10,12 +10,18 @@ import {
 import { streamCandidateAnswer } from './interview';
 import { memoryApi } from './memory-api';
 import { loadPacket, loadSettings, savePacket } from './storage';
-import type { DailyMessage, DailyModel, DailySession, InterviewPacket, Message, Mode, Settings, ThemeMode } from './types';
+import type { DailyModel, DailySession, InterviewPacket, Message, Mode, Settings, ThemeMode } from './types';
 
 const exampleJD = `Remote Backend Engineer
 Own server-side APIs, database design, performance tuning, and production reliability. Comfortable with a mainstream backend language, SQL, Redis, Docker, and distributed systems fundamentals; able to clarify requirements and deliver independently.`;
 
 const exampleResume = `Started in Android development after graduation, then built a startup and worked remotely for an extended period. During the startup journey, took on product, user operations, customer support, sales, and recruiting work; continued building backend engineering skills with a demonstrated ability to learn across languages and deliver independently.`;
+
+const dailyChatAdapter: ChatAdapter<DailySession> = {
+  listSessions: async () => (await memoryApi.listSessions()).sessions,
+  createSession: async () => (await memoryApi.createSession()).session,
+  send: ({ sessionId, content, model, replaceFromMessageId, signal, onDelta }) => memoryApi.streamChat(sessionId, content, onDelta, signal, replaceFromMessageId, model as DailyModel),
+};
 
 function formatPreparedAt(value: string) {
   return new Intl.DateTimeFormat('en-US', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(value));
@@ -56,17 +62,12 @@ export function App() {
   const [input, setInput] = useState('');
   const [streaming, setStreaming] = useState(false);
   const [error, setError] = useState('');
-  const [dailySessions, setDailySessions] = useState<DailySession[]>([]);
-  const [dailySessionId, setDailySessionId] = useState<string | null>(null);
-  const [dailyInput, setDailyInput] = useState('');
-  const [dailyStreaming, setDailyStreaming] = useState(false);
-  const [dailyError, setDailyError] = useState('');
   const [dailyModel, setDailyModel] = useState<DailyModel>(() => {
     const saved = window.localStorage.getItem('mindclone.daily-model');
     return saved === 'deepseek-high' ? 'deepseek-high' : 'deepseek-medium';
   });
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => window.matchMedia('(max-width: 780px)').matches);
-  const [dailyNewChatActive, setDailyNewChatActive] = useState(false);
+  const dailyChat = useChatController(dailyChatAdapter, dailyModel);
   const [sidebarWidth, setSidebarWidth] = useState(() => {
     const saved = Number(window.localStorage.getItem('mindclone-sidebar-width'));
     return Number.isFinite(saved) ? Math.min(420, Math.max(240, saved)) : 280;
@@ -77,7 +78,6 @@ export function App() {
   const formalFollowingRef = useRef(true);
   const [showFormalScrollButton, setShowFormalScrollButton] = useState(false);
   const formalScrollTimerRef = useRef<number | null>(null);
-  const dailyAbortRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
     const stored = loadPacket();
@@ -93,15 +93,6 @@ export function App() {
     window.localStorage.setItem('mindclone-theme', theme);
   }, [theme]);
 
-  async function refreshSessions() {
-    try {
-      const { sessions } = await memoryApi.listSessions();
-      setDailySessions(sessions);
-      setDailySessionId((current) => current && sessions.some((session) => session.id === current) ? current : sessions[0]?.id ?? null);
-    } catch (caught) { setDailyError((caught as Error).message); }
-  }
-
-  useEffect(() => { void refreshSessions(); }, []);
 
   useEffect(() => {
     const transcript = transcriptRef.current;
@@ -237,16 +228,6 @@ export function App() {
     void askQuestion(true);
   }
 
-  async function newDailySession() {
-    try {
-      const { session } = await memoryApi.createSession();
-      setDailySessions((current) => [session, ...current]);
-      setDailySessionId(session.id);
-      setDailyError('');
-      return session.id;
-    } catch (caught) { setDailyError((caught as Error).message); return null; }
-  }
-
   async function importChatGPT(file: File) {
     const contents = extractChatGPTConversations(JSON.parse(await file.text()));
     if (!contents.length) throw new Error('No readable user/assistant conversations were found in this export.');
@@ -269,19 +250,18 @@ export function App() {
 
   return (
     <main className={`app-shell ${sidebarCollapsed ? 'sidebar-collapsed' : ''}`} style={{ '--app-sidebar-width': `${sidebarWidth}px` } as CSSProperties}>
-      <AppSidebar sessions={dailySessions} activeSessionId={dailySessionId} newChatActive={dailyNewChatActive} mode={mode} hasPacket={Boolean(packet)}
+      <AppSidebar sessions={dailyChat.sessions} activeSessionId={dailyChat.activeSessionId} newChatActive={dailyChat.newChatActive} mode={mode} hasPacket={Boolean(packet)}
         sidebarWidth={sidebarWidth} onSidebarWidthChange={setSidebarWidth}
         onToggleSidebar={() => setSidebarCollapsed((current) => !current)} onModeChange={setMode} onOpenSettings={() => setShowSettings(true)}
-        onNewChat={() => { setDailyNewChatActive(true); setDailySessionId(null); setDailyInput(''); setDailyError(''); setMode('daily'); }}
-        onSelectSession={(id) => { setDailyNewChatActive(false); setDailySessionId(id); setMode('daily'); }}
-        onRefresh={() => void refreshSessions()} onError={setDailyError} />
+        onNewChat={() => { dailyChat.newChat(); setMode('daily'); }}
+        onSelectSession={(id) => { dailyChat.selectSession(id); setMode('daily'); }}
+        onRefresh={() => void dailyChat.refreshSessions()} onError={dailyChat.setError} />
       {sidebarCollapsed && <button className="sidebar-reopen" title="Expand sidebar" onClick={() => setSidebarCollapsed(false)}><PanelLeftOpen size={19} /></button>}
       <section className="workspace">
         {mode === 'daily' ? (
-          <DailyChatView sessions={dailySessions} activeSessionId={dailySessionId} input={dailyInput} streaming={dailyStreaming} error={dailyError} model={dailyModel} newChatActive={dailyNewChatActive}
+          <DailyChatView messages={dailyChat.messages} input={dailyChat.input} streaming={dailyChat.streaming} error={dailyChat.error} model={dailyModel}
             onModelChange={(model) => { setDailyModel(model); window.localStorage.setItem('mindclone.daily-model', model); }}
-            onInputChange={setDailyInput} onNewSession={newDailySession} onRefresh={() => void refreshSessions()}
-            onError={setDailyError} onStreamChange={setDailyStreaming} onImport={importChatGPT} onNewChatActiveChange={setDailyNewChatActive} />
+            onInputChange={dailyChat.setInput} onSend={dailyChat.send} onError={dailyChat.setError} onImport={importChatGPT} />
         ) : mode === 'prepare' ? (
           <PrepareView
             jd={jd} resume={resume} packet={packet} ready={ready}
@@ -331,12 +311,11 @@ function AppSidebar({ sessions, activeSessionId, newChatActive, mode, hasPacket,
   return <ChatSidebar brand="MindClone" brandIcon={<Sparkles size={21} />} sessions={sessions} activeSessionId={newChatActive ? null : activeSessionId} width={sidebarWidth} onWidthChange={onSidebarWidthChange} onCollapse={onToggleSidebar} onNewChat={onNewChat} onSelectSession={onSelectSession} onSettings={onOpenSettings} status="Local engine" nav={<><button className={mode === 'prepare' ? 'active' : ''} onClick={() => onModeChange('prepare')}><FileText size={16} />Interview prep</button><button className={mode === 'formal' ? 'active' : ''} disabled={!hasPacket} onClick={() => hasPacket && onModeChange('formal')}><BotMessageSquare size={16} />Live interview</button></>} onPin={(session) => void updateSession(session as DailySession, { pinned: !session.pinned })} onRename={(session) => renameSession(session as DailySession)} onDelete={(session) => void deleteSession(session as DailySession)} />;
 }
 
-function DailyChatView({ sessions, activeSessionId, input, streaming, error, model, newChatActive, onModelChange, onInputChange, onNewSession, onRefresh, onError, onStreamChange, onImport, onNewChatActiveChange }: {
-  sessions: DailySession[]; activeSessionId: string | null; input: string; streaming: boolean; error: string;
+function DailyChatView({ messages, input, streaming, error, model, onModelChange, onInputChange, onSend, onError, onImport }: {
+  messages: ChatMessage[]; input: string; streaming: boolean; error: string;
   model: DailyModel; onModelChange: (model: DailyModel) => void;
-  newChatActive: boolean; onInputChange: (value: string) => void; onNewSession: () => Promise<string | null>; onRefresh: () => void;
-  onError: (value: string) => void; onStreamChange: (value: boolean) => void; onImport: (file: File) => Promise<void>;
-  onNewChatActiveChange: (value: boolean) => void;
+  onInputChange: (value: string) => void; onSend: (content?: string, replaceFromMessageId?: string) => Promise<void>;
+  onError: (value: string) => void; onImport: (file: File) => Promise<void>;
 }) {
   const [attachmentOpen, setAttachmentOpen] = useState(false);
   const [attachmentMode, setAttachmentMode] = useState<'note' | 'video' | null>(null);
@@ -346,43 +325,7 @@ function DailyChatView({ sessions, activeSessionId, input, streaming, error, mod
   const [shortVideoContent, setShortVideoContent] = useState('');
   const [attachmentBusy, setAttachmentBusy] = useState(false);
   const [attachmentStatus, setAttachmentStatus] = useState('');
-  const [draftMessages, setDraftMessages] = useState<DailyMessage[]>([]);
   const fileRef = useRef<HTMLInputElement>(null);
-  const activeSession = sessions.find((session) => session.id === activeSessionId) ?? null;
-  const messages = draftMessages.length ? draftMessages : newChatActive ? [] : activeSession?.messages ?? [];
-
-  useEffect(() => { setDraftMessages([]); }, [activeSessionId]);
-
-  async function send(contentOverride?: string, replaceFromMessageId?: string) {
-    const content = (contentOverride ?? input).trim();
-    if (!content || streaming) return;
-    let sessionId = newChatActive ? null : activeSessionId;
-    if (!sessionId) {
-      sessionId = await onNewSession();
-      if (!sessionId) return;
-      onNewChatActiveChange(false);
-    }
-    const userMessage: DailyMessage = { id: crypto.randomUUID(), role: 'user', content, createdAt: new Date().toISOString() };
-    const answerMessage: DailyMessage = { id: crypto.randomUUID(), role: 'assistant', content: '', createdAt: new Date().toISOString() };
-    const branchIndex = replaceFromMessageId ? activeSession?.messages.findIndex((message) => message.id === replaceFromMessageId) ?? -1 : -1;
-    const branchMessages = branchIndex >= 0 ? activeSession?.messages.slice(0, branchIndex) ?? [] : activeSession?.messages ?? [];
-    const next = [...branchMessages, userMessage, answerMessage];
-    setDraftMessages(next);
-    onInputChange(''); onError(''); onStreamChange(true);
-    const controller = new AbortController();
-    try {
-      await memoryApi.streamChat(sessionId, content, (delta) => {
-        setDraftMessages((current) => current.map((message) => message.id === answerMessage.id ? { ...message, content: message.content + delta } : message));
-      }, controller.signal, replaceFromMessageId, model);
-      setDraftMessages([]);
-      onRefresh();
-    } catch (caught) {
-      setDraftMessages((current) => current.filter((message) => message.id !== answerMessage.id || message.content));
-      onError((caught as Error).message);
-    } finally {
-      onStreamChange(false);
-    }
-  }
 
   async function saveAttachmentNote() {
     if (attachmentNote.trim().length < 10) { setAttachmentStatus('Please enter at least one complete piece of source material.'); return; }
@@ -425,7 +368,7 @@ function DailyChatView({ sessions, activeSessionId, input, streaming, error, mod
 
   const attachmentControl = <div className="attachment-area">{attachmentOpen && <div className="attachment-menu"><div className="attachment-menu-title">Teach MindClone</div><button onClick={() => fileRef.current?.click()}><FileUp size={17} /> Import ChatGPT history</button><button onClick={() => { setAttachmentMode('note'); setAttachmentStatus(''); }}><Paperclip size={17} /> Add text / Markdown</button><button onClick={() => { setAttachmentMode('video'); setAttachmentStatus(''); }}><Video size={17} /> Learn from Douyin audio</button>{attachmentMode === 'note' && <div className="attachment-editor"><textarea value={attachmentNote} onChange={(event) => setAttachmentNote(event.target.value)} placeholder="Paste notes or source material..." /><button className="primary-button compact" disabled={attachmentBusy} onClick={() => void saveAttachmentNote()}>{attachmentBusy ? 'Learning...' : 'Learn this text'}</button></div>}{attachmentMode === 'video' && <div className="attachment-editor video-editor"><textarea value={shortVideoShare} onChange={(event) => setShortVideoShare(event.target.value)} placeholder="Paste the Douyin share message or v.douyin.com link..." /><div className="attachment-actions"><button className="primary-button compact" disabled={attachmentBusy} onClick={() => void prepareShortVideo(true)}>{attachmentBusy ? 'Working...' : 'Transcribe audio'}</button><button className="ghost-button compact" disabled={attachmentBusy} onClick={() => void prepareShortVideo(false)}>Add transcript manually</button></div>{shortVideoContent && <><input value={shortVideoTitle} onChange={(event) => setShortVideoTitle(event.target.value)} placeholder="Video title" /><textarea className="transcript-editor" value={shortVideoContent} onChange={(event) => setShortVideoContent(event.target.value)} placeholder="Review the spoken transcript..." /><button className="primary-button compact" disabled={attachmentBusy} onClick={() => void learnShortVideo()}>{attachmentBusy ? 'Learning...' : 'Learn this transcript'}</button></>}</div>}{attachmentStatus && <p>{attachmentStatus}</p>}</div>}<input ref={fileRef} className="hidden-input" type="file" accept="application/json,.json" onChange={(event) => { const file = event.target.files?.[0]; if (file) void importFile(file); event.currentTarget.value = ''; }} /><button className={attachmentOpen ? 'plus-button open' : 'plus-button'} title="Add material" onClick={() => setAttachmentOpen((current) => !current)}><Plus size={21} /></button></div>;
 
-  return <ChatConversation messages={messages} input={input} streaming={streaming} error={error} model={model} models={[{ id: 'deepseek-medium', name: 'DeepSeek Medium', detail: 'Balanced reasoning' }, { id: 'deepseek-high', name: 'DeepSeek High', detail: 'More thorough reasoning' }]} placeholder="Message MindClone..." empty={<><Sparkles size={32} /><h2>Start with what is on your mind</h2><p>MindClone learns from your conversations and asks for clarification when imported material needs your judgment.</p></>} onInputChange={onInputChange} onModelChange={(value) => onModelChange(value as DailyModel)} onSend={(content, replaceFromMessageId) => void send(content, replaceFromMessageId)} onEdit={(message, content) => void send(content, message.id)} leading={attachmentControl} />;
+  return <ChatConversation messages={messages} input={input} streaming={streaming} error={error} model={model} models={[{ id: 'deepseek-medium', name: 'DeepSeek Medium', detail: 'Balanced reasoning' }, { id: 'deepseek-high', name: 'DeepSeek High', detail: 'More thorough reasoning' }]} placeholder="Message MindClone..." empty={<><Sparkles size={32} /><h2>Start with what is on your mind</h2><p>MindClone learns from your conversations and asks for clarification when imported material needs your judgment.</p></>} onInputChange={onInputChange} onModelChange={(value) => onModelChange(value as DailyModel)} onSend={(content, replaceFromMessageId) => void onSend(content, replaceFromMessageId)} onEdit={(message, content) => void onSend(content, message.id)} leading={attachmentControl} />;
 }
 
 function PrepareView(props: {

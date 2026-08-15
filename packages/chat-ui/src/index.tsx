@@ -1,11 +1,72 @@
-import { Children, isValidElement, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
+import { Children, isValidElement, useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { ArrowDown, ChevronDown, Copy, MoreHorizontal, PanelLeftClose, Pencil, Pin, Plus, SendHorizontal, Settings2, Trash2 } from 'lucide-react';
 
-export type ChatMessage = { id: string; role: 'user' | 'assistant'; content: string };
-export type ChatSession = { id: string; title: string; pinned?: boolean; updatedAt?: string };
+export type ChatMessage = { id: string; role: 'user' | 'assistant'; content: string; createdAt?: string };
+export type ChatSession = { id: string; title: string; pinned?: boolean; createdAt?: string; updatedAt?: string; messages: ChatMessage[] };
 export type ChatModelOption = { id: string; name: string; detail?: string };
+export type ChatAdapter<Session extends ChatSession> = {
+  listSessions: () => Promise<Session[]>;
+  createSession: () => Promise<Session>;
+  send: (request: { sessionId: string; content: string; model: string; replaceFromMessageId?: string; signal: AbortSignal; onDelta: (delta: string) => void }) => Promise<void>;
+};
+
+export function useChatController<Session extends ChatSession>(adapter: ChatAdapter<Session>, model: string) {
+  const [sessions, setSessions] = useState<Session[]>([]);
+  const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
+  const [newChatActive, setNewChatActive] = useState(false);
+  const [input, setInput] = useState('');
+  const [streaming, setStreaming] = useState(false);
+  const [error, setError] = useState('');
+  const [draftMessages, setDraftMessages] = useState<ChatMessage[]>([]);
+  const activeSession = sessions.find((session) => session.id === activeSessionId) ?? null;
+  const messages = draftMessages.length ? draftMessages : newChatActive ? [] : activeSession?.messages ?? [];
+
+  const refreshSessions = useCallback(async (preferredId?: string) => {
+    try {
+      const next = await adapter.listSessions();
+      setSessions(next);
+      setActiveSessionId((current) => preferredId ?? (current && next.some((session) => session.id === current) ? current : next[0]?.id ?? null));
+    } catch (caught) { setError(caught instanceof Error ? caught.message : 'Unable to load conversations.'); }
+  }, [adapter]);
+
+  useEffect(() => { void refreshSessions(); }, [refreshSessions]);
+  function newChat() { setDraftMessages([]); setNewChatActive(true); setActiveSessionId(null); setInput(''); setError(''); }
+  function selectSession(id: string) { setDraftMessages([]); setNewChatActive(false); setActiveSessionId(id); setError(''); }
+
+  async function send(contentOverride?: string, replaceFromMessageId?: string) {
+    const content = (contentOverride ?? input).trim();
+    if (!content || streaming) return;
+    let sessionId = newChatActive ? null : activeSessionId;
+    if (!sessionId) {
+      try {
+        const session = await adapter.createSession();
+        sessionId = session.id;
+        setSessions((current) => [session, ...current]);
+        setActiveSessionId(session.id);
+        setNewChatActive(false);
+      } catch (caught) { setError(caught instanceof Error ? caught.message : 'Unable to create conversation.'); return; }
+    }
+    const createdAt = new Date().toISOString();
+    const userMessage: ChatMessage = { id: crypto.randomUUID(), role: 'user', content, createdAt };
+    const answerMessage: ChatMessage = { id: crypto.randomUUID(), role: 'assistant', content: '', createdAt };
+    const branchIndex = replaceFromMessageId ? activeSession?.messages.findIndex((message) => message.id === replaceFromMessageId) ?? -1 : -1;
+    const branchMessages = branchIndex >= 0 ? activeSession?.messages.slice(0, branchIndex) ?? [] : activeSession?.messages ?? [];
+    setDraftMessages([...branchMessages, userMessage, answerMessage]);
+    setInput(''); setError(''); setStreaming(true);
+    try {
+      await adapter.send({ sessionId, content, model, replaceFromMessageId, signal: new AbortController().signal, onDelta: (delta) => setDraftMessages((current) => current.map((message) => message.id === answerMessage.id ? { ...message, content: message.content + delta } : message)) });
+      await refreshSessions(sessionId);
+      setDraftMessages([]);
+    } catch (caught) {
+      setDraftMessages((current) => current.filter((message) => message.id !== answerMessage.id || message.content));
+      setError(caught instanceof Error ? caught.message : 'Chat request failed.');
+    } finally { setStreaming(false); }
+  }
+
+  return { sessions, activeSessionId, newChatActive, input, streaming, error, messages, setInput, setError, newChat, selectSession, refreshSessions, send };
+}
 
 export function MarkdownText({ content }: { content: string }) {
   return <div className="chat-rich-text"><ReactMarkdown remarkPlugins={[remarkGfm]} components={{

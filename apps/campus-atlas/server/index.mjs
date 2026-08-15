@@ -117,6 +117,7 @@ const server = createServer(async (request, response) => {
     if (!session || !String(content || '').trim()) throw new Error('A valid session and message are required.');
     chatHistory.addMessage(sessionId, { role: 'user', content: String(content).trim() });
     const messages = chatHistory.getSession(sessionId).messages.map(({ role, content }) => ({ role, content }));
+    if (messages.filter((message) => message.role === 'user').length === 1) chatHistory.updateSession(sessionId, { title: String(content).slice(0, 48) });
     if (!Array.isArray(messages) || !messages.length || !messages.every((message) => ['user', 'assistant', 'system'].includes(message.role) && typeof message.content === 'string')) throw new Error('Messages must be a non-empty OpenAI-style message list.');
     if (!['Medium', 'High'].includes(quality)) throw new Error('Quality must be Medium or High.');
     const latestUser = [...messages].reverse().find((message) => message.role === 'user');
@@ -133,7 +134,6 @@ const server = createServer(async (request, response) => {
     const evidence = knowledgeEngine.buildEvidenceContext(results);
     const answer = await callGateway([{ role: 'system', content: chatEvidencePrompt(evidence) }, ...messages], quality);
     chatHistory.addMessage(sessionId, { role: 'assistant', content: answer });
-    if (messages.filter((message) => message.role === 'user').length === 1) chatHistory.updateSession(sessionId, { title: String(content).slice(0, 48) });
     return sendJson(response, 200, { content: answer, evidence, session: chatHistory.getSession(sessionId) });
   } catch (error) { return sendJson(response, 400, { error: error instanceof Error ? error.message : 'Chat request failed.' }); }
 });
