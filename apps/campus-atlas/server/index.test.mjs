@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { parseJsonResponse, planningPrompt, responseText } from './index.mjs';
+import { parseJsonResponse, planningPrompt, responseText, shouldLearnConversation } from './index.mjs';
 
 test('extracts the OpenAI-compatible assistant response returned by custom-api-gateway', () => {
   assert.equal(responseText({ choices: [{ message: { content: 'Policy answer' } }] }), 'Policy answer');
@@ -15,4 +15,9 @@ test('planning prompt requires evidence-grounded output', () => {
 
 test('parses fenced JSON returned by an extraction model', () => {
   assert.deepEqual(parseJsonResponse('```json\n[{"title":"Deadline"}]\n```'), [{ title: 'Deadline' }]);
+});
+
+test('only learns long messages that explicitly look like supplied source material', () => {
+  assert.equal(shouldLearnConversation('这是普通问题吗？'), false);
+  assert.equal(shouldLearnConversation('请记住这份竞赛资料：' + '报名截止和组队要求。'.repeat(12)), true);
 });

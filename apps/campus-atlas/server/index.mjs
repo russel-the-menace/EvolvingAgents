@@ -24,6 +24,10 @@ export function planningPrompt(question, evidence) {
   return `你是 CampusAtlas 的大学生竞赛规划助手。只能根据下方已检索到的证据回答，不要把推测写成事实。输出：1) 推荐的竞赛时间表；2) 每项准备任务和截止日期；3) 每项建议对应的证据引用；4) 信息不足或冲突时列出待确认问题。区分“官方事实”“用户资料”和“模型建议”。\n\n用户目标：${question}\n\n证据：\n${JSON.stringify(evidence).slice(0, 60000)}`;
 }
 
+function chatEvidencePrompt(evidence) {
+  return `你是 CampusAtlas。回答必须优先使用下方检索证据；证据为空时明确说明资料不足，不要编造竞赛、日期或资格条件。涉及竞赛规划时，输出时间表、准备任务、证据引用和待确认问题，并区分官方事实、用户资料和模型建议。\n\n检索证据：\n${JSON.stringify(evidence).slice(0, 60000)}`;
+}
+
 export function parseJsonResponse(content) {
   const cleaned = String(content || '').replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim();
   return JSON.parse(cleaned);
@@ -31,6 +35,10 @@ export function parseJsonResponse(content) {
 
 function extractionPrompt(title, content) {
   return `从下面的竞赛资料中抽取事实 claims，只返回 JSON 数组。每项必须有 title、proposition、kind、sourceQuote、tags、validFrom、validTo、confidence。不要补充资料中不存在的日期或资格条件。\n标题：${title}\n资料：${content.slice(0, 50000)}`;
+}
+
+export function shouldLearnConversation(text) {
+  return String(text || '').length >= 80 && /(记住|资料|竞赛|比赛|报名截止|我的技能|我的时间|我的兴趣)/u.test(text);
 }
 
 async function callGateway(messages, quality = 'Medium') {
@@ -85,7 +93,19 @@ const server = createServer(async (request, response) => {
     const { messages, quality = process.env.DEEPSEEK_QUALITY || 'Medium' } = await requestBody(request);
     if (!Array.isArray(messages) || !messages.length || !messages.every((message) => ['user', 'assistant', 'system'].includes(message.role) && typeof message.content === 'string')) throw new Error('Messages must be a non-empty OpenAI-style message list.');
     if (!['Medium', 'High'].includes(quality)) throw new Error('Quality must be Medium or High.');
-    return sendJson(response, 200, { content: await callGateway(messages, quality) });
+    const latestUser = [...messages].reverse().find((message) => message.role === 'user');
+    if (latestUser && shouldLearnConversation(latestUser.content)) {
+      const privateProfile = /(我的技能|我的时间|我的兴趣|我每周|我的背景)/u.test(latestUser.content);
+      const title = `${privateProfile ? '对话中的个人资料' : '对话中的竞赛资料'} ${new Date().toISOString().slice(0, 10)}`;
+      const proposals = parseJsonResponse(await callGateway([{ role: 'system', content: 'You extract conservative structured competition facts or user profile constraints.' }, { role: 'user', content: extractionPrompt(title, latestUser.content) }], quality));
+      if (Array.isArray(proposals) && proposals.length) {
+        const ingested = await knowledgeEngine.ingest({ title, content: latestUser.content, sourceType: privateProfile ? 'conversation_profile' : 'conversation_competition', sourceActor: privateProfile ? 'user' : 'conversation', metadata: { domain: privateProfile ? 'user_profile' : 'competition', accessScope: privateProfile ? 'private_profile' : 'public', proposals } });
+        await knowledgeEngine.learn(ingested.source.id);
+      }
+    }
+    const results = latestUser ? await knowledgeEngine.retrieve(latestUser.content, { limit: 20, context: { accessScopes: ['public', 'private_profile'] } }) : [];
+    const evidence = knowledgeEngine.buildEvidenceContext(results);
+    return sendJson(response, 200, { content: await callGateway([{ role: 'system', content: chatEvidencePrompt(evidence) }, ...messages], quality), evidence });
   } catch (error) { return sendJson(response, 400, { error: error instanceof Error ? error.message : 'Chat request failed.' }); }
 });
 
