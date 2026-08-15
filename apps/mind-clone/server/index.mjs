@@ -10,6 +10,7 @@ import { extractDouyinShare, resolveDouyinLink, transcribeShortVideo } from './i
 import { createMindCloneLearningEngine } from './adapters/mindclone-learning.mjs';
 import { applyInquiryReply, classifyInquiryReply, inquiryDialogueContext } from './domain/inquiry-dialogue.mjs';
 import { createModelGateway } from '@evolving-agents/model-gateway';
+import { createChatRuntime } from '@evolving-agents/chat-runtime';
 
 const app = express();
 const port = Number(process.env.PORT || 5270);
@@ -18,6 +19,7 @@ const repository = openDatabase(
   process.env.MINDCLONE_LEGACY_STORE_PATH || join(process.cwd(), 'data', 'memory-store.json'),
 );
 const gateway = createModelGateway({ baseUrl: process.env.GATEWAY_BASE_URL || 'https://feiwan.online', apiKey: process.env.GATEWAY_API_KEY || 'yeatom' });
+const chatRuntime = createChatRuntime(repository, { titleLength: 28 });
 const learningEngine = createMindCloneLearningEngine(repository, gateway);
 app.use(express.json({ limit: '50mb' }));
 
@@ -225,39 +227,32 @@ app.patch('/api/chat/sessions/:id', (request, response) => {
 
 app.post('/api/chat/sessions/:id/stream', async (request, response, next) => {
   try {
-    const content = String(request.body.content || '').trim();
-    if (!content) return response.status(400).json({ error: 'A message is required.' });
-    let session = repository.getSession(request.params.id);
-    if (!session) return response.status(404).json({ error: 'Conversation was not found.' });
-    if (request.body.replaceFromMessageId && !repository.truncateSession(session.id, request.body.replaceFromMessageId)) return response.status(404).json({ error: 'The message to edit was not found.' });
-    const activeInquiry = repository.activeInquiryForSession(session.id);
-    const inquiryReply = activeInquiry ? classifyInquiryReply(content) : null;
-    repository.addMessage(session.id, { role: 'user', content });
-    session = repository.getSession(session.id);
-    if (session.messages.filter((message) => message.role === 'user').length === 1) repository.updateSession(session.id, { title: content.slice(0, 28) });
-    response.setHeader('Content-Type', 'text/event-stream'); response.setHeader('Cache-Control', 'no-cache'); response.setHeader('Connection', 'keep-alive'); response.flushHeaders();
-    let answer = await streamDailyChat(
-      repository.getSession(session.id), response, content, request.body.model,
-      activeInquiry ? inquiryDialogueContext(activeInquiry, inquiryReply) : '',
-    );
-    const { source } = await learningEngine.ingest({
-      id: randomUUID(), title: `Daily chat: ${repository.getSession(session.id).title}`,
-      sourceType: 'conversation', content: `User: ${content}\n\nMindClone: ${answer}`,
-      sourceActor: 'user_and_mindclone', metadata: { directConversation: true }, createdAt: new Date().toISOString(),
-    }, { deduplicate: false });
-    if (activeInquiry) applyInquiryReply({ repository, inquiry: activeInquiry, reply: inquiryReply, evidenceSourceId: source.id });
-    if (!activeInquiry) {
-      const inquiry = repository.presentNextInquiry(session.id);
-      if (inquiry) {
-        const followUp = `\n\n顺便问你一个我在学习时留下的问题：${inquiry.question}`;
-        answer += followUp;
-        response.write(`data: ${JSON.stringify({ delta: followUp })}\n\n`);
-      }
-    }
-    if (answer) repository.addMessage(session.id, { role: 'assistant', content: answer });
+    const result = await chatRuntime.run({
+      sessionId: request.params.id,
+      content: request.body.content,
+      replaceFromMessageId: request.body.replaceFromMessageId,
+      beforeMessage: ({ session, content }) => {
+        const activeInquiry = repository.activeInquiryForSession(session.id);
+        return { activeInquiry, inquiryReply: activeInquiry ? classifyInquiryReply(content) : null };
+      },
+      createAnswer: ({ session, content, context }) => {
+        response.setHeader('Content-Type', 'text/event-stream'); response.setHeader('Cache-Control', 'no-cache'); response.setHeader('Connection', 'keep-alive'); response.flushHeaders();
+        return streamDailyChat(session, response, content, request.body.model, context.activeInquiry ? inquiryDialogueContext(context.activeInquiry, context.inquiryReply) : '');
+      },
+      afterAnswer: async ({ content: initialAnswer, session, context }) => {
+        let answer = initialAnswer;
+        const { source } = await learningEngine.ingest({ id: randomUUID(), title: `Daily chat: ${session.title}`, sourceType: 'conversation', content: `User: ${String(request.body.content).trim()}\n\nMindClone: ${answer}`, sourceActor: 'user_and_mindclone', metadata: { directConversation: true }, createdAt: new Date().toISOString() }, { deduplicate: false });
+        if (context.activeInquiry) applyInquiryReply({ repository, inquiry: context.activeInquiry, reply: context.inquiryReply, evidenceSourceId: source.id });
+        if (!context.activeInquiry) {
+          const inquiry = repository.presentNextInquiry(session.id);
+          if (inquiry) { const followUp = `\n\n顺便问你一个我在学习时留下的问题：${inquiry.question}`; answer += followUp; response.write(`data: ${JSON.stringify({ delta: followUp })}\n\n`); }
+        }
+        void learningEngine.learn(source.id, { context: { resolvedInquiryClaimId: context.activeInquiry?.claim_id } }).catch((error) => console.error('Daily claim extraction failed:', error.message));
+        return answer;
+      },
+    });
     response.write('data: [DONE]\n\n'); response.end();
-    void learningEngine.learn(source.id, { context: { resolvedInquiryClaimId: activeInquiry?.claim_id } })
-      .catch((error) => console.error('Daily claim extraction failed:', error.message));
+    return result;
   } catch (error) { next(error); }
 });
 

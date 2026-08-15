@@ -5,6 +5,7 @@ import { createSqliteLearningStore } from '@evolving-agents/learning-engine';
 import { createCompetitionPlanningEngine } from '../src/learning.mjs';
 import { createChatHistoryStore } from '@evolving-agents/chat-history';
 import { createModelGateway } from '@evolving-agents/model-gateway';
+import { createChatRuntime } from '@evolving-agents/chat-runtime';
 
 const port = Number(process.env.CAMPUS_ATLAS_API_PORT || 5445);
 const gatewayBaseUrl = (process.env.GATEWAY_BASE_URL || 'https://feiwan.online').replace(/\/$/, '');
@@ -16,6 +17,7 @@ const db = new DatabaseSync(databasePath);
 db.exec('PRAGMA foreign_keys = ON;');
 const store = createSqliteLearningStore(db);
 const chatHistory = createChatHistoryStore(db);
+const chatRuntime = createChatRuntime(chatHistory);
 const knowledgeEngine = createCompetitionPlanningEngine({ store, extractor: { async extract({ source }) { return source.metadata.proposals || []; } } });
 
 export function planningPrompt(question, evidence) {
@@ -49,6 +51,25 @@ async function requestBody(request) {
   let raw = '';
   for await (const chunk of request) { raw += chunk; if (raw.length > 1_000_000) throw new Error('Request body is too large.'); }
   return JSON.parse(raw);
+}
+
+async function createCampusAnswer(messages, quality) {
+  if (!Array.isArray(messages) || !messages.length || !messages.every((message) => ['user', 'assistant', 'system'].includes(message.role) && typeof message.content === 'string')) throw new Error('Messages must be a non-empty OpenAI-style message list.');
+  if (!['Medium', 'High'].includes(quality)) throw new Error('Quality must be Medium or High.');
+  const latestUser = [...messages].reverse().find((message) => message.role === 'user');
+  if (latestUser && shouldLearnConversation(latestUser.content)) {
+    const privateProfile = /(我的技能|我的时间|我的兴趣|我每周|我的背景)/u.test(latestUser.content);
+    const title = `${privateProfile ? '对话中的个人资料' : '对话中的竞赛资料'} ${new Date().toISOString().slice(0, 10)}`;
+    const proposals = parseJsonResponse(await callGateway([{ role: 'system', content: 'You extract conservative structured competition facts or user profile constraints.' }, { role: 'user', content: extractionPrompt(title, latestUser.content) }], quality));
+    if (Array.isArray(proposals) && proposals.length) {
+      const ingested = await knowledgeEngine.ingest({ title, content: latestUser.content, sourceType: privateProfile ? 'conversation_profile' : 'conversation_competition', sourceActor: privateProfile ? 'user' : 'conversation', metadata: { domain: privateProfile ? 'user_profile' : 'competition', accessScope: privateProfile ? 'private_profile' : 'public', proposals } });
+      await knowledgeEngine.learn(ingested.source.id);
+    }
+  }
+  const results = latestUser ? await knowledgeEngine.retrieve(latestUser.content, { limit: 20, context: { accessScopes: ['public', 'private_profile'] } }) : [];
+  const evidence = knowledgeEngine.buildEvidenceContext(results);
+  const content = await callGateway([{ role: 'system', content: chatEvidencePrompt(evidence) }, ...messages], quality);
+  return { content, evidence };
 }
 
 const server = createServer(async (request, response) => {
@@ -106,29 +127,9 @@ const server = createServer(async (request, response) => {
   if (!gatewayBaseUrl || !gatewayApiKey) return sendJson(response, 503, { error: 'Gateway is not configured. Set GATEWAY_BASE_URL and GATEWAY_API_KEY in .env.' });
   try {
     const { sessionId, content, quality = process.env.DEEPSEEK_QUALITY || 'Medium' } = await requestBody(request);
-    const session = chatHistory.getSession(sessionId);
-    if (!session || !String(content || '').trim()) throw new Error('A valid session and message are required.');
-    chatHistory.addMessage(sessionId, { role: 'user', content: String(content).trim() });
-    const messages = chatHistory.getSession(sessionId).messages.map(({ role, content }) => ({ role, content }));
-    if (messages.filter((message) => message.role === 'user').length === 1) chatHistory.updateSession(sessionId, { title: String(content).slice(0, 48) });
-    if (!Array.isArray(messages) || !messages.length || !messages.every((message) => ['user', 'assistant', 'system'].includes(message.role) && typeof message.content === 'string')) throw new Error('Messages must be a non-empty OpenAI-style message list.');
-    if (!['Medium', 'High'].includes(quality)) throw new Error('Quality must be Medium or High.');
-    const latestUser = [...messages].reverse().find((message) => message.role === 'user');
-    if (latestUser && shouldLearnConversation(latestUser.content)) {
-      const privateProfile = /(我的技能|我的时间|我的兴趣|我每周|我的背景)/u.test(latestUser.content);
-      const title = `${privateProfile ? '对话中的个人资料' : '对话中的竞赛资料'} ${new Date().toISOString().slice(0, 10)}`;
-      const proposals = parseJsonResponse(await callGateway([{ role: 'system', content: 'You extract conservative structured competition facts or user profile constraints.' }, { role: 'user', content: extractionPrompt(title, latestUser.content) }], quality));
-      if (Array.isArray(proposals) && proposals.length) {
-        const ingested = await knowledgeEngine.ingest({ title, content: latestUser.content, sourceType: privateProfile ? 'conversation_profile' : 'conversation_competition', sourceActor: privateProfile ? 'user' : 'conversation', metadata: { domain: privateProfile ? 'user_profile' : 'competition', accessScope: privateProfile ? 'private_profile' : 'public', proposals } });
-        await knowledgeEngine.learn(ingested.source.id);
-      }
-    }
-    const results = latestUser ? await knowledgeEngine.retrieve(latestUser.content, { limit: 20, context: { accessScopes: ['public', 'private_profile'] } }) : [];
-    const evidence = knowledgeEngine.buildEvidenceContext(results);
-    const answer = await callGateway([{ role: 'system', content: chatEvidencePrompt(evidence) }, ...messages], quality);
-    chatHistory.addMessage(sessionId, { role: 'assistant', content: answer });
-    return sendJson(response, 200, { content: answer, evidence, session: chatHistory.getSession(sessionId) });
-  } catch (error) { return sendJson(response, 400, { error: error instanceof Error ? error.message : 'Chat request failed.' }); }
+    const result = await chatRuntime.run({ sessionId, content, createAnswer: ({ messages }) => createCampusAnswer(messages, quality) });
+    return sendJson(response, 200, result);
+  } catch (error) { return sendJson(response, error.status || 400, { error: error instanceof Error ? error.message : 'Chat request failed.' }); }
 });
 
 if (process.argv[1] && import.meta.url === `file://${process.argv[1]}`) server.listen(port, '127.0.0.1', () => console.log(`CampusAtlas API listening on http://127.0.0.1:${port}`));

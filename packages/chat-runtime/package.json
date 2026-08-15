@@ -1,0 +1,10 @@
+{
+  "name": "@evolving-agents/chat-runtime",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": "./src/index.mjs",
+  "scripts": { "check": "node --check src/*.mjs test/*.test.mjs", "test": "node --test test/*.test.mjs" },
+  "devDependencies": { "@evolving-agents/chat-history": "0.1.0" },
+  "engines": { "node": ">=22.5" }
+}
