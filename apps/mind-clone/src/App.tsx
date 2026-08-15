@@ -20,6 +20,8 @@ const exampleResume = `Started in Android development after graduation, then bui
 const dailyChatAdapter: ChatAdapter<DailySession> = {
   listSessions: async () => (await memoryApi.listSessions()).sessions,
   createSession: async () => (await memoryApi.createSession()).session,
+  updateSession: async (sessionId, values) => (await memoryApi.updateSession(sessionId, values)).session,
+  deleteSession: (sessionId) => memoryApi.deleteSession(sessionId),
   send: ({ sessionId, content, model, replaceFromMessageId, signal, onDelta }) => memoryApi.streamChat(sessionId, content, onDelta, signal, replaceFromMessageId, model as DailyModel),
 };
 
@@ -255,7 +257,7 @@ export function App() {
         onToggleSidebar={() => setSidebarCollapsed((current) => !current)} onModeChange={setMode} onOpenSettings={() => setShowSettings(true)}
         onNewChat={() => { dailyChat.newChat(); setMode('daily'); }}
         onSelectSession={(id) => { dailyChat.selectSession(id); setMode('daily'); }}
-        onRefresh={() => void dailyChat.refreshSessions()} onError={dailyChat.setError} />
+        onUpdate={(session, values) => void dailyChat.updateSession(session, values)} onDelete={(session) => void dailyChat.deleteSession(session)} />
       {sidebarCollapsed && <button className="sidebar-reopen" title="Expand sidebar" onClick={() => setSidebarCollapsed(false)}><PanelLeftOpen size={19} /></button>}
       <section className="workspace">
         {mode === 'daily' ? (
@@ -301,14 +303,14 @@ function extractChatGPTConversations(value: unknown) {
   });
 }
 
-function AppSidebar({ sessions, activeSessionId, newChatActive, mode, hasPacket, sidebarWidth, onSidebarWidthChange, onToggleSidebar, onModeChange, onOpenSettings, onNewChat, onSelectSession, onRefresh, onError }: {
+function AppSidebar({ sessions, activeSessionId, newChatActive, mode, hasPacket, sidebarWidth, onSidebarWidthChange, onToggleSidebar, onModeChange, onOpenSettings, onNewChat, onSelectSession, onUpdate, onDelete }: {
   sessions: DailySession[]; activeSessionId: string | null; newChatActive: boolean; mode: Mode; hasPacket: boolean; sidebarWidth: number;
-  onSidebarWidthChange: (width: number) => void; onToggleSidebar: () => void; onModeChange: (mode: Mode) => void; onOpenSettings: () => void; onNewChat: () => void; onSelectSession: (id: string) => void; onRefresh: () => void; onError: (value: string) => void;
+  onSidebarWidthChange: (width: number) => void; onToggleSidebar: () => void; onModeChange: (mode: Mode) => void; onOpenSettings: () => void; onNewChat: () => void; onSelectSession: (id: string) => void;
+  onUpdate: (session: DailySession, values: Partial<Pick<DailySession, 'title' | 'pinned'>>) => void; onDelete: (session: DailySession) => void;
 }) {
-  async function updateSession(session: DailySession, update: Partial<Pick<DailySession, 'title' | 'pinned'>>) { try { await memoryApi.updateSession(session.id, update); onRefresh(); } catch (caught) { onError((caught as Error).message); } }
-  async function deleteSession(session: DailySession) { if (!window.confirm(`Delete “${session.title}” and all messages in it? Learned claims remain available unless explicitly superseded in conversation.`)) return; try { await memoryApi.deleteSession(session.id); if (session.id === activeSessionId) onNewChat(); onRefresh(); } catch (caught) { onError((caught as Error).message); } }
-  function renameSession(session: DailySession) { const title = window.prompt('Rename conversation', session.title)?.trim(); if (title && title !== session.title) void updateSession(session, { title }); }
-  return <ChatSidebar brand="MindClone" brandIcon={<Sparkles size={21} />} sessions={sessions} activeSessionId={newChatActive ? null : activeSessionId} width={sidebarWidth} onWidthChange={onSidebarWidthChange} onCollapse={onToggleSidebar} onNewChat={onNewChat} onSelectSession={onSelectSession} onSettings={onOpenSettings} status="Local engine" nav={<><button className={mode === 'prepare' ? 'active' : ''} onClick={() => onModeChange('prepare')}><FileText size={16} />Interview prep</button><button className={mode === 'formal' ? 'active' : ''} disabled={!hasPacket} onClick={() => hasPacket && onModeChange('formal')}><BotMessageSquare size={16} />Live interview</button></>} onPin={(session) => void updateSession(session as DailySession, { pinned: !session.pinned })} onRename={(session) => renameSession(session as DailySession)} onDelete={(session) => void deleteSession(session as DailySession)} />;
+  function renameSession(session: DailySession) { const title = window.prompt('Rename conversation', session.title)?.trim(); if (title && title !== session.title) onUpdate(session, { title }); }
+  function deleteSession(session: DailySession) { if (window.confirm(`Delete “${session.title}” and all messages in it? Learned claims remain available unless explicitly superseded in conversation.`)) onDelete(session); }
+  return <ChatSidebar brand="MindClone" brandIcon={<Sparkles size={21} />} sessions={sessions} activeSessionId={newChatActive ? null : activeSessionId} width={sidebarWidth} onWidthChange={onSidebarWidthChange} onCollapse={onToggleSidebar} onNewChat={onNewChat} onSelectSession={onSelectSession} onSettings={onOpenSettings} status="Local engine" nav={<><button className={mode === 'prepare' ? 'active' : ''} onClick={() => onModeChange('prepare')}><FileText size={16} />Interview prep</button><button className={mode === 'formal' ? 'active' : ''} disabled={!hasPacket} onClick={() => hasPacket && onModeChange('formal')}><BotMessageSquare size={16} />Live interview</button></>} onPin={(session) => onUpdate(session as DailySession, { pinned: !session.pinned })} onRename={(session) => renameSession(session as DailySession)} onDelete={(session) => deleteSession(session as DailySession)} />;
 }
 
 function DailyChatView({ messages, input, streaming, error, model, onModelChange, onInputChange, onSend, onError, onImport }: {

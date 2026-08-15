@@ -9,6 +9,8 @@ export type ChatModelOption = { id: string; name: string; detail?: string };
 export type ChatAdapter<Session extends ChatSession> = {
   listSessions: () => Promise<Session[]>;
   createSession: () => Promise<Session>;
+  updateSession: (sessionId: string, values: Partial<Pick<Session, 'title' | 'pinned'>>) => Promise<Session>;
+  deleteSession: (sessionId: string) => Promise<void>;
   send: (request: { sessionId: string; content: string; model: string; replaceFromMessageId?: string; signal: AbortSignal; onDelta: (delta: string) => void }) => Promise<void>;
 };
 
@@ -65,7 +67,17 @@ export function useChatController<Session extends ChatSession>(adapter: ChatAdap
     } finally { setStreaming(false); }
   }
 
-  return { sessions, activeSessionId, newChatActive, input, streaming, error, messages, setInput, setError, newChat, selectSession, refreshSessions, send };
+  async function updateSession(session: Session, values: Partial<Pick<Session, 'title' | 'pinned'>>) {
+    try { await adapter.updateSession(session.id, values); await refreshSessions(activeSessionId || undefined); }
+    catch (caught) { setError(caught instanceof Error ? caught.message : 'Unable to update conversation.'); }
+  }
+
+  async function deleteSession(session: Session) {
+    try { await adapter.deleteSession(session.id); if (activeSessionId === session.id) newChat(); await refreshSessions(); }
+    catch (caught) { setError(caught instanceof Error ? caught.message : 'Unable to delete conversation.'); }
+  }
+
+  return { sessions, activeSessionId, newChatActive, input, streaming, error, messages, setInput, setError, newChat, selectSession, refreshSessions, send, updateSession, deleteSession };
 }
 
 export function MarkdownText({ content }: { content: string }) {
