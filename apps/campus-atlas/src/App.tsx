@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Compass, Plus, SendHorizontal, Settings2 } from 'lucide-react';
+import { Compass, PanelLeftClose, PanelLeftOpen, Plus, SendHorizontal, Settings2 } from 'lucide-react';
 
 type Message = { id: string; role: 'user' | 'assistant'; text: string };
 type Theme = 'light' | 'dark' | 'system';
@@ -8,6 +8,7 @@ export function App() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => window.matchMedia('(max-width: 780px)').matches);
   const [theme, setTheme] = useState<Theme>(() => {
     const saved = window.localStorage.getItem('campus-atlas-theme');
     return saved === 'light' || saved === 'dark' || saved === 'system' ? saved : 'system';
@@ -32,12 +33,13 @@ export function App() {
     setInput('');
   }
 
-  return <main className="app-shell">
+  return <main className={`app-shell ${sidebarCollapsed ? 'sidebar-collapsed' : ''}`}>
     <aside className="sidebar">
-      <div className="brand"><Compass size={21} /><span>CampusAtlas</span></div>
+      <div className="brand"><Compass size={21} /><span>CampusAtlas</span><button className="icon-button sidebar-close" title="Collapse sidebar" aria-label="Collapse sidebar" onClick={() => setSidebarCollapsed(true)}><PanelLeftClose size={18} /></button></div>
       <nav aria-label="Conversation actions"><button className="new-chat" onClick={newChat}><Plus size={16} />New chat</button></nav>
       <div className="sidebar-footer"><button className="icon-button" title="Settings" aria-label="Settings" onClick={() => setSettingsOpen(true)}><Settings2 size={18} /></button></div>
     </aside>
+    {sidebarCollapsed && <button className="sidebar-reopen" title="Expand sidebar" aria-label="Expand sidebar" onClick={() => setSidebarCollapsed(false)}><PanelLeftOpen size={19} /></button>}
     <section className="conversation">
       <div className="transcript" aria-live="polite">
         {messages.length === 0 ? <div className="empty-state"><Compass size={34} /><h1>Campus policy, with evidence</h1><p>Ask about a campus policy. Verified sources and citations will appear with each answer.</p></div> : messages.map((message) => <article className={`message ${message.role}`} key={message.id}><div className="message-body">{message.text}</div></article>)}
