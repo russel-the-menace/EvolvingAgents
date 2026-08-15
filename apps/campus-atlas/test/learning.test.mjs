@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { DatabaseSync } from 'node:sqlite';
 import { createSqliteLearningStore } from '@evolving-agents/learning-engine';
-import { createCampusPolicyEngine } from '../src/learning.mjs';
+import { createCampusPolicyEngine, createCompetitionPlanningEngine } from '../src/learning.mjs';
 
 function createCampusEngine() {
   const db = new DatabaseSync(':memory:');
@@ -97,5 +97,33 @@ test('the default chunker processes material beyond a single model context windo
   const learned = await engine.learn(source.id);
   assert(learned.chunks.length > 1);
   assert.equal(learned.claims.length, 1);
+  db.close();
+});
+
+test('competition planning keeps public facts and private profile claims separately authorized', async () => {
+  const db = new DatabaseSync(':memory:');
+  db.exec('PRAGMA foreign_keys = ON;');
+  const store = createSqliteLearningStore(db);
+  const engine = createCompetitionPlanningEngine({
+    store,
+    extractor: { async extract({ source, chunk }) { return [{
+      title: source.metadata.domain === 'user_profile' ? '个人可投入时间' : '竞赛报名截止时间',
+      proposition: chunk.text,
+      kind: source.metadata.domain === 'user_profile' ? 'personal_constraint' : 'deadline',
+      sourceQuote: chunk.text,
+      attributes: { competitionId: source.metadata.competitionId },
+      confidence: 0.95,
+    }]; } },
+  });
+  const competition = await engine.ingest({ title: '全国大学生创新竞赛通知', sourceType: 'manual_competition', sourceActor: 'official-organizer', sourceUri: 'https://contest.example/2027', metadata: { domain: 'competition', accessScope: 'public', competitionId: 'innovation-2027' }, content: '报名截止时间为2027-04-30。' });
+  const profile = await engine.ingest({ title: '我的竞赛偏好', sourceType: 'user_note', sourceActor: 'user', metadata: { domain: 'user_profile', accessScope: 'private_profile' }, content: '我每周可以投入八小时，偏好人工智能方向。' });
+  await engine.learn(competition.source.id);
+  await engine.learn(profile.source.id);
+  const anonymous = await engine.retrieve('每周投入时间 报名截止', { context: { accessScopes: ['public'] } });
+  assert.equal(anonymous.length, 1);
+  assert.match(anonymous[0].claim.proposition, /报名截止/);
+  const personalized = await engine.retrieve('每周投入时间 报名截止', { context: { accessScopes: ['public', 'private_profile'] } });
+  assert.equal(personalized.length, 2);
+  assert(personalized.some((item) => item.claim.id));
   db.close();
 });
