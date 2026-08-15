@@ -13,6 +13,7 @@
     "check": "node --check src/*.mjs test/*.mjs && tsc -b"
   },
   "dependencies": {
+    "@evolving-agents/chat-ui": "0.1.0",
     "@evolving-agents/learning-engine": "0.1.0",
     "@vitejs/plugin-react": "latest",
     "lucide-react": "latest",
