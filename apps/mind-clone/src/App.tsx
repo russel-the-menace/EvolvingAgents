@@ -1,16 +1,15 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { ChatConversation, ChatSidebar } from '@evolving-agents/chat-ui';
 import {
-  ArrowDown, ArrowRight, BotMessageSquare, CheckCircle2, ChevronDown, CircleStop, FileText,
+  ArrowDown, ArrowRight, BotMessageSquare, CheckCircle2, CircleStop, FileText,
   FileUp, ListChecks, Mic, Paperclip, Play,
-  Copy, MoreHorizontal, PanelLeftClose, PanelLeftOpen, Pencil, Pin, Plus, SendHorizontal, Settings2,
-  Sparkles, Trash2, Video, Volume2,
+  PanelLeftOpen, Plus, SendHorizontal, Sparkles, Video, Volume2,
 } from 'lucide-react';
 import { streamCandidateAnswer } from './interview';
 import { memoryApi } from './memory-api';
-import { loadPacket, loadSettings, savePacket, saveSettings } from './storage';
+import { loadPacket, loadSettings, savePacket } from './storage';
 import type { DailyMessage, DailyModel, DailySession, InterviewPacket, Message, Mode, Settings, ThemeMode } from './types';
 
 const exampleJD = `Remote Backend Engineer
@@ -238,11 +237,6 @@ export function App() {
     void askQuestion(true);
   }
 
-  function updateSettings(next: Settings) {
-    setSettings(next);
-    saveSettings(next);
-  }
-
   async function newDailySession() {
     try {
       const { session } = await memoryApi.createSession();
@@ -276,7 +270,7 @@ export function App() {
   return (
     <main className={`app-shell ${sidebarCollapsed ? 'sidebar-collapsed' : ''}`} style={{ '--app-sidebar-width': `${sidebarWidth}px` } as CSSProperties}>
       <AppSidebar sessions={dailySessions} activeSessionId={dailySessionId} newChatActive={dailyNewChatActive} mode={mode} hasPacket={Boolean(packet)}
-        sidebarCollapsed={sidebarCollapsed} sidebarWidth={sidebarWidth} onSidebarWidthChange={setSidebarWidth}
+        sidebarWidth={sidebarWidth} onSidebarWidthChange={setSidebarWidth}
         onToggleSidebar={() => setSidebarCollapsed((current) => !current)} onModeChange={setMode} onOpenSettings={() => setShowSettings(true)}
         onNewChat={() => { setDailyNewChatActive(true); setDailySessionId(null); setDailyInput(''); setDailyError(''); setMode('daily'); }}
         onSelectSession={(id) => { setDailyNewChatActive(false); setDailySessionId(id); setMode('daily'); }}
@@ -305,7 +299,7 @@ export function App() {
         ) : null}
       </section>
 
-      {showSettings && <SettingsDialog settings={settings} theme={theme} onThemeChange={setTheme} onClose={() => setShowSettings(false)} onChange={updateSettings} />}
+      {showSettings && <SettingsDialog theme={theme} onThemeChange={setTheme} onClose={() => setShowSettings(false)} />}
     </main>
   );
 }
@@ -327,21 +321,14 @@ function extractChatGPTConversations(value: unknown) {
   });
 }
 
-function AppSidebar({ sessions, activeSessionId, newChatActive, mode, hasPacket, sidebarCollapsed, sidebarWidth, onSidebarWidthChange, onToggleSidebar, onModeChange, onOpenSettings, onNewChat, onSelectSession, onRefresh, onError }: {
-  sessions: DailySession[]; activeSessionId: string | null; newChatActive: boolean; mode: Mode; hasPacket: boolean; sidebarCollapsed: boolean; sidebarWidth: number;
+function AppSidebar({ sessions, activeSessionId, newChatActive, mode, hasPacket, sidebarWidth, onSidebarWidthChange, onToggleSidebar, onModeChange, onOpenSettings, onNewChat, onSelectSession, onRefresh, onError }: {
+  sessions: DailySession[]; activeSessionId: string | null; newChatActive: boolean; mode: Mode; hasPacket: boolean; sidebarWidth: number;
   onSidebarWidthChange: (width: number) => void; onToggleSidebar: () => void; onModeChange: (mode: Mode) => void; onOpenSettings: () => void; onNewChat: () => void; onSelectSession: (id: string) => void; onRefresh: () => void; onError: (value: string) => void;
 }) {
-  const [sessionMenuId, setSessionMenuId] = useState<string | null>(null);
-  const resizeRef = useRef<{ startX: number; startWidth: number } | null>(null);
-  function resizeStart(event: React.PointerEvent<HTMLDivElement>) { if (sidebarCollapsed) return; resizeRef.current = { startX: event.clientX, startWidth: sidebarWidth }; event.currentTarget.setPointerCapture(event.pointerId); }
-  function resizeMove(event: React.PointerEvent<HTMLDivElement>) { if (resizeRef.current) onSidebarWidthChange(Math.min(420, Math.max(240, resizeRef.current.startWidth + event.clientX - resizeRef.current.startX))); }
-  function resizeEnd(event: React.PointerEvent<HTMLDivElement>) { resizeRef.current = null; window.localStorage.setItem('mindclone-sidebar-width', String(sidebarWidth)); if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId); }
-  async function updateSession(session: DailySession, update: Partial<Pick<DailySession, 'title' | 'pinned'>>) { try { await memoryApi.updateSession(session.id, update); setSessionMenuId(null); onRefresh(); } catch (caught) { onError((caught as Error).message); } }
+  async function updateSession(session: DailySession, update: Partial<Pick<DailySession, 'title' | 'pinned'>>) { try { await memoryApi.updateSession(session.id, update); onRefresh(); } catch (caught) { onError((caught as Error).message); } }
   async function deleteSession(session: DailySession) { if (!window.confirm(`Delete “${session.title}” and all messages in it? Learned claims remain available unless explicitly superseded in conversation.`)) return; try { await memoryApi.deleteSession(session.id); if (session.id === activeSessionId) onNewChat(); onRefresh(); } catch (caught) { onError((caught as Error).message); } }
   function renameSession(session: DailySession) { const title = window.prompt('Rename conversation', session.title)?.trim(); if (title && title !== session.title) void updateSession(session, { title }); }
   return <ChatSidebar brand="MindClone" brandIcon={<Sparkles size={21} />} sessions={sessions} activeSessionId={newChatActive ? null : activeSessionId} width={sidebarWidth} onWidthChange={onSidebarWidthChange} onCollapse={onToggleSidebar} onNewChat={onNewChat} onSelectSession={onSelectSession} onSettings={onOpenSettings} status="Local engine" nav={<><button className={mode === 'prepare' ? 'active' : ''} onClick={() => onModeChange('prepare')}><FileText size={16} />Interview prep</button><button className={mode === 'formal' ? 'active' : ''} disabled={!hasPacket} onClick={() => hasPacket && onModeChange('formal')}><BotMessageSquare size={16} />Live interview</button></>} onPin={(session) => void updateSession(session as DailySession, { pinned: !session.pinned })} onRename={(session) => renameSession(session as DailySession)} onDelete={(session) => void deleteSession(session as DailySession)} />;
-  /* ponytail: the legacy sidebar below remains until both consumers complete visual parity, then delete it. */
-  return <aside className="daily-history" style={{ width: sidebarCollapsed ? 0 : sidebarWidth }}><div className="daily-brand"><Sparkles size={21} /><span>MindClone</span><button className="icon-button sidebar-close" title="Collapse sidebar" onClick={onToggleSidebar}><PanelLeftClose size={19} /></button></div><nav className="daily-nav"><button className={mode === 'daily' && (newChatActive || !activeSessionId) ? 'active' : ''} onClick={onNewChat}><Plus size={14} /> New Chat</button><button className={mode === 'prepare' ? 'active' : ''} onClick={() => onModeChange('prepare')}><FileText size={14} /> Interview prep</button><button className={mode === 'formal' ? 'active' : ''} disabled={!hasPacket} onClick={() => hasPacket && onModeChange('formal')}><BotMessageSquare size={14} /> Live interview</button></nav><div className="recents-panel"><div className="daily-history-top recents-toggle"><span>Recents</span></div><div className="session-list">{sessions.length === 0 ? <p>Start a conversation. MindClone keeps your record on this device.</p> : [...sessions].sort((left, right) => Number(Boolean(right.pinned)) - Number(Boolean(left.pinned)) || new Date(right.updatedAt).getTime() - new Date(left.updatedAt).getTime()).map((session) => <div key={session.id} className={mode === 'daily' && session.id === activeSessionId && !newChatActive ? 'session-item active' : 'session-item'}><button onClick={() => { setSessionMenuId(null); onSelectSession(session.id); }}><span>{session.pinned && <Pin size={12} fill="currentColor" />} {session.title}</span></button><div className="session-more"><button className="session-more-trigger" title="Conversation options" onClick={(event) => { event.stopPropagation(); setSessionMenuId((current) => current === session.id ? null : session.id); }}><MoreHorizontal size={17} /></button>{sessionMenuId === session.id && <div className="session-context-menu"><button onClick={() => void updateSession(session, { pinned: !session.pinned })}><Pin size={15} /> {session.pinned ? 'Unpin' : 'Pin'}</button><button onClick={() => renameSession(session)}><Pencil size={15} /> Rename</button><button className="danger" onClick={() => void deleteSession(session)}><Trash2 size={15} /> Delete</button></div>}</div></div>)}</div></div><div className="daily-sidebar-footer"><div className="local-status"><span /> Local engine</div><button className="icon-button light" title="Settings" onClick={onOpenSettings}><Settings2 size={18} /></button></div><div className="sidebar-resize-handle" role="separator" aria-orientation="vertical" aria-label="Resize sidebar" onPointerDown={resizeStart} onPointerMove={resizeMove} onPointerUp={resizeEnd} onPointerCancel={resizeEnd} /></aside>;
 }
 
 function DailyChatView({ sessions, activeSessionId, input, streaming, error, model, newChatActive, onModelChange, onInputChange, onNewSession, onRefresh, onError, onStreamChange, onImport, onNewChatActiveChange }: {
@@ -359,50 +346,12 @@ function DailyChatView({ sessions, activeSessionId, input, streaming, error, mod
   const [shortVideoContent, setShortVideoContent] = useState('');
   const [attachmentBusy, setAttachmentBusy] = useState(false);
   const [attachmentStatus, setAttachmentStatus] = useState('');
-  const [thinkingVisible, setThinkingVisible] = useState(false);
-  const [editingMessage, setEditingMessage] = useState<{ id: string; content: string } | null>(null);
   const [draftMessages, setDraftMessages] = useState<DailyMessage[]>([]);
-  const [composerExpanded, setComposerExpanded] = useState(false);
-  const [modelMenuOpen, setModelMenuOpen] = useState(false);
-  const [showScrollButton, setShowScrollButton] = useState(false);
-  const listRef = useRef<HTMLDivElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
-  const dailyInputRef = useRef<HTMLTextAreaElement>(null);
-  const modelMenuRef = useRef<HTMLDivElement>(null);
-  const thinkingTimerRef = useRef<number | null>(null);
-  const followingRef = useRef(true);
-  const scrollTimerRef = useRef<number | null>(null);
   const activeSession = sessions.find((session) => session.id === activeSessionId) ?? null;
   const messages = draftMessages.length ? draftMessages : newChatActive ? [] : activeSession?.messages ?? [];
 
   useEffect(() => { setDraftMessages([]); }, [activeSessionId]);
-  useLayoutEffect(() => {
-    const transcript = listRef.current;
-    if (transcript && followingRef.current) transcript.scrollTop = transcript.scrollHeight;
-  }, [messages, streaming]);
-  useEffect(() => {
-    const textarea = dailyInputRef.current;
-    if (!textarea) return;
-    textarea.style.height = 'auto';
-    textarea.style.height = Math.min(textarea.scrollHeight, 144) + 'px';
-    if (!input.length) {
-      setComposerExpanded(false);
-    } else if (textarea.scrollHeight > 28) {
-      setComposerExpanded(true);
-    }
-  }, [input]);
-  useEffect(() => {
-    function closeMenu(event: MouseEvent) {
-      if (!modelMenuRef.current?.contains(event.target as Node)) setModelMenuOpen(false);
-    }
-    document.addEventListener('mousedown', closeMenu);
-    return () => document.removeEventListener('mousedown', closeMenu);
-  }, []);
-
-  function updateDailyInput(value: string) {
-    if (!value) setComposerExpanded(false);
-    onInputChange(value);
-  }
 
   async function send(contentOverride?: string, replaceFromMessageId?: string) {
     const content = (contentOverride ?? input).trim();
@@ -418,32 +367,19 @@ function DailyChatView({ sessions, activeSessionId, input, streaming, error, mod
     const branchIndex = replaceFromMessageId ? activeSession?.messages.findIndex((message) => message.id === replaceFromMessageId) ?? -1 : -1;
     const branchMessages = branchIndex >= 0 ? activeSession?.messages.slice(0, branchIndex) ?? [] : activeSession?.messages ?? [];
     const next = [...branchMessages, userMessage, answerMessage];
-    followLatest(true);
     setDraftMessages(next);
-    if (thinkingTimerRef.current) window.clearTimeout(thinkingTimerRef.current);
-    thinkingTimerRef.current = null;
-    setThinkingVisible(true);
     onInputChange(''); onError(''); onStreamChange(true);
     const controller = new AbortController();
-    let firstDelta = true;
     try {
       await memoryApi.streamChat(sessionId, content, (delta) => {
-        if (firstDelta) {
-          firstDelta = false;
-          thinkingTimerRef.current = window.setTimeout(() => setThinkingVisible(false), 320);
-        }
         setDraftMessages((current) => current.map((message) => message.id === answerMessage.id ? { ...message, content: message.content + delta } : message));
       }, controller.signal, replaceFromMessageId, model);
       setDraftMessages([]);
-      setEditingMessage(null);
       onRefresh();
     } catch (caught) {
       setDraftMessages((current) => current.filter((message) => message.id !== answerMessage.id || message.content));
       onError((caught as Error).message);
     } finally {
-      if (thinkingTimerRef.current) window.clearTimeout(thinkingTimerRef.current);
-      thinkingTimerRef.current = null;
-      setThinkingVisible(false);
       onStreamChange(false);
     }
   }
@@ -487,53 +423,9 @@ function DailyChatView({ sessions, activeSessionId, input, streaming, error, mod
     } catch (caught) { setAttachmentStatus((caught as Error).message); } finally { setAttachmentBusy(false); }
   }
 
-  function editMessage(message: DailyMessage) {
-    setEditingMessage({ id: message.id, content: message.content });
-  }
-
-  async function copyMessage(message: DailyMessage) {
-    try { await navigator.clipboard.writeText(message.content); } catch { onError('Unable to access the system clipboard.'); }
-  }
-
-  function updateScrollPosition() {
-    const transcript = listRef.current;
-    if (!transcript) return;
-    const nextAtBottom = transcript.scrollHeight - transcript.scrollTop - transcript.clientHeight <= 24;
-    followingRef.current = nextAtBottom;
-    if (nextAtBottom) {
-      if (scrollTimerRef.current) window.clearTimeout(scrollTimerRef.current);
-      scrollTimerRef.current = null;
-      setShowScrollButton(false);
-    } else if (!scrollTimerRef.current && !showScrollButton) {
-      scrollTimerRef.current = window.setTimeout(() => {
-        scrollTimerRef.current = null;
-        setShowScrollButton(true);
-      }, 1000);
-    }
-  }
-
-  function followLatest(immediate = false) {
-    const transcript = listRef.current;
-    if (!transcript) return;
-    followingRef.current = true;
-    if (scrollTimerRef.current) window.clearTimeout(scrollTimerRef.current);
-    scrollTimerRef.current = null;
-    setShowScrollButton(false);
-    window.requestAnimationFrame(() => {
-      transcript.scrollTo({ top: transcript.scrollHeight, behavior: immediate ? 'auto' : 'smooth' });
-      if (immediate) window.requestAnimationFrame(() => { transcript.scrollTop = transcript.scrollHeight; });
-    });
-  }
-
   const attachmentControl = <div className="attachment-area">{attachmentOpen && <div className="attachment-menu"><div className="attachment-menu-title">Teach MindClone</div><button onClick={() => fileRef.current?.click()}><FileUp size={17} /> Import ChatGPT history</button><button onClick={() => { setAttachmentMode('note'); setAttachmentStatus(''); }}><Paperclip size={17} /> Add text / Markdown</button><button onClick={() => { setAttachmentMode('video'); setAttachmentStatus(''); }}><Video size={17} /> Learn from Douyin audio</button>{attachmentMode === 'note' && <div className="attachment-editor"><textarea value={attachmentNote} onChange={(event) => setAttachmentNote(event.target.value)} placeholder="Paste notes or source material..." /><button className="primary-button compact" disabled={attachmentBusy} onClick={() => void saveAttachmentNote()}>{attachmentBusy ? 'Learning...' : 'Learn this text'}</button></div>}{attachmentMode === 'video' && <div className="attachment-editor video-editor"><textarea value={shortVideoShare} onChange={(event) => setShortVideoShare(event.target.value)} placeholder="Paste the Douyin share message or v.douyin.com link..." /><div className="attachment-actions"><button className="primary-button compact" disabled={attachmentBusy} onClick={() => void prepareShortVideo(true)}>{attachmentBusy ? 'Working...' : 'Transcribe audio'}</button><button className="ghost-button compact" disabled={attachmentBusy} onClick={() => void prepareShortVideo(false)}>Add transcript manually</button></div>{shortVideoContent && <><input value={shortVideoTitle} onChange={(event) => setShortVideoTitle(event.target.value)} placeholder="Video title" /><textarea className="transcript-editor" value={shortVideoContent} onChange={(event) => setShortVideoContent(event.target.value)} placeholder="Review the spoken transcript..." /><button className="primary-button compact" disabled={attachmentBusy} onClick={() => void learnShortVideo()}>{attachmentBusy ? 'Learning...' : 'Learn this transcript'}</button></>}</div>}{attachmentStatus && <p>{attachmentStatus}</p>}</div>}<input ref={fileRef} className="hidden-input" type="file" accept="application/json,.json" onChange={(event) => { const file = event.target.files?.[0]; if (file) void importFile(file); event.currentTarget.value = ''; }} /><button className={attachmentOpen ? 'plus-button open' : 'plus-button'} title="Add material" onClick={() => setAttachmentOpen((current) => !current)}><Plus size={21} /></button></div>;
 
   return <ChatConversation messages={messages} input={input} streaming={streaming} error={error} model={model} models={[{ id: 'deepseek-medium', name: 'DeepSeek Medium', detail: 'Balanced reasoning' }, { id: 'deepseek-high', name: 'DeepSeek High', detail: 'More thorough reasoning' }]} placeholder="Message MindClone..." empty={<><Sparkles size={32} /><h2>Start with what is on your mind</h2><p>MindClone learns from your conversations and asks for clarification when imported material needs your judgment.</p></>} onInputChange={onInputChange} onModelChange={(value) => onModelChange(value as DailyModel)} onSend={(content, replaceFromMessageId) => void send(content, replaceFromMessageId)} onEdit={(message, content) => void send(content, message.id)} leading={attachmentControl} />;
-  /* ponytail: legacy daily markup stays temporarily as the visual rollback path; remove after both apps pass screenshot parity. */
-
-  return <section className="daily-conversation"><div className="daily-transcript" ref={listRef} onScroll={updateScrollPosition}>{messages.length === 0 ? <div className="daily-empty"><Sparkles size={32} /><h2>Start with what is on your mind</h2><p>MindClone learns from your conversations and asks for clarification here when imported material needs your judgment.</p></div> : messages.map((message) => <article className={`daily-message ${message.role}`} key={message.id}>{editingMessage?.id === message.id ? <div className="inline-message-editor"><textarea autoFocus value={editingMessage.content} onChange={(event) => setEditingMessage({ ...editingMessage, content: event.target.value })} onKeyDown={(event) => { if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') void send(editingMessage.content, message.id); if (event.key === 'Escape') setEditingMessage(null); }} /><div><button className="edit-cancel-button" onClick={() => setEditingMessage(null)}>Cancel</button><button className="edit-send-button" disabled={!editingMessage.content.trim() || streaming} onClick={() => void send(editingMessage.content, message.id)}>Send</button></div></div> : <><div className="message-body">{message.content ? <MarkdownText content={message.content} /> : streaming && message.role === 'assistant' ? <ThinkingIndicator /> : null}{thinkingVisible && message.id === messages.at(-1)?.id && message.role === 'assistant' && message.content && <ThinkingIndicator />}</div>{message.content && <div className="message-actions"><button title="Copy message" aria-label="Copy message" onClick={() => void copyMessage(message)}><Copy size={16} /></button>{message.role === 'user' && <button title="Edit message" aria-label="Edit message" onClick={() => editMessage(message)}><Pencil size={16} /></button>}</div>}</>}</article>)}{error && <div className="error-note">{error}</div>}</div>
-      <button className={showScrollButton ? 'scroll-to-latest is-visible' : 'scroll-to-latest'} title="Back to latest message" aria-label="Back to latest message" aria-hidden={!showScrollButton} disabled={!showScrollButton} onClick={() => followLatest()}><ArrowDown size={18} /></button>
-      <div className={composerExpanded ? 'daily-composer expanded' : 'daily-composer'}><div className="attachment-area">{attachmentOpen && <div className="attachment-menu"><div className="attachment-menu-title">Teach MindClone</div><button onClick={() => fileRef.current?.click()}><FileUp size={17} /> Import ChatGPT history</button><button onClick={() => { setAttachmentMode('note'); setAttachmentStatus(''); }}><Paperclip size={17} /> Add text / Markdown</button><button onClick={() => { setAttachmentMode('video'); setAttachmentStatus(''); }}><Video size={17} /> Learn from Douyin audio</button>{attachmentMode === 'note' && <div className="attachment-editor"><textarea value={attachmentNote} onChange={(event) => setAttachmentNote(event.target.value)} placeholder="Paste notes or source material..." /><button className="primary-button compact" disabled={attachmentBusy} onClick={() => void saveAttachmentNote()}>{attachmentBusy ? 'Learning...' : 'Learn this text'}</button></div>}{attachmentMode === 'video' && <div className="attachment-editor video-editor"><textarea value={shortVideoShare} onChange={(event) => setShortVideoShare(event.target.value)} placeholder="Paste the Douyin share message or v.douyin.com link..." /><div className="attachment-actions"><button className="primary-button compact" disabled={attachmentBusy} onClick={() => void prepareShortVideo(true)}>{attachmentBusy ? 'Working...' : 'Transcribe audio'}</button><button className="ghost-button compact" disabled={attachmentBusy} onClick={() => void prepareShortVideo(false)}>Add transcript manually</button></div>{shortVideoContent && <><input value={shortVideoTitle} onChange={(event) => setShortVideoTitle(event.target.value)} placeholder="Video title" /><textarea className="transcript-editor" value={shortVideoContent} onChange={(event) => setShortVideoContent(event.target.value)} placeholder="Review the spoken transcript..." /><button className="primary-button compact" disabled={attachmentBusy} onClick={() => void learnShortVideo()}>{attachmentBusy ? 'Learning...' : 'Learn this transcript'}</button></>}</div>}{attachmentStatus && <p>{attachmentStatus}</p>}</div>}<input ref={fileRef} className="hidden-input" type="file" accept="application/json,.json" onChange={(event) => { const file = event.target.files?.[0]; if (file) void importFile(file); event.currentTarget.value = ''; }} /><button className={attachmentOpen ? 'plus-button open' : 'plus-button'} title="Add material" onClick={() => setAttachmentOpen((current) => !current)}><Plus size={21} /></button></div><textarea ref={dailyInputRef} rows={1} value={input} onChange={(event) => updateDailyInput(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); void send(); } }} placeholder="Message MindClone..." /><div ref={modelMenuRef} className={modelMenuOpen ? 'daily-model-picker open' : 'daily-model-picker'}><button type="button" aria-haspopup="menu" aria-expanded={modelMenuOpen} onClick={() => setModelMenuOpen((open) => !open)}>{({ 'deepseek-light': 'DeepSeek Light', 'deepseek-medium': 'DeepSeek Medium', 'deepseek-high': 'DeepSeek High', 'deepseek-ultra': 'DeepSeek Ultra' } as const)[model]}<ChevronDown size={16} /></button>{modelMenuOpen && <div className="daily-model-menu" role="menu">{([{ id: 'deepseek-light', name: 'DeepSeek Light', detail: 'deepseek-v4-flash · non-thinking' }, { id: 'deepseek-medium', name: 'DeepSeek Medium', detail: 'deepseek-v4-flash · thinking' }, { id: 'deepseek-high', name: 'DeepSeek High', detail: 'deepseek-v4-pro · non-thinking' }, { id: 'deepseek-ultra', name: 'DeepSeek Ultra', detail: 'deepseek-v4-pro · thinking' }] as const).map((option) => <button key={option.id} role="menuitem" className={model === option.id ? 'selected' : ''} onClick={() => { onModelChange(option.id); setModelMenuOpen(false); }}><strong>{option.name}</strong><span>{option.detail}</span></button>)}</div>}</div><button className="send-icon" disabled={!input.trim() || streaming} title="Send" onClick={() => void send()}><SendHorizontal size={19} /></button></div>
-    </section>;
 }
 
 function PrepareView(props: {
@@ -592,9 +484,6 @@ function FormalView(props: {
   </div>;
 }
 
-function SettingsDialog({ settings, theme, onThemeChange, onClose, onChange }: { settings: Settings; theme: ThemeMode; onThemeChange: (theme: ThemeMode) => void; onClose: () => void; onChange: (settings: Settings) => void }) {
-  const [draft, setDraft] = useState(settings);
+function SettingsDialog({ theme, onThemeChange, onClose }: { theme: ThemeMode; onThemeChange: (theme: ThemeMode) => void; onClose: () => void }) {
   return <div className="dialog-backdrop" role="presentation" onMouseDown={onClose}><div className="settings-dialog" role="dialog" aria-modal="true" onMouseDown={(event) => event.stopPropagation()}><div><p className="eyebrow">MINDCLONE SETTINGS</p><h2>设置</h2><p>调整共享聊天界面的主题。</p></div><label className="theme-field">主题<div className="theme-options">{(['light', 'dark', 'system'] as ThemeMode[]).map((option) => <button key={option} type="button" className={theme === option ? 'selected' : ''} onClick={() => onThemeChange(option)}>{option === 'light' ? '浅色' : option === 'dark' ? '深色' : '跟随系统'}</button>)}</div></label><div className="dialog-actions"><button className="primary-button compact" onClick={onClose}>完成</button></div></div></div>;
-  /* ponytail: keep the legacy return until the Settings type is removed from interview state. */
-  return <div className="dialog-backdrop" role="presentation" onMouseDown={onClose}><div className="settings-dialog" role="dialog" aria-modal="true" onMouseDown={(event) => event.stopPropagation()}><div><p className="eyebrow">MINDCLONE SETTINGS</p><h2>设置</h2><p>调整界面主题和本地模型连接。</p></div><label className="theme-field">主题<div className="theme-options">{(['light', 'dark', 'system'] as ThemeMode[]).map((option) => <button key={option} type="button" className={theme === option ? 'selected' : ''} onClick={() => onThemeChange(option)}>{option === 'light' ? '浅色' : option === 'dark' ? '深色' : '跟随系统'}</button>)}</div></label><label>服务地址<input value={draft.baseUrl} onChange={(event) => setDraft({ ...draft, baseUrl: event.target.value })} /></label><label>模型名称<input value={draft.model} onChange={(event) => setDraft({ ...draft, model: event.target.value })} /></label><div className="dialog-actions"><button className="ghost-button" onClick={onClose}>取消</button><button className="primary-button compact" onClick={() => { onChange(draft); onClose(); }}>保存</button></div></div></div>;
 }
