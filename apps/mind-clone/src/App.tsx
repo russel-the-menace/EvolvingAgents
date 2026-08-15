@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { ChatConversation, ChatSidebar, useChatController, type ChatAdapter, type ChatMessage } from '@evolving-agents/chat-ui';
+import { ChatConversation, ChatSidebar, useChatController, useChatPreferences, type ChatAdapter, type ChatMessage, type ChatTheme } from '@evolving-agents/chat-ui';
 import {
   ArrowDown, ArrowRight, BotMessageSquare, CheckCircle2, CircleStop, FileText,
   FileUp, ListChecks, Mic, Paperclip, Play,
@@ -10,7 +10,7 @@ import {
 import { streamCandidateAnswer } from './interview';
 import { memoryApi } from './memory-api';
 import { loadPacket, loadSettings, savePacket } from './storage';
-import type { DailyModel, DailySession, InterviewPacket, Message, Mode, Settings, ThemeMode } from './types';
+import type { DailyModel, DailySession, InterviewPacket, Message, Mode, Settings } from './types';
 
 const exampleJD = `Remote Backend Engineer
 Own server-side APIs, database design, performance tuning, and production reliability. Comfortable with a mainstream backend language, SQL, Redis, Docker, and distributed systems fundamentals; able to clarify requirements and deliver independently.`;
@@ -55,25 +55,13 @@ export function App() {
   const [resume, setResume] = useState('');
   const [packet, setPacket] = useState<InterviewPacket | null>(null);
   const [settings, setSettings] = useState<Settings>(loadSettings);
-  const [theme, setTheme] = useState<ThemeMode>(() => {
-    const stored = window.localStorage.getItem('mindclone-theme');
-    return stored === 'dark' || stored === 'system' ? stored : 'light';
-  });
   const [showSettings, setShowSettings] = useState(false);
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
   const [streaming, setStreaming] = useState(false);
   const [error, setError] = useState('');
-  const [dailyModel, setDailyModel] = useState<DailyModel>(() => {
-    const saved = window.localStorage.getItem('mindclone.daily-model');
-    return saved === 'deepseek-high' ? 'deepseek-high' : 'deepseek-medium';
-  });
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => window.matchMedia('(max-width: 780px)').matches);
-  const dailyChat = useChatController(dailyChatAdapter, dailyModel);
-  const [sidebarWidth, setSidebarWidth] = useState(() => {
-    const saved = Number(window.localStorage.getItem('mindclone-sidebar-width'));
-    return Number.isFinite(saved) ? Math.min(420, Math.max(240, saved)) : 280;
-  });
+  const preferences = useChatPreferences<DailyModel>({ themeKey: 'mindclone-theme', modelKey: 'mindclone.daily-model', sidebarWidthKey: 'mindclone-sidebar-width', defaultTheme: 'light', defaultModel: 'deepseek-medium', parseModel: (saved) => saved === 'deepseek-high' ? 'deepseek-high' : 'deepseek-medium' });
+  const dailyChat = useChatController(dailyChatAdapter, preferences.model);
   const abortRef = useRef<AbortController | null>(null);
   const generationRef = useRef(0);
   const transcriptRef = useRef<HTMLDivElement>(null);
@@ -89,11 +77,6 @@ export function App() {
       setResume(stored.resume);
     }
   }, []);
-
-  useEffect(() => {
-    document.documentElement.dataset.theme = theme;
-    window.localStorage.setItem('mindclone-theme', theme);
-  }, [theme]);
 
 
   useEffect(() => {
@@ -251,18 +234,18 @@ export function App() {
   }
 
   return (
-    <main className={`app-shell ${sidebarCollapsed ? 'sidebar-collapsed' : ''}`} style={{ '--app-sidebar-width': `${sidebarWidth}px` } as CSSProperties}>
+    <main className={`app-shell ${preferences.sidebarCollapsed ? 'sidebar-collapsed' : ''}`} style={{ '--app-sidebar-width': `${preferences.sidebarWidth}px` } as CSSProperties}>
       <AppSidebar sessions={dailyChat.sessions} activeSessionId={dailyChat.activeSessionId} newChatActive={dailyChat.newChatActive} mode={mode} hasPacket={Boolean(packet)}
-        sidebarWidth={sidebarWidth} onSidebarWidthChange={setSidebarWidth}
-        onToggleSidebar={() => setSidebarCollapsed((current) => !current)} onModeChange={setMode} onOpenSettings={() => setShowSettings(true)}
+        sidebarWidth={preferences.sidebarWidth} onSidebarWidthChange={preferences.setSidebarWidth}
+        onToggleSidebar={() => preferences.setSidebarCollapsed((current) => !current)} onModeChange={setMode} onOpenSettings={() => setShowSettings(true)}
         onNewChat={() => { dailyChat.newChat(); setMode('daily'); }}
         onSelectSession={(id) => { dailyChat.selectSession(id); setMode('daily'); }}
         onUpdate={(session, values) => void dailyChat.updateSession(session, values)} onDelete={(session) => void dailyChat.deleteSession(session)} />
-      {sidebarCollapsed && <button className="sidebar-reopen" title="Expand sidebar" onClick={() => setSidebarCollapsed(false)}><PanelLeftOpen size={19} /></button>}
+      {preferences.sidebarCollapsed && <button className="sidebar-reopen" title="Expand sidebar" onClick={() => preferences.setSidebarCollapsed(false)}><PanelLeftOpen size={19} /></button>}
       <section className="workspace">
         {mode === 'daily' ? (
-          <DailyChatView messages={dailyChat.messages} input={dailyChat.input} streaming={dailyChat.streaming} error={dailyChat.error} model={dailyModel}
-            onModelChange={(model) => { setDailyModel(model); window.localStorage.setItem('mindclone.daily-model', model); }}
+          <DailyChatView messages={dailyChat.messages} input={dailyChat.input} streaming={dailyChat.streaming} error={dailyChat.error} model={preferences.model}
+            onModelChange={preferences.setModel}
             onInputChange={dailyChat.setInput} onSend={dailyChat.send} onError={dailyChat.setError} onImport={importChatGPT} />
         ) : mode === 'prepare' ? (
           <PrepareView
@@ -281,7 +264,7 @@ export function App() {
         ) : null}
       </section>
 
-      {showSettings && <SettingsDialog theme={theme} onThemeChange={setTheme} onClose={() => setShowSettings(false)} />}
+      {showSettings && <SettingsDialog theme={preferences.theme} onThemeChange={preferences.setTheme} onClose={() => setShowSettings(false)} />}
     </main>
   );
 }
@@ -429,6 +412,6 @@ function FormalView(props: {
   </div>;
 }
 
-function SettingsDialog({ theme, onThemeChange, onClose }: { theme: ThemeMode; onThemeChange: (theme: ThemeMode) => void; onClose: () => void }) {
-  return <div className="dialog-backdrop" role="presentation" onMouseDown={onClose}><div className="settings-dialog" role="dialog" aria-modal="true" onMouseDown={(event) => event.stopPropagation()}><div><p className="eyebrow">MINDCLONE SETTINGS</p><h2>设置</h2><p>调整共享聊天界面的主题。</p></div><label className="theme-field">主题<div className="theme-options">{(['light', 'dark', 'system'] as ThemeMode[]).map((option) => <button key={option} type="button" className={theme === option ? 'selected' : ''} onClick={() => onThemeChange(option)}>{option === 'light' ? '浅色' : option === 'dark' ? '深色' : '跟随系统'}</button>)}</div></label><div className="dialog-actions"><button className="primary-button compact" onClick={onClose}>完成</button></div></div></div>;
+function SettingsDialog({ theme, onThemeChange, onClose }: { theme: ChatTheme; onThemeChange: (theme: ChatTheme) => void; onClose: () => void }) {
+  return <div className="dialog-backdrop" role="presentation" onMouseDown={onClose}><div className="settings-dialog" role="dialog" aria-modal="true" onMouseDown={(event) => event.stopPropagation()}><div><p className="eyebrow">MINDCLONE SETTINGS</p><h2>设置</h2><p>调整共享聊天界面的主题。</p></div><label className="theme-field">主题<div className="theme-options">{(['light', 'dark', 'system'] as ChatTheme[]).map((option) => <button key={option} type="button" className={theme === option ? 'selected' : ''} onClick={() => onThemeChange(option)}>{option === 'light' ? '浅色' : option === 'dark' ? '深色' : '跟随系统'}</button>)}</div></label><div className="dialog-actions"><button className="primary-button compact" onClick={onClose}>完成</button></div></div></div>;
 }

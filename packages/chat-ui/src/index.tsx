@@ -6,6 +6,7 @@ import { ArrowDown, ChevronDown, Copy, MoreHorizontal, PanelLeftClose, Pencil, P
 export type ChatMessage = { id: string; role: 'user' | 'assistant'; content: string; createdAt?: string };
 export type ChatSession = { id: string; title: string; pinned?: boolean; createdAt?: string; updatedAt?: string; messages: ChatMessage[] };
 export type ChatModelOption = { id: string; name: string; detail?: string };
+export type ChatTheme = 'light' | 'dark' | 'system';
 export type ChatAdapter<Session extends ChatSession> = {
   listSessions: () => Promise<Session[]>;
   createSession: () => Promise<Session>;
@@ -78,6 +79,19 @@ export function useChatController<Session extends ChatSession>(adapter: ChatAdap
   }
 
   return { sessions, activeSessionId, newChatActive, input, streaming, error, messages, setInput, setError, newChat, selectSession, refreshSessions, send, updateSession, deleteSession };
+}
+
+export function useChatPreferences<Model extends string>({ themeKey, modelKey, sidebarWidthKey, defaultTheme, defaultModel, parseModel }: {
+  themeKey: string; modelKey: string; sidebarWidthKey: string; defaultTheme: ChatTheme; defaultModel: Model; parseModel: (stored: string | null) => Model;
+}) {
+  const [theme, setTheme] = useState<ChatTheme>(() => { const stored = window.localStorage.getItem(themeKey); return stored === 'light' || stored === 'dark' || stored === 'system' ? stored : defaultTheme; });
+  const [model, setModel] = useState<Model>(() => parseModel(window.localStorage.getItem(modelKey)) || defaultModel);
+  const [sidebarWidth, setSidebarWidth] = useState(() => { const saved = Number(window.localStorage.getItem(sidebarWidthKey)); return Number.isFinite(saved) && saved > 0 ? Math.min(420, Math.max(240, saved)) : 280; });
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => window.matchMedia('(max-width: 780px)').matches);
+  useEffect(() => { document.documentElement.dataset.theme = theme; window.localStorage.setItem(themeKey, theme); }, [theme, themeKey]);
+  useEffect(() => { window.localStorage.setItem(modelKey, model); }, [model, modelKey]);
+  useEffect(() => { window.localStorage.setItem(sidebarWidthKey, String(sidebarWidth)); }, [sidebarWidth, sidebarWidthKey]);
+  return { theme, setTheme, model, setModel, sidebarWidth, setSidebarWidth, sidebarCollapsed, setSidebarCollapsed };
 }
 
 export function MarkdownText({ content }: { content: string }) {
