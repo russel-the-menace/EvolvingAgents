@@ -26,7 +26,15 @@ export function App() {
   const [sidebarWidth, setSidebarWidth] = useState(280);
   const [theme, setTheme] = useState<Theme>(() => { const saved = window.localStorage.getItem('campus-atlas-theme'); return saved === 'light' || saved === 'dark' || saved === 'system' ? saved : 'system'; });
   const active = sessions.find((session) => session.id === activeId)!;
-  async function refreshSessions(preferredId?: string) { const body = await readApiResponse(await fetch('/api/chat/sessions')); setSessions(body.sessions || []); if (preferredId) setActiveId(preferredId); }
+  async function refreshSessions(preferredId?: string) {
+    let body = await readApiResponse(await fetch('/api/chat/sessions'));
+    const legacy = window.localStorage.getItem('campus-atlas-sessions');
+    if (!body.sessions?.length && legacy) {
+      body = await readApiResponse(await fetch('/api/chat/sessions/import', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sessions: JSON.parse(legacy) }) }));
+      window.localStorage.removeItem('campus-atlas-sessions');
+    }
+    setSessions(body.sessions || []); if (preferredId) setActiveId(preferredId);
+  }
   useEffect(() => { void refreshSessions(); }, []);
   useEffect(() => { document.documentElement.dataset.theme = theme; window.localStorage.setItem('campus-atlas-theme', theme); }, [theme]);
   function newChat() { setActiveId(null); setInput(''); setError(''); }

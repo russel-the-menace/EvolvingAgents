@@ -59,6 +59,18 @@ async function requestBody(request) {
 }
 
 const server = createServer(async (request, response) => {
+  if (request.method === 'POST' && request.url === '/api/chat/sessions/import') {
+    try {
+      const { sessions } = await requestBody(request);
+      if (!Array.isArray(sessions) || sessions.length > 500) throw new Error('sessions must be an array with at most 500 items.');
+      for (const item of sessions) {
+        if (!item?.id || !item?.title || !Array.isArray(item.messages) || chatHistory.getSession(item.id)) continue;
+        const session = chatHistory.createSession({ id: String(item.id), title: String(item.title).slice(0, 160), pinned: Boolean(item.pinned) });
+        for (const message of item.messages.slice(0, 2000)) if (['user', 'assistant'].includes(message?.role) && typeof (message.content ?? message.text) === 'string') chatHistory.addMessage(session.id, { ...(message.id ? { id: String(message.id) } : {}), ...(message.createdAt ? { createdAt: String(message.createdAt) } : {}), role: message.role, content: message.content ?? message.text });
+      }
+      return sendJson(response, 200, { sessions: chatHistory.listSessions() });
+    } catch (error) { return sendJson(response, 400, { error: error instanceof Error ? error.message : 'Session import failed.' }); }
+  }
   if (request.method === 'GET' && request.url === '/api/chat/sessions') return sendJson(response, 200, { sessions: chatHistory.listSessions() });
   if (request.method === 'POST' && request.url === '/api/chat/sessions') return sendJson(response, 201, { session: chatHistory.createSession() });
   const sessionRoute = request.url?.match(/^\/api\/chat\/sessions\/([^/]+)$/);
