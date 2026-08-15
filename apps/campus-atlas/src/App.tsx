@@ -8,6 +8,14 @@ const sessionKey = 'campus-atlas-sessions';
 
 function loadSessions(): Session[] { try { const value = JSON.parse(window.localStorage.getItem(sessionKey) || '[]'); return Array.isArray(value) ? value : []; } catch { return []; } }
 
+async function readApiResponse(response: Response) {
+  const raw = await response.text();
+  let body: { content?: string; error?: string } = {};
+  try { body = raw ? JSON.parse(raw) : {}; } catch { throw new Error(`CampusAtlas API returned ${response.status} without valid JSON.`); }
+  if (!response.ok) throw new Error(body.error || `CampusAtlas API returned ${response.status}.`);
+  return body;
+}
+
 export function App() {
   const [sessions, setSessions] = useState<Session[]>(loadSessions);
   const [activeId, setActiveId] = useState<string | null>(null);
@@ -30,7 +38,8 @@ export function App() {
     setSessions((current) => [next, ...current.filter((session) => session.id !== id)]); setActiveId(id); setInput(''); setError(''); setSending(true);
     try {
       const response = await fetch('/api/chat', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ quality, messages: next.messages.map((message) => ({ role: message.role, content: message.text })) }) });
-      const body = await response.json(); if (!response.ok) throw new Error(body.error || 'Chat request failed.');
+      const body = await readApiResponse(response);
+      if (!body.content) throw new Error('CampusAtlas API returned no assistant content.');
       const assistant: Message = { id: crypto.randomUUID(), role: 'assistant', text: body.content };
       setSessions((current) => current.map((session) => session.id === id ? { ...session, messages: [...session.messages, assistant] } : session));
     } catch (caught) { setError(caught instanceof Error ? caught.message : 'Chat request failed.'); } finally { setSending(false); }
