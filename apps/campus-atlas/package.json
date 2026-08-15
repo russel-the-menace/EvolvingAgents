@@ -5,11 +5,23 @@
   "type": "module",
   "exports": "./src/learning.mjs",
   "scripts": {
+    "dev": "vite --host 127.0.0.1",
+    "build": "tsc -b && vite build",
     "test": "node --test test/*.test.mjs",
-    "check": "node --check src/*.mjs test/*.mjs"
+    "check": "node --check src/*.mjs test/*.mjs && tsc -b"
   },
   "dependencies": {
-    "@evolving-agents/learning-engine": "0.1.0"
+    "@evolving-agents/learning-engine": "0.1.0",
+    "@vitejs/plugin-react": "latest",
+    "lucide-react": "latest",
+    "react": "latest",
+    "react-dom": "latest",
+    "vite": "latest"
+  },
+  "devDependencies": {
+    "@types/react": "latest",
+    "@types/react-dom": "latest",
+    "typescript": "latest"
   },
   "engines": {
     "node": ">=22.5"
