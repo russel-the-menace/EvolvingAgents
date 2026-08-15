@@ -5,9 +5,11 @@
   "type": "module",
   "exports": "./src/learning.mjs",
   "scripts": {
-    "dev": "vite --host 127.0.0.1",
+    "dev": "concurrently -k \"npm:dev:api\" \"npm:dev:web\"",
+    "dev:api": "node --env-file-if-exists=.env server/index.mjs",
+    "dev:web": "vite --host 127.0.0.1",
     "build": "tsc -b && vite build",
-    "test": "node --test test/*.test.mjs",
+    "test": "node --test test/*.test.mjs server/*.test.mjs",
     "check": "node --check src/*.mjs test/*.mjs && tsc -b"
   },
   "dependencies": {
@@ -21,6 +23,7 @@
   "devDependencies": {
     "@types/react": "latest",
     "@types/react-dom": "latest",
+    "concurrently": "latest",
     "typescript": "latest"
   },
   "engines": {
