@@ -4,6 +4,7 @@ import { dirname } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { legacyCandidateToClaim } from '../domain/cognition.mjs';
 import { createSqliteLearningStore } from '@evolving-agents/learning-engine';
+import { createChatHistoryStore } from '@evolving-agents/chat-history';
 
 function json(value, fallback = []) {
   try { return value ? JSON.parse(value) : fallback; } catch { return fallback; }
@@ -49,10 +50,11 @@ export function openDatabase(path, legacyPath) {
   if (!inquiryColumns.has('response_text')) db.exec('ALTER TABLE inquiry_items ADD COLUMN response_text TEXT');
   if (!inquiryColumns.has('resolution')) db.exec('ALTER TABLE inquiry_items ADD COLUMN resolution TEXT');
   const learningStore = createSqliteLearningStore(db);
+  const chatHistory = createChatHistoryStore(db);
 
   const migrated = db.prepare("SELECT value FROM meta WHERE key = 'legacy_json_migrated_v1'").get();
   if (!migrated && legacyPath) migrateLegacy(db, legacyPath, learningStore);
-  return createRepository(db, learningStore);
+  return createRepository(db, learningStore, chatHistory);
 }
 
 function migrateLegacy(db, legacyPath, learningStore) {
@@ -106,7 +108,7 @@ function mapSession(db, row) {
   return { id: row.id, title: row.title, pinned: Boolean(row.pinned), createdAt: row.created_at, updatedAt: row.updated_at, messages };
 }
 
-function createRepository(db, learningStore) {
+function createRepository(db, learningStore, chatHistory) {
   return {
     ...learningStore,
     db,
@@ -213,6 +215,7 @@ function createRepository(db, learningStore) {
       return true;
     },
     deleteSession: (id) => db.prepare('DELETE FROM sessions WHERE id = ?').run(id),
+    ...chatHistory,
     close: () => db.close(),
   };
 }

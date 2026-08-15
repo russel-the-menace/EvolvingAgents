@@ -2,23 +2,19 @@ import { useEffect, useState } from 'react';
 import { ChevronDown, Compass, MessageSquare, PanelLeftClose, PanelLeftOpen, Plus, SendHorizontal, Settings2 } from 'lucide-react';
 import { ChatConversation, ChatSidebar } from '@evolving-agents/chat-ui';
 
-type Message = { id: string; role: 'user' | 'assistant'; text: string };
-type Session = { id: string; title: string; messages: Message[] };
+type Message = { id: string; role: 'user' | 'assistant'; content: string; text?: string; createdAt?: string };
+type Session = { id: string; title: string; pinned?: boolean; updatedAt?: string; messages: Message[] };
 type Theme = 'light' | 'dark' | 'system';
-const sessionKey = 'campus-atlas-sessions';
-
-function loadSessions(): Session[] { try { const value = JSON.parse(window.localStorage.getItem(sessionKey) || '[]'); return Array.isArray(value) ? value : []; } catch { return []; } }
-
 async function readApiResponse(response: Response) {
   const raw = await response.text();
-  let body: { content?: string; error?: string } = {};
+  let body: any = {};
   try { body = raw ? JSON.parse(raw) : {}; } catch { throw new Error(`CampusAtlas API returned ${response.status} without valid JSON.`); }
   if (!response.ok) throw new Error(body.error || `CampusAtlas API returned ${response.status}.`);
   return body;
 }
 
 export function App() {
-  const [sessions, setSessions] = useState<Session[]>(loadSessions);
+  const [sessions, setSessions] = useState<Session[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [input, setInput] = useState('');
   const [sending, setSending] = useState(false);
@@ -30,26 +26,28 @@ export function App() {
   const [sidebarWidth, setSidebarWidth] = useState(280);
   const [theme, setTheme] = useState<Theme>(() => { const saved = window.localStorage.getItem('campus-atlas-theme'); return saved === 'light' || saved === 'dark' || saved === 'system' ? saved : 'system'; });
   const active = sessions.find((session) => session.id === activeId)!;
-  useEffect(() => { window.localStorage.setItem(sessionKey, JSON.stringify(sessions)); }, [sessions]);
+  async function refreshSessions(preferredId?: string) { const body = await readApiResponse(await fetch('/api/chat/sessions')); setSessions(body.sessions || []); if (preferredId) setActiveId(preferredId); }
+  useEffect(() => { void refreshSessions(); }, []);
   useEffect(() => { document.documentElement.dataset.theme = theme; window.localStorage.setItem('campus-atlas-theme', theme); }, [theme]);
   function newChat() { setActiveId(null); setInput(''); setError(''); }
   async function send() {
     const text = input.trim(); if (!text || sending) return;
-    const id = activeId || crypto.randomUUID(); const user: Message = { id: crypto.randomUUID(), role: 'user', text };
-    const next: Session = { id, title: active?.title || text.slice(0, 48), messages: [...(active?.messages || []), user] };
-    setSessions((current) => [next, ...current.filter((session) => session.id !== id)]); setActiveId(id); setInput(''); setError(''); setSending(true);
+    setInput(''); setError(''); setSending(true);
     try {
-      const response = await fetch('/api/chat', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ quality, messages: next.messages.map((message) => ({ role: message.role, content: message.text })) }) });
+      let id = activeId;
+      if (!id) { const created = await readApiResponse(await fetch('/api/chat/sessions', { method: 'POST' })); id = created.session.id; setActiveId(id); }
+      const response = await fetch('/api/chat', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ quality, sessionId: id, content: text }) });
       const body = await readApiResponse(response);
       if (!body.content) throw new Error('CampusAtlas API returned no assistant content.');
-      const assistant: Message = { id: crypto.randomUUID(), role: 'assistant', text: body.content };
-      setSessions((current) => current.map((session) => session.id === id ? { ...session, messages: [...session.messages, assistant] } : session));
+      await refreshSessions(id || undefined);
     } catch (caught) { setError(caught instanceof Error ? caught.message : 'Chat request failed.'); } finally { setSending(false); }
   }
+  async function updateSession(session: Session, values: Partial<Pick<Session, 'title' | 'pinned'>>) { await readApiResponse(await fetch(`/api/chat/sessions/${session.id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(values) })); await refreshSessions(activeId || undefined); }
+  async function deleteSession(session: Session) { await fetch(`/api/chat/sessions/${session.id}`, { method: 'DELETE' }); if (activeId === session.id) setActiveId(null); await refreshSessions(); }
   return <main className={`app-shell ${sidebarCollapsed ? 'sidebar-collapsed' : ''}`} style={{ gridTemplateColumns: sidebarCollapsed ? 'minmax(0, 1fr)' : `${sidebarWidth}px minmax(0, 1fr)` }}>
-    {!sidebarCollapsed && <ChatSidebar brand="CampusAtlas" brandIcon={<Compass size={21} />} sessions={sessions} activeSessionId={activeId} width={sidebarWidth} onWidthChange={setSidebarWidth} onCollapse={() => setSidebarCollapsed(true)} onNewChat={newChat} onSelectSession={(id) => { setActiveId(id); setError(''); }} onSettings={() => setSettingsOpen(true)} status="Evidence engine" />}
+    {!sidebarCollapsed && <ChatSidebar brand="CampusAtlas" brandIcon={<Compass size={21} />} sessions={sessions} activeSessionId={activeId} width={sidebarWidth} onWidthChange={setSidebarWidth} onCollapse={() => setSidebarCollapsed(true)} onNewChat={newChat} onSelectSession={(id) => { setActiveId(id); setError(''); }} onSettings={() => setSettingsOpen(true)} status="Evidence engine" onPin={(session) => void updateSession(session as Session, { pinned: !session.pinned })} onRename={(session) => { const title = window.prompt('Rename conversation', session.title)?.trim(); if (title) void updateSession(session as Session, { title }); }} onDelete={(session) => void deleteSession(session as Session)} />}
     {sidebarCollapsed && <button className="sidebar-reopen" title="Expand sidebar" onClick={() => setSidebarCollapsed(false)}><PanelLeftOpen size={19} /></button>}
-    <ChatConversation messages={(active?.messages || []).map((message) => ({ id: message.id, role: message.role, content: message.text }))} input={input} streaming={sending} error={error} model={quality} models={[{ id: 'Medium', name: 'DeepSeek Medium', detail: 'Balanced reasoning' }, { id: 'High', name: 'DeepSeek High', detail: 'More thorough reasoning' }]} placeholder="Ask about a campus policy or competition plan" empty={<><Compass size={34} /><h1>Campus policy, with evidence</h1><p>Ask a question, paste competition material, or describe your goals.</p></>} onInputChange={setInput} onModelChange={(value) => { const next = value === 'High' ? 'High' : 'Medium'; setQuality(next); window.localStorage.setItem('campus-atlas-quality', next); }} onSend={() => void send()} />
+    <ChatConversation messages={active?.messages || []} input={input} streaming={sending} error={error} model={quality} models={[{ id: 'Medium', name: 'DeepSeek Medium', detail: 'Balanced reasoning' }, { id: 'High', name: 'DeepSeek High', detail: 'More thorough reasoning' }]} placeholder="Ask about a campus policy or competition plan" empty={<><Compass size={34} /><h1>Campus policy, with evidence</h1><p>Ask a question, paste competition material, or describe your goals.</p></>} onInputChange={setInput} onModelChange={(value) => { const next = value === 'High' ? 'High' : 'Medium'; setQuality(next); window.localStorage.setItem('campus-atlas-quality', next); }} onSend={() => void send()} />
     {settingsOpen && <div className="dialog-backdrop" role="presentation" onMouseDown={() => setSettingsOpen(false)}><section className="settings-dialog" role="dialog" aria-modal="true" aria-labelledby="settings-title" onMouseDown={(event) => event.stopPropagation()}><p className="eyebrow">CAMPUSATLAS SETTINGS</p><h2 id="settings-title">Settings</h2><p>Choose how CampusAtlas appears on this device.</p><div className="theme-field"><span>Theme</span><div className="theme-options">{(['light', 'dark', 'system'] as Theme[]).map((option) => <button key={option} type="button" className={theme === option ? 'selected' : ''} onClick={() => setTheme(option)}>{option === 'light' ? 'Light' : option === 'dark' ? 'Dark' : 'System'}</button>)}</div></div><div className="dialog-actions"><button className="ghost-button" onClick={() => setSettingsOpen(false)}>Close</button></div></section></div>}
   </main>;
   /* ponytail: legacy CampusAtlas chat markup stays as a rollback path until screenshot parity is signed off. */

@@ -3,6 +3,7 @@ import { mkdirSync } from 'node:fs';
 import { DatabaseSync } from 'node:sqlite';
 import { createSqliteLearningStore } from '@evolving-agents/learning-engine';
 import { createCompetitionPlanningEngine } from '../src/learning.mjs';
+import { createChatHistoryStore } from '@evolving-agents/chat-history';
 
 const port = Number(process.env.CAMPUS_ATLAS_API_PORT || 5445);
 const gatewayBaseUrl = (process.env.GATEWAY_BASE_URL || 'https://feiwan.online').replace(/\/$/, '');
@@ -12,6 +13,7 @@ mkdirSync(databasePath.slice(0, databasePath.lastIndexOf('/')) || '.', { recursi
 const db = new DatabaseSync(databasePath);
 db.exec('PRAGMA foreign_keys = ON;');
 const store = createSqliteLearningStore(db);
+const chatHistory = createChatHistoryStore(db);
 const knowledgeEngine = createCompetitionPlanningEngine({ store, extractor: { async extract({ source }) { return source.metadata.proposals || []; } } });
 
 export function responseText(body) {
@@ -57,6 +59,14 @@ async function requestBody(request) {
 }
 
 const server = createServer(async (request, response) => {
+  if (request.method === 'GET' && request.url === '/api/chat/sessions') return sendJson(response, 200, { sessions: chatHistory.listSessions() });
+  if (request.method === 'POST' && request.url === '/api/chat/sessions') return sendJson(response, 201, { session: chatHistory.createSession() });
+  const sessionRoute = request.url?.match(/^\/api\/chat\/sessions\/([^/]+)$/);
+  if (sessionRoute && request.method === 'PATCH') {
+    const session = chatHistory.updateSession(sessionRoute[1], await requestBody(request));
+    return sendJson(response, session ? 200 : 404, session ? { session } : { error: 'Conversation was not found.' });
+  }
+  if (sessionRoute && request.method === 'DELETE') { chatHistory.deleteSession(sessionRoute[1]); response.writeHead(204); return response.end(); }
   if (request.method === 'POST' && request.url === '/api/knowledge/ingest') {
     try {
       const payload = await requestBody(request);
@@ -90,7 +100,11 @@ const server = createServer(async (request, response) => {
   if (request.method !== 'POST' || request.url !== '/api/chat') return sendJson(response, 404, { error: 'Not found.' });
   if (!gatewayBaseUrl || !gatewayApiKey) return sendJson(response, 503, { error: 'Gateway is not configured. Set GATEWAY_BASE_URL and GATEWAY_API_KEY in .env.' });
   try {
-    const { messages, quality = process.env.DEEPSEEK_QUALITY || 'Medium' } = await requestBody(request);
+    const { sessionId, content, quality = process.env.DEEPSEEK_QUALITY || 'Medium' } = await requestBody(request);
+    const session = chatHistory.getSession(sessionId);
+    if (!session || !String(content || '').trim()) throw new Error('A valid session and message are required.');
+    chatHistory.addMessage(sessionId, { role: 'user', content: String(content).trim() });
+    const messages = chatHistory.getSession(sessionId).messages.map(({ role, content }) => ({ role, content }));
     if (!Array.isArray(messages) || !messages.length || !messages.every((message) => ['user', 'assistant', 'system'].includes(message.role) && typeof message.content === 'string')) throw new Error('Messages must be a non-empty OpenAI-style message list.');
     if (!['Medium', 'High'].includes(quality)) throw new Error('Quality must be Medium or High.');
     const latestUser = [...messages].reverse().find((message) => message.role === 'user');
@@ -105,7 +119,10 @@ const server = createServer(async (request, response) => {
     }
     const results = latestUser ? await knowledgeEngine.retrieve(latestUser.content, { limit: 20, context: { accessScopes: ['public', 'private_profile'] } }) : [];
     const evidence = knowledgeEngine.buildEvidenceContext(results);
-    return sendJson(response, 200, { content: await callGateway([{ role: 'system', content: chatEvidencePrompt(evidence) }, ...messages], quality), evidence });
+    const answer = await callGateway([{ role: 'system', content: chatEvidencePrompt(evidence) }, ...messages], quality);
+    chatHistory.addMessage(sessionId, { role: 'assistant', content: answer });
+    if (messages.filter((message) => message.role === 'user').length === 1) chatHistory.updateSession(sessionId, { title: String(content).slice(0, 48) });
+    return sendJson(response, 200, { content: answer, evidence, session: chatHistory.getSession(sessionId) });
   } catch (error) { return sendJson(response, 400, { error: error instanceof Error ? error.message : 'Chat request failed.' }); }
 });
 
