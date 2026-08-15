@@ -20,6 +20,17 @@ export function responseText(body) {
   throw new Error('Gateway returned no assistant message.');
 }
 
+export function planningPrompt(question, evidence) {
+  return `你是 CampusAtlas 的大学生竞赛规划助手。只能根据下方已检索到的证据回答，不要把推测写成事实。输出：1) 推荐的竞赛时间表；2) 每项准备任务和截止日期；3) 每项建议对应的证据引用；4) 信息不足或冲突时列出待确认问题。区分“官方事实”“用户资料”和“模型建议”。\n\n用户目标：${question}\n\n证据：\n${JSON.stringify(evidence).slice(0, 60000)}`;
+}
+
+async function callGateway(messages, quality = 'Medium') {
+  const upstream = await fetch(`${gatewayBaseUrl}/v1/chat/completions`, { method: 'POST', headers: { Authorization: `Bearer ${gatewayApiKey}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ provider: 'deepseek', quality, messages }), signal: AbortSignal.timeout(120_000) });
+  const body = await upstream.json().catch(() => ({}));
+  if (!upstream.ok) { const error = new Error(body.error?.message || body.error || 'Gateway request failed.'); error.status = upstream.status; throw error; }
+  return responseText(body);
+}
+
 function sendJson(response, status, body) { response.writeHead(status, { 'Content-Type': 'application/json' }); response.end(JSON.stringify(body)); }
 
 async function requestBody(request) {
@@ -47,16 +58,23 @@ const server = createServer(async (request, response) => {
       return sendJson(response, 200, { results, evidence: knowledgeEngine.buildEvidenceContext(results) });
     } catch (error) { return sendJson(response, 400, { error: error instanceof Error ? error.message : 'Knowledge retrieval failed.' }); }
   }
+  if (request.method === 'POST' && request.url === '/api/plan') {
+    try {
+      const payload = await requestBody(request);
+      if (!String(payload.question || '').trim()) throw new Error('question is required.');
+      const results = await knowledgeEngine.retrieve(payload.question, { now: payload.now, limit: 20, context: { accessScopes: payload.accessScopes || ['public', 'private_profile'] } });
+      const evidence = knowledgeEngine.buildEvidenceContext(results);
+      const plan = await callGateway([{ role: 'system', content: 'You produce evidence-grounded university competition plans.' }, { role: 'user', content: planningPrompt(payload.question, evidence) }], payload.quality || 'High');
+      return sendJson(response, 200, { plan, evidence });
+    } catch (error) { return sendJson(response, error.status || 400, { error: error instanceof Error ? error.message : 'Planning request failed.' }); }
+  }
   if (request.method !== 'POST' || request.url !== '/api/chat') return sendJson(response, 404, { error: 'Not found.' });
   if (!gatewayBaseUrl || !gatewayApiKey) return sendJson(response, 503, { error: 'Gateway is not configured. Set GATEWAY_BASE_URL and GATEWAY_API_KEY in .env.' });
   try {
     const { messages, quality = process.env.DEEPSEEK_QUALITY || 'Medium' } = await requestBody(request);
     if (!Array.isArray(messages) || !messages.length || !messages.every((message) => ['user', 'assistant', 'system'].includes(message.role) && typeof message.content === 'string')) throw new Error('Messages must be a non-empty OpenAI-style message list.');
     if (!['Medium', 'High'].includes(quality)) throw new Error('Quality must be Medium or High.');
-    const upstream = await fetch(`${gatewayBaseUrl}/v1/chat/completions`, { method: 'POST', headers: { Authorization: `Bearer ${gatewayApiKey}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ provider: 'deepseek', quality, messages }), signal: AbortSignal.timeout(120_000) });
-    const body = await upstream.json().catch(() => ({}));
-    if (!upstream.ok) return sendJson(response, upstream.status, { error: body.error?.message || body.error || 'Gateway request failed.' });
-    return sendJson(response, 200, { content: responseText(body) });
+    return sendJson(response, 200, { content: await callGateway(messages, quality) });
   } catch (error) { return sendJson(response, 400, { error: error instanceof Error ? error.message : 'Chat request failed.' }); }
 });
 
