@@ -1,11 +1,22 @@
-import { useState } from 'react';
-import { Compass, Plus, SendHorizontal } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { Compass, Plus, SendHorizontal, Settings2 } from 'lucide-react';
 
 type Message = { id: string; role: 'user' | 'assistant'; text: string };
+type Theme = 'light' | 'dark' | 'system';
 
 export function App() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [theme, setTheme] = useState<Theme>(() => {
+    const saved = window.localStorage.getItem('campus-atlas-theme');
+    return saved === 'light' || saved === 'dark' || saved === 'system' ? saved : 'system';
+  });
+
+  useEffect(() => {
+    document.documentElement.dataset.theme = theme;
+    window.localStorage.setItem('campus-atlas-theme', theme);
+  }, [theme]);
 
   function newChat() {
     setMessages([]);
@@ -25,6 +36,7 @@ export function App() {
     <aside className="sidebar">
       <div className="brand"><Compass size={21} /><span>CampusAtlas</span></div>
       <nav aria-label="Conversation actions"><button className="new-chat" onClick={newChat}><Plus size={16} />New chat</button></nav>
+      <div className="sidebar-footer"><button className="icon-button" title="Settings" aria-label="Settings" onClick={() => setSettingsOpen(true)}><Settings2 size={18} /></button></div>
     </aside>
     <section className="conversation">
       <div className="transcript" aria-live="polite">
@@ -37,5 +49,6 @@ export function App() {
         <button type="submit" className="send" title="Send message" aria-label="Send message" disabled={!input.trim()}><SendHorizontal size={17} /></button>
       </form>
     </section>
+    {settingsOpen && <div className="dialog-backdrop" role="presentation" onMouseDown={() => setSettingsOpen(false)}><section className="settings-dialog" role="dialog" aria-modal="true" aria-labelledby="settings-title" onMouseDown={(event) => event.stopPropagation()}><p className="eyebrow">CAMPUSATLAS SETTINGS</p><h2 id="settings-title">Settings</h2><p>Choose how CampusAtlas appears on this device.</p><div className="theme-field"><span>Theme</span><div className="theme-options">{(['light', 'dark', 'system'] as Theme[]).map((option) => <button key={option} type="button" className={theme === option ? 'selected' : ''} onClick={() => setTheme(option)}>{option === 'light' ? 'Light' : option === 'dark' ? 'Dark' : 'System'}</button>)}</div></div><div className="dialog-actions"><button className="ghost-button" onClick={() => setSettingsOpen(false)}>Close</button></div></section></div>}
   </main>;
 }
