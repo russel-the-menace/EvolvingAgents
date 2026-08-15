@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "exports": { ".": "./src/index.tsx", "./styles.css": "./src/styles.css" },
-  "scripts": { "check": "tsc --noEmit" },
+  "scripts": { "check": "tsc --noEmit", "test": "node --test test/*.test.mjs" },
   "dependencies": { "lucide-react": "latest", "react": "latest", "react-markdown": "^10.1.0", "remark-gfm": "^4.0.1" },
   "devDependencies": { "@types/react": "latest", "typescript": "latest" }
 }
