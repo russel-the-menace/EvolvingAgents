@@ -54,39 +54,24 @@ async function relevantContext(query) {
   return sections.join('\n\n');
 }
 
+async function gatewayChat(messages, quality = 'Medium') {
+  const base = (process.env.GATEWAY_BASE_URL || 'https://feiwan.online').replace(/\/$/, '');
+  const response = await fetch(`${base}/v1/chat/completions`, { method: 'POST', headers: { Authorization: `Bearer ${process.env.GATEWAY_API_KEY || 'yeatom'}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ provider: 'deepseek', quality, messages }), signal: AbortSignal.timeout(120_000) });
+  const body = await response.json().catch(() => ({}));
+  const content = body?.choices?.[0]?.message?.content;
+  if (!response.ok || typeof content !== 'string') throw new Error(body.error?.message || body.error || `Gateway request failed (${response.status}).`);
+  return content;
+}
+
 async function streamDailyChat(session, response, query, model, dialogueContext = '') {
-  const apiKey = process.env.DEEPSEEK_API_KEY;
-  if (!apiKey) throw new Error('DEEPSEEK_API_KEY is not configured. Set it in the local .env file and restart the service.');
   const context = await relevantContext(query);
   const system = `You are MindClone, a long-term conversational partner. Help the user think, challenge weak assumptions when warranted, and express conclusions naturally. Distinguish source knowledge from the user's position. An understood external claim is available for reasoning but is not the user's belief. Never turn external or third-party material into the user's experience. Match the user's language.\n\n${dialogueContext}\n\n${context || 'No authorized long-term context is relevant yet.'}`;
-  const options = {
-    'deepseek-light': { model: 'deepseek-v4-flash', thinking: false },
-    'deepseek-medium': { model: 'deepseek-v4-flash', thinking: true },
-    'deepseek-high': { model: 'deepseek-v4-pro', thinking: false },
-    'deepseek-ultra': { model: 'deepseek-v4-pro', thinking: true },
-  };
-  const selected = options[model] || options['deepseek-light'];
-  const upstream = await fetch(`${(process.env.DEEPSEEK_BASE_URL || 'https://api.deepseek.com').replace(/\/$/, '')}/chat/completions`, {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ model: selected.model, stream: true, thinking: { type: selected.thinking ? 'enabled' : 'disabled' }, ...(selected.thinking ? { reasoning_effort: 'high' } : { temperature: 0.7 }), messages: [{ role: 'system', content: system }, ...session.messages.slice(-24).map(({ role, content }) => ({ role, content }))] }),
-  });
-  if (!upstream.ok || !upstream.body) throw new Error(`DeepSeek daily chat request failed (${upstream.status}).`);
-  const reader = upstream.body.getReader();
-  const decoder = new TextDecoder();
-  let answer = ''; let pending = '';
-  while (true) {
-    const { value, done } = await reader.read(); if (done) break;
-    pending += decoder.decode(value, { stream: true });
-    const lines = pending.split('\n'); pending = lines.pop() || '';
-    for (const line of lines) {
-      if (!line.startsWith('data:')) continue;
-      const data = line.slice(5).trim(); if (data === '[DONE]') continue;
-      try { const delta = JSON.parse(data).choices?.[0]?.delta?.content; if (typeof delta === 'string') { answer += delta; response.write(`data: ${JSON.stringify({ delta })}\n\n`); } } catch { /* provider keep-alive */ }
-    }
-  }
+  const answer = await gatewayChat([{ role: 'system', content: system }, ...session.messages.slice(-24).map(({ role, content }) => ({ role, content }))], model === 'deepseek-high' ? 'High' : 'Medium');
+  response.write(`data: ${JSON.stringify({ delta: answer })}\n\n`);
   return answer;
 }
+
+app.post('/api/model/chat', async (request, response, next) => { try { response.json({ content: await gatewayChat(request.body.messages, request.body.quality === 'High' ? 'High' : 'Medium') }); } catch (error) { next(error); } });
 
 app.get('/api/health', (_, response) => response.json({ status: 'ok', store: 'sqlite', schema: 1 }));
 

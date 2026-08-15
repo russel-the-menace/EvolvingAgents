@@ -37,7 +37,7 @@ export const memoryApi = {
   updateSession: (sessionId: string, payload: Partial<Pick<DailySession, 'title' | 'pinned'>>) =>
     request<{ session: DailySession }>(`/chat/sessions/${sessionId}`, { method: 'PATCH', body: JSON.stringify(payload) }),
   deleteSession: (sessionId: string) => request<void>(`/chat/sessions/${sessionId}`, { method: 'DELETE' }),
-  streamChat: async (sessionId: string, content: string, onDelta: (delta: string) => void, signal: AbortSignal, replaceFromMessageId?: string, model: DailyModel = 'deepseek-light') => {
+  streamChat: async (sessionId: string, content: string, onDelta: (delta: string) => void, signal: AbortSignal, replaceFromMessageId?: string, model: DailyModel = 'deepseek-medium') => {
     const response = await fetch(`/api/chat/sessions/${sessionId}/stream`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, signal, body: JSON.stringify({ content, replaceFromMessageId, model }),
     });

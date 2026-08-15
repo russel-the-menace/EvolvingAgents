@@ -16,6 +16,7 @@
     "sync:reference": "./scripts/sync-jd2resume-reference.sh"
   },
   "dependencies": {
+    "@evolving-agents/chat-ui": "0.1.0",
     "@evolving-agents/learning-engine": "0.1.0",
     "@vitejs/plugin-react": "latest",
     "dotenv": "latest",

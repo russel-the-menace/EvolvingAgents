@@ -21,14 +21,11 @@ function extractionPrompt(source, chunk, context = {}) {
 function createDeepSeekExtractor() {
   return {
     async extract({ source, chunk, context }) {
-      const apiKey = process.env.DEEPSEEK_API_KEY;
-      if (!apiKey) throw new Error('DEEPSEEK_API_KEY is not configured. Set it in the local .env file and restart the service.');
-      const response = await fetch(`${(process.env.DEEPSEEK_BASE_URL || 'https://api.deepseek.com').replace(/\/$/, '')}/chat/completions`, {
+      const response = await fetch(`${(process.env.GATEWAY_BASE_URL || 'https://feiwan.online').replace(/\/$/, '')}/v1/chat/completions`, {
         method: 'POST',
-        headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+        headers: { Authorization: `Bearer ${process.env.GATEWAY_API_KEY || 'yeatom'}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          model: process.env.DEEPSEEK_MODEL || 'deepseek-chat', temperature: 0.1,
-          response_format: { type: 'json_object' }, messages: [{ role: 'user', content: extractionPrompt(source, chunk, context) }],
+          provider: 'deepseek', quality: 'High', messages: [{ role: 'user', content: extractionPrompt(source, chunk, context) }],
         }),
       });
       if (!response.ok) throw new Error(`DeepSeek extraction request failed (${response.status}).`);

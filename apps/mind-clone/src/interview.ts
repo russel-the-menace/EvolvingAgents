@@ -51,19 +51,11 @@ export async function streamCandidateAnswer(
     { role: 'system', content: systemPrompt(packet, plan, claims) },
     ...messages.map((message) => ({ role: message.role === 'interviewer' ? 'user' : 'assistant', content: message.content })),
   ];
-  const response = await fetch(`${settings.baseUrl.replace(/\/$/, '')}/chat/completions`, {
+  const response = await fetch('/api/model/chat', {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, signal,
-    body: JSON.stringify({ model: settings.model, messages: requestMessages, temperature: 0.35, stream: true }),
+    body: JSON.stringify({ quality: 'High', messages: requestMessages }),
   });
-  if (!response.ok || !response.body) throw new Error(`The local model did not respond (${response.status}). Check the model service and settings.`);
-  const reader = response.body.getReader(); const decoder = new TextDecoder(); let pending = '';
-  while (true) {
-    const { value, done } = await reader.read(); if (done) break;
-    pending += decoder.decode(value, { stream: true }); const lines = pending.split('\n'); pending = lines.pop() ?? '';
-    for (const line of lines) {
-      if (!line.startsWith('data:')) continue;
-      const data = line.slice(5).trim(); if (data === '[DONE]') return;
-      try { const delta = JSON.parse(data).choices?.[0]?.delta?.content; if (typeof delta === 'string') onDelta(delta); } catch { /* provider keep-alive */ }
-    }
-  }
+  const body = await response.json();
+  if (!response.ok || typeof body.content !== 'string') throw new Error(body.error || `Gateway did not respond (${response.status}).`);
+  onDelta(body.content);
 }
