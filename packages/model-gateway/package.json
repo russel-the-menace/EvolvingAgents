@@ -1,0 +1,9 @@
+{
+  "name": "@evolving-agents/model-gateway",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": "./src/index.mjs",
+  "scripts": { "check": "node --check src/*.mjs test/*.test.mjs", "test": "node --test test/*.test.mjs" },
+  "engines": { "node": ">=22.5" }
+}

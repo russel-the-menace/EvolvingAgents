@@ -18,28 +18,19 @@ function extractionPrompt(source, chunk, context = {}) {
   return `Extract atomic claims from this chunk of user-owned material. Use only supported information and distinguish experience, viewpoint, preference, value, knowledge, and expression samples. In conversation records, extract personal claims only from text explicitly labeled User; assistant text is context and must never become a user claim. Return strict JSON: {"claims":[{"kind":"experience|viewpoint|preference|value|knowledge|expression","owner":"user","title":"short title","proposition":"complete candidate claim","tags":["tag"],"sourceQuote":"direct supporting quote from the user","confidence":0.0}]}. ${authority} ${resolution} Return at most 12 items. Chunk:\n${chunk.text}`;
 }
 
-function createDeepSeekExtractor() {
+function createDeepSeekExtractor(gateway) {
   return {
     async extract({ source, chunk, context }) {
-      const response = await fetch(`${(process.env.GATEWAY_BASE_URL || 'https://feiwan.online').replace(/\/$/, '')}/v1/chat/completions`, {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${process.env.GATEWAY_API_KEY || 'yeatom'}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          provider: 'deepseek', quality: 'High', messages: [{ role: 'user', content: extractionPrompt(source, chunk, context) }],
-        }),
-      });
-      if (!response.ok) throw new Error(`DeepSeek extraction request failed (${response.status}).`);
-      const payload = await response.json();
-      const parsed = JSON.parse(payload.choices?.[0]?.message?.content || '{}');
+      const parsed = JSON.parse(await gateway.complete([{ role: 'user', content: extractionPrompt(source, chunk, context) }], { quality: 'High' }));
       return Array.isArray(parsed.claims) ? parsed.claims : [];
     },
   };
 }
 
-export function createMindCloneLearningEngine(repository) {
+export function createMindCloneLearningEngine(repository, gateway) {
   return createLearningEngine({
     store: repository,
-    extractor: createDeepSeekExtractor(),
+    extractor: createDeepSeekExtractor(gateway),
     chunking: { maxChars: 6000, overlapChars: 300 },
     policy: {
       mapProposal: ({ proposal, source, chunk }) => {

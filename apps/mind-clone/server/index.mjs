@@ -9,6 +9,7 @@ import { openDatabase } from './infrastructure/database.mjs';
 import { extractDouyinShare, resolveDouyinLink, transcribeShortVideo } from './infrastructure/video-transcription.mjs';
 import { createMindCloneLearningEngine } from './adapters/mindclone-learning.mjs';
 import { applyInquiryReply, classifyInquiryReply, inquiryDialogueContext } from './domain/inquiry-dialogue.mjs';
+import { createModelGateway } from '@evolving-agents/model-gateway';
 
 const app = express();
 const port = Number(process.env.PORT || 5270);
@@ -16,7 +17,8 @@ const repository = openDatabase(
   process.env.MINDCLONE_DB_PATH || join(process.cwd(), 'data', 'mindclone.sqlite'),
   process.env.MINDCLONE_LEGACY_STORE_PATH || join(process.cwd(), 'data', 'memory-store.json'),
 );
-const learningEngine = createMindCloneLearningEngine(repository);
+const gateway = createModelGateway({ baseUrl: process.env.GATEWAY_BASE_URL || 'https://feiwan.online', apiKey: process.env.GATEWAY_API_KEY || 'yeatom' });
+const learningEngine = createMindCloneLearningEngine(repository, gateway);
 app.use(express.json({ limit: '50mb' }));
 
 function clip(value, length = 720) {
@@ -54,24 +56,15 @@ async function relevantContext(query) {
   return sections.join('\n\n');
 }
 
-async function gatewayChat(messages, quality = 'Medium') {
-  const base = (process.env.GATEWAY_BASE_URL || 'https://feiwan.online').replace(/\/$/, '');
-  const response = await fetch(`${base}/v1/chat/completions`, { method: 'POST', headers: { Authorization: `Bearer ${process.env.GATEWAY_API_KEY || 'yeatom'}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ provider: 'deepseek', quality, messages }), signal: AbortSignal.timeout(120_000) });
-  const body = await response.json().catch(() => ({}));
-  const content = body?.choices?.[0]?.message?.content;
-  if (!response.ok || typeof content !== 'string') throw new Error(body.error?.message || body.error || `Gateway request failed (${response.status}).`);
-  return content;
-}
-
 async function streamDailyChat(session, response, query, model, dialogueContext = '') {
   const context = await relevantContext(query);
   const system = `You are MindClone, a long-term conversational partner. Help the user think, challenge weak assumptions when warranted, and express conclusions naturally. Distinguish source knowledge from the user's position. An understood external claim is available for reasoning but is not the user's belief. Never turn external or third-party material into the user's experience. Match the user's language.\n\n${dialogueContext}\n\n${context || 'No authorized long-term context is relevant yet.'}`;
-  const answer = await gatewayChat([{ role: 'system', content: system }, ...session.messages.slice(-24).map(({ role, content }) => ({ role, content }))], model === 'deepseek-high' ? 'High' : 'Medium');
+  const answer = await gateway.complete([{ role: 'system', content: system }, ...session.messages.slice(-24).map(({ role, content }) => ({ role, content }))], { quality: model === 'deepseek-high' ? 'High' : 'Medium' });
   response.write(`data: ${JSON.stringify({ delta: answer })}\n\n`);
   return answer;
 }
 
-app.post('/api/model/chat', async (request, response, next) => { try { response.json({ content: await gatewayChat(request.body.messages, request.body.quality === 'High' ? 'High' : 'Medium') }); } catch (error) { next(error); } });
+app.post('/api/model/chat', async (request, response, next) => { try { response.json({ content: await gateway.complete(request.body.messages, { quality: request.body.quality === 'High' ? 'High' : 'Medium' }) }); } catch (error) { next(error); } });
 
 app.get('/api/health', (_, response) => response.json({ status: 'ok', store: 'sqlite', schema: 1 }));
 

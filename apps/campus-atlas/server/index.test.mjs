@@ -1,11 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { parseJsonResponse, planningPrompt, responseText, shouldLearnConversation } from './index.mjs';
-
-test('extracts the OpenAI-compatible assistant response returned by custom-api-gateway', () => {
-  assert.equal(responseText({ choices: [{ message: { content: 'Policy answer' } }] }), 'Policy answer');
-  assert.throws(() => responseText({ choices: [] }), /no assistant message/);
-});
+import { parseJsonResponse, planningPrompt, shouldLearnConversation } from './index.mjs';
 
 test('planning prompt requires evidence-grounded output', () => {
   const prompt = planningPrompt('安排人工智能竞赛', [{ citation: 'E1', evidence: '报名截止 2027-04-30' }]);

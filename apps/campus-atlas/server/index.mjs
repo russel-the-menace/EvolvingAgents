@@ -4,10 +4,12 @@ import { DatabaseSync } from 'node:sqlite';
 import { createSqliteLearningStore } from '@evolving-agents/learning-engine';
 import { createCompetitionPlanningEngine } from '../src/learning.mjs';
 import { createChatHistoryStore } from '@evolving-agents/chat-history';
+import { createModelGateway } from '@evolving-agents/model-gateway';
 
 const port = Number(process.env.CAMPUS_ATLAS_API_PORT || 5445);
 const gatewayBaseUrl = (process.env.GATEWAY_BASE_URL || 'https://feiwan.online').replace(/\/$/, '');
 const gatewayApiKey = process.env.GATEWAY_API_KEY || 'yeatom';
+const gateway = createModelGateway({ baseUrl: gatewayBaseUrl, apiKey: gatewayApiKey });
 const databasePath = process.env.CAMPUS_ATLAS_DB || 'data/campus-atlas.sqlite';
 mkdirSync(databasePath.slice(0, databasePath.lastIndexOf('/')) || '.', { recursive: true });
 const db = new DatabaseSync(databasePath);
@@ -15,12 +17,6 @@ db.exec('PRAGMA foreign_keys = ON;');
 const store = createSqliteLearningStore(db);
 const chatHistory = createChatHistoryStore(db);
 const knowledgeEngine = createCompetitionPlanningEngine({ store, extractor: { async extract({ source }) { return source.metadata.proposals || []; } } });
-
-export function responseText(body) {
-  const content = body?.choices?.[0]?.message?.content;
-  if (typeof content === 'string' && content.trim()) return content;
-  throw new Error('Gateway returned no assistant message.');
-}
 
 export function planningPrompt(question, evidence) {
   return `你是 CampusAtlas 的大学生竞赛规划助手。只能根据下方已检索到的证据回答，不要把推测写成事实。输出：1) 推荐的竞赛时间表；2) 每项准备任务和截止日期；3) 每项建议对应的证据引用；4) 信息不足或冲突时列出待确认问题。区分“官方事实”“用户资料”和“模型建议”。\n\n用户目标：${question}\n\n证据：\n${JSON.stringify(evidence).slice(0, 60000)}`;
@@ -44,10 +40,7 @@ export function shouldLearnConversation(text) {
 }
 
 async function callGateway(messages, quality = 'Medium') {
-  const upstream = await fetch(`${gatewayBaseUrl}/v1/chat/completions`, { method: 'POST', headers: { Authorization: `Bearer ${gatewayApiKey}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ provider: 'deepseek', quality, messages }), signal: AbortSignal.timeout(120_000) });
-  const body = await upstream.json().catch(() => ({}));
-  if (!upstream.ok) { const error = new Error(body.error?.message || body.error || 'Gateway request failed.'); error.status = upstream.status; throw error; }
-  return responseText(body);
+  return gateway.complete(messages, { quality });
 }
 
 function sendJson(response, status, body) { response.writeHead(status, { 'Content-Type': 'application/json' }); response.end(JSON.stringify(body)); }
