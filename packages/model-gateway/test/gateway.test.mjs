@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { createModelGateway, responseDelta, responseText } from '../src/index.mjs';
+import { createModelGateway, createOpenAICompatibleGateway, responseDelta, responseText } from '../src/index.mjs';
 
 test('extracts an OpenAI-compatible assistant response', () => {
   assert.equal(responseText({ choices: [{ message: { content: 'Policy answer' } }] }), 'Policy answer');
@@ -22,6 +22,18 @@ test('sends the configured provider, quality, and bearer token', async () => {
   assert.equal(request.url, 'https://gateway.example/v1/chat/completions');
   assert.equal(request.options.headers.Authorization, 'Bearer secret');
   assert.deepEqual(JSON.parse(request.options.body), { provider: 'deepseek', quality: 'High', messages: [{ role: 'user', content: 'hello' }] });
+});
+
+test('sends OpenAI-compatible local model requests with a model name', async () => {
+  let request;
+  const gateway = createOpenAICompatibleGateway({ baseUrl: 'http://127.0.0.1:11434/v1/', model: 'qwen3:8b', fetchImpl: async (url, options) => {
+    request = { url, options };
+    return { ok: true, json: async () => ({ choices: [{ message: { content: 'local answer' } }] }) };
+  } });
+  assert.equal(await gateway.complete([{ role: 'user', content: 'hello' }]), 'local answer');
+  assert.equal(request.url, 'http://127.0.0.1:11434/v1/chat/completions');
+  assert.equal(request.options.headers.Authorization, 'Bearer local');
+  assert.deepEqual(JSON.parse(request.options.body), { model: 'qwen3:8b', messages: [{ role: 'user', content: 'hello' }], stream: false });
 });
 
 test('preserves gateway status and error messages', async () => {

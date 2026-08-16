@@ -10,7 +10,7 @@ import { extractDouyinShare, resolveDouyinLink, transcribeShortVideo } from './i
 import { createMindCloneLearningEngine } from './adapters/mindclone-learning.mjs';
 import { applyInquiryReply, classifyInquiryReply, inquiryDialogueContext } from './domain/inquiry-dialogue.mjs';
 import { compileTranscript, contextAuditText } from './domain/context-compiler.mjs';
-import { createModelGateway } from '@evolving-agents/model-gateway';
+import { createModelGateway, createOpenAICompatibleGateway } from '@evolving-agents/model-gateway';
 import { createChatRuntime } from '@evolving-agents/chat-runtime';
 
 const app = express();
@@ -20,6 +20,9 @@ const repository = openDatabase(
   process.env.MINDCLONE_LEGACY_STORE_PATH || join(process.cwd(), 'data', 'memory-store.json'),
 );
 const gateway = createModelGateway({ baseUrl: process.env.GATEWAY_BASE_URL || 'https://feiwan.online', apiKey: process.env.GATEWAY_API_KEY || 'yeatom' });
+const localModel = process.env.LOCAL_MODEL_BASE_URL && process.env.LOCAL_MODEL_NAME
+  ? createOpenAICompatibleGateway({ baseUrl: process.env.LOCAL_MODEL_BASE_URL, model: process.env.LOCAL_MODEL_NAME, apiKey: process.env.LOCAL_MODEL_API_KEY || 'local' })
+  : null;
 const chatRuntime = createChatRuntime(repository, { titleLength: 28 });
 const learningEngine = createMindCloneLearningEngine(repository, gateway);
 app.use(express.json({ limit: '50mb' }));
@@ -69,7 +72,12 @@ async function streamDailyChat(session, response, query, model, dialogueContext 
   });
 }
 
-app.post('/api/model/chat', async (request, response, next) => { try { response.json({ content: await gateway.complete(request.body.messages, { quality: request.body.quality === 'High' ? 'High' : 'Medium' }) }); } catch (error) { next(error); } });
+app.post('/api/model/chat', async (request, response, next) => {
+  try {
+    if (!localModel) return response.status(503).json({ error: 'Local formal model is not configured. Set LOCAL_MODEL_BASE_URL and LOCAL_MODEL_NAME.' });
+    response.json({ content: await localModel.complete(request.body.messages) });
+  } catch (error) { next(error); }
+});
 
 app.get('/api/health', (_, response) => response.json({ status: 'ok', store: 'sqlite', schema: 1 }));
 

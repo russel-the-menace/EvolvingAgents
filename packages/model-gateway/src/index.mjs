@@ -77,3 +77,53 @@ export function createModelGateway({ baseUrl, apiKey, provider = 'deepseek', tim
     },
   };
 }
+
+export function createOpenAICompatibleGateway({ baseUrl, model, apiKey = 'local', timeoutMs = 120_000, fetchImpl = fetch }) {
+  if (!baseUrl || !model) throw new Error('OpenAI-compatible baseUrl and model are required.');
+  const root = baseUrl.replace(/\/$/, '');
+  const endpoint = `${root}/chat/completions`;
+  const headers = { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' };
+  const request = (messages, stream, signal) => fetchImpl(endpoint, {
+    method: 'POST', headers, body: JSON.stringify({ model, messages, stream }), signal: requestSignal(signal, timeoutMs),
+  });
+  return {
+    async complete(messages, { signal } = {}) {
+      if (!Array.isArray(messages) || !messages.length) throw new Error('Gateway messages must be a non-empty array.');
+      const response = await request(messages, false, signal);
+      if (!response.ok) throw await gatewayError(response);
+      return responseText(await response.json().catch(() => ({})));
+    },
+    async stream(messages, { signal, onDelta = () => {} } = {}) {
+      if (!Array.isArray(messages) || !messages.length) throw new Error('Gateway messages must be a non-empty array.');
+      const response = await request(messages, true, signal);
+      if (!response.ok) throw await gatewayError(response);
+      if (!response.body) throw new Error('Gateway returned no response stream.');
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let pending = '';
+      let answer = '';
+      const consume = (line) => {
+        if (!line.startsWith('data:')) return false;
+        const data = line.slice(5).trim();
+        if (!data) return false;
+        if (data === '[DONE]') return true;
+        const body = JSON.parse(data);
+        if (body.error) throw new Error(body.error?.message || body.error);
+        const delta = responseDelta(body);
+        if (delta) { answer += delta; onDelta(delta); }
+        return false;
+      };
+      while (true) {
+        const { value, done } = await reader.read();
+        pending += decoder.decode(value, { stream: !done });
+        const lines = pending.split(/\r?\n/);
+        pending = lines.pop() ?? '';
+        for (const line of lines) if (consume(line)) return answer;
+        if (done) break;
+      }
+      if (pending && consume(pending)) return answer;
+      if (!answer.trim()) throw new Error('Gateway returned no assistant message.');
+      return answer;
+    },
+  };
+}
