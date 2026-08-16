@@ -1,9 +1,11 @@
-import { Children, isValidElement, useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
+import { Children, isValidElement, useCallback, useEffect, useLayoutEffect, useReducer, useRef, useState, type ReactNode } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { ArrowDown, ChevronDown, Copy, MoreHorizontal, PanelLeftClose, Pencil, Pin, Plus, SendHorizontal, Settings2, Trash2 } from 'lucide-react';
 import { normalizeChatMarkdown } from './markdown';
+import { reduceChatDrafts } from './chat-state';
 export { normalizeChatMarkdown } from './markdown';
+export { reduceChatDrafts } from './chat-state';
 
 export type ChatMessage = { id: string; role: 'user' | 'assistant'; content: string; createdAt?: string };
 export type ChatSession = { id: string; title: string; pinned?: boolean; createdAt?: string; updatedAt?: string; messages: ChatMessage[] };
@@ -50,12 +52,17 @@ export function useChatController<Session extends ChatSession>(adapter: ChatAdap
   const [sessions, setSessions] = useState<Session[]>([]);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [newChatActive, setNewChatActive] = useState(false);
-  const [input, setInput] = useState('');
-  const [streaming, setStreaming] = useState(false);
+  const [inputs, setInputs] = useState<Record<string, string>>({});
   const [error, setError] = useState('');
-  const [draftMessages, setDraftMessages] = useState<ChatMessage[]>([]);
+  const [drafts, dispatchDraft] = useReducer(reduceChatDrafts, {});
+  const inputKey = newChatActive || !activeSessionId ? '__new__' : activeSessionId;
+  const input = inputs[inputKey] ?? '';
+  const setInput = (value: string) => setInputs((current) => ({ ...current, [inputKey]: value }));
   const activeSession = sessions.find((session) => session.id === activeSessionId) ?? null;
-  const messages = draftMessages.length ? draftMessages : newChatActive ? [] : activeSession?.messages ?? [];
+  const activeDraft = activeSessionId ? drafts[activeSessionId] : null;
+  const messages = activeDraft?.messages ?? (newChatActive ? [] : activeSession?.messages ?? []);
+  const streaming = activeDraft?.streaming ?? false;
+  const activeError = activeDraft?.error || error;
 
   const refreshSessions = useCallback(async (preferredId?: string) => {
     try {
@@ -66,12 +73,12 @@ export function useChatController<Session extends ChatSession>(adapter: ChatAdap
   }, [adapter]);
 
   useEffect(() => { void refreshSessions(); }, [refreshSessions]);
-  function newChat() { setDraftMessages([]); setNewChatActive(true); setActiveSessionId(null); setInput(''); setError(''); }
-  function selectSession(id: string) { setDraftMessages([]); setNewChatActive(false); setActiveSessionId(id); setError(''); }
+  function newChat() { setInputs((current) => ({ ...current, __new__: '' })); setNewChatActive(true); setActiveSessionId(null); setError(''); }
+  function selectSession(id: string) { setNewChatActive(false); setActiveSessionId(id); setError(''); }
 
   async function send(contentOverride?: string, replaceFromMessageId?: string) {
     const content = (contentOverride ?? input).trim();
-    if (!content || streaming) return;
+    if (!content) return;
     let sessionId = newChatActive ? null : activeSessionId;
     if (!sessionId) {
       try {
@@ -82,21 +89,21 @@ export function useChatController<Session extends ChatSession>(adapter: ChatAdap
         setNewChatActive(false);
       } catch (caught) { setError(caught instanceof Error ? caught.message : 'Unable to create conversation.'); return; }
     }
+    if (drafts[sessionId]?.streaming) return;
     const createdAt = new Date().toISOString();
     const userMessage: ChatMessage = { id: crypto.randomUUID(), role: 'user', content, createdAt };
     const answerMessage: ChatMessage = { id: crypto.randomUUID(), role: 'assistant', content: '', createdAt };
     const branchIndex = replaceFromMessageId ? activeSession?.messages.findIndex((message) => message.id === replaceFromMessageId) ?? -1 : -1;
     const branchMessages = branchIndex >= 0 ? activeSession?.messages.slice(0, branchIndex) ?? [] : activeSession?.messages ?? [];
-    setDraftMessages([...branchMessages, userMessage, answerMessage]);
-    setInput(''); setError(''); setStreaming(true);
+    dispatchDraft({ type: 'start', sessionId, messages: [...branchMessages, userMessage, answerMessage] });
+    setInputs((current) => ({ ...current, [inputKey]: '', [sessionId]: '' })); setError('');
     try {
-      await adapter.send({ sessionId, content, model, replaceFromMessageId, signal: new AbortController().signal, onDelta: (delta) => setDraftMessages((current) => current.map((message) => message.id === answerMessage.id ? { ...message, content: message.content + delta } : message)) });
-      await refreshSessions(sessionId);
-      setDraftMessages([]);
+      await adapter.send({ sessionId, content, model, replaceFromMessageId, signal: new AbortController().signal, onDelta: (delta) => dispatchDraft({ type: 'delta', sessionId, messageId: answerMessage.id, delta }) });
+      await refreshSessions();
+      dispatchDraft({ type: 'finish', sessionId });
     } catch (caught) {
-      setDraftMessages((current) => current.filter((message) => message.id !== answerMessage.id || message.content));
-      setError(caught instanceof Error ? caught.message : 'Chat request failed.');
-    } finally { setStreaming(false); }
+      dispatchDraft({ type: 'fail', sessionId, messageId: answerMessage.id, error: caught instanceof Error ? caught.message : 'Chat request failed.' });
+    }
   }
 
   async function updateSession(session: Session, values: Partial<Pick<Session, 'title' | 'pinned'>>) {
@@ -105,11 +112,11 @@ export function useChatController<Session extends ChatSession>(adapter: ChatAdap
   }
 
   async function deleteSession(session: Session) {
-    try { await adapter.deleteSession(session.id); if (activeSessionId === session.id) newChat(); await refreshSessions(); }
+    try { await adapter.deleteSession(session.id); dispatchDraft({ type: 'remove', sessionId: session.id }); setInputs((current) => { const { [session.id]: _, ...remaining } = current; return remaining; }); if (activeSessionId === session.id) newChat(); await refreshSessions(); }
     catch (caught) { setError(caught instanceof Error ? caught.message : 'Unable to delete conversation.'); }
   }
 
-  return { sessions, activeSessionId, newChatActive, input, streaming, error, messages, setInput, setError, newChat, selectSession, refreshSessions, send, updateSession, deleteSession };
+  return { sessions, activeSessionId, newChatActive, input, streaming, error: activeError, messages, setInput, setError, newChat, selectSession, refreshSessions, send, updateSession, deleteSession };
 }
 
 export function useChatPreferences<Model extends string>({ themeKey, modelKey, sidebarWidthKey, defaultTheme, defaultModel, parseModel }: {
