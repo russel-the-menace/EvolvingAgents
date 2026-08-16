@@ -46,6 +46,7 @@ async function callGateway(messages, quality = 'Medium') {
 }
 
 function sendJson(response, status, body) { response.writeHead(status, { 'Content-Type': 'application/json' }); response.end(JSON.stringify(body)); }
+function sendEvent(response, body) { response.write(`data: ${typeof body === 'string' ? body : JSON.stringify(body)}\n\n`); }
 
 async function requestBody(request) {
   let raw = '';
@@ -53,7 +54,7 @@ async function requestBody(request) {
   return JSON.parse(raw);
 }
 
-async function createCampusAnswer(messages, quality) {
+async function createCampusAnswer(messages, quality, stream) {
   if (!Array.isArray(messages) || !messages.length || !messages.every((message) => ['user', 'assistant', 'system'].includes(message.role) && typeof message.content === 'string')) throw new Error('Messages must be a non-empty OpenAI-style message list.');
   if (!['Medium', 'High'].includes(quality)) throw new Error('Quality must be Medium or High.');
   const latestUser = [...messages].reverse().find((message) => message.role === 'user');
@@ -68,7 +69,9 @@ async function createCampusAnswer(messages, quality) {
   }
   const results = latestUser ? await knowledgeEngine.retrieve(latestUser.content, { limit: 20, context: { accessScopes: ['public', 'private_profile'] } }) : [];
   const evidence = knowledgeEngine.buildEvidenceContext(results);
-  const content = await callGateway([{ role: 'system', content: chatEvidencePrompt(evidence) }, ...messages], quality);
+  const gatewayMessages = [{ role: 'system', content: chatEvidencePrompt(evidence) }, ...messages];
+  stream?.onReady();
+  const content = stream ? await gateway.stream(gatewayMessages, { quality, onDelta: stream.onDelta }) : await callGateway(gatewayMessages, quality);
   return { content, evidence };
 }
 
@@ -123,13 +126,23 @@ const server = createServer(async (request, response) => {
       return sendJson(response, 200, { plan, evidence });
     } catch (error) { return sendJson(response, error.status || 400, { error: error instanceof Error ? error.message : 'Planning request failed.' }); }
   }
-  if (request.method !== 'POST' || request.url !== '/api/chat') return sendJson(response, 404, { error: 'Not found.' });
+  const streamingChat = request.method === 'POST' && request.url === '/api/chat/stream';
+  if (request.method !== 'POST' || (!streamingChat && request.url !== '/api/chat')) return sendJson(response, 404, { error: 'Not found.' });
   if (!gatewayBaseUrl || !gatewayApiKey) return sendJson(response, 503, { error: 'Gateway is not configured. Set GATEWAY_BASE_URL and GATEWAY_API_KEY in .env.' });
   try {
     const { sessionId, content, quality = process.env.DEEPSEEK_QUALITY || 'Medium' } = await requestBody(request);
-    const result = await chatRuntime.run({ sessionId, content, createAnswer: ({ messages }) => createCampusAnswer(messages, quality) });
+    const stream = streamingChat ? {
+      onReady: () => response.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive' }),
+      onDelta: (delta) => sendEvent(response, { delta }),
+    } : null;
+    const result = await chatRuntime.run({ sessionId, content, createAnswer: ({ messages }) => createCampusAnswer(messages, quality, stream) });
+    if (streamingChat) { sendEvent(response, '[DONE]'); return response.end(); }
     return sendJson(response, 200, result);
-  } catch (error) { return sendJson(response, error.status || 400, { error: error instanceof Error ? error.message : 'Chat request failed.' }); }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Chat request failed.';
+    if (response.headersSent) { sendEvent(response, { error: message }); sendEvent(response, '[DONE]'); return response.end(); }
+    return sendJson(response, error.status || 400, { error: message });
+  }
 });
 
 if (process.argv[1] && import.meta.url === `file://${process.argv[1]}`) server.listen(port, '127.0.0.1', () => console.log(`CampusAtlas API listening on http://127.0.0.1:${port}`));

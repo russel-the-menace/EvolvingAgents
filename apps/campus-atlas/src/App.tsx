@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Compass, PanelLeftOpen } from 'lucide-react';
-import { ChatConversation, ChatSidebar, useChatController, useChatPreferences, type ChatAdapter, type ChatTheme } from '@evolving-agents/chat-ui';
+import { ChatConversation, ChatSidebar, readChatStream, useChatController, useChatPreferences, type ChatAdapter, type ChatTheme } from '@evolving-agents/chat-ui';
 
 type Message = { id: string; role: 'user' | 'assistant'; content: string; text?: string; createdAt?: string };
 type Session = { id: string; title: string; pinned?: boolean; updatedAt?: string; messages: Message[] };
@@ -26,9 +26,8 @@ const chatAdapter: ChatAdapter<Session> = {
   updateSession: async (sessionId, values) => (await readApiResponse(await fetch(`/api/chat/sessions/${sessionId}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(values) }))).session,
   deleteSession: async (sessionId) => { await readApiResponse(await fetch(`/api/chat/sessions/${sessionId}`, { method: 'DELETE' })); },
   send: async ({ sessionId, content, model, signal, onDelta }) => {
-    const body = await readApiResponse(await fetch('/api/chat', { method: 'POST', headers: { 'Content-Type': 'application/json' }, signal, body: JSON.stringify({ quality: model, sessionId, content }) }));
-    if (!body.content) throw new Error('CampusAtlas API returned no assistant content.');
-    onDelta(body.content);
+    const response = await fetch('/api/chat/stream', { method: 'POST', headers: { 'Content-Type': 'application/json' }, signal, body: JSON.stringify({ quality: model, sessionId, content }) });
+    await readChatStream(response, onDelta);
   },
 };
 

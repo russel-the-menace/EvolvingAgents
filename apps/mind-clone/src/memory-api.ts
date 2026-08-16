@@ -1,4 +1,5 @@
 import type { AnswerPlan, Claim, DailyModel, DailySession, InterviewPacket, MemoryDocument } from './types';
+import { readChatStream } from '@evolving-agents/chat-ui';
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`/api${path}`, {
@@ -41,25 +42,6 @@ export const memoryApi = {
     const response = await fetch(`/api/chat/sessions/${sessionId}/stream`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, signal, body: JSON.stringify({ content, replaceFromMessageId, model }),
     });
-    if (!response.ok || !response.body) {
-      const payload = await response.json().catch(() => null);
-      throw new Error(payload?.error || `Daily chat service error (${response.status})`);
-    }
-    const reader = response.body.getReader();
-    const decoder = new TextDecoder();
-    let pending = '';
-    while (true) {
-      const { value, done } = await reader.read();
-      if (done) break;
-      pending += decoder.decode(value, { stream: true });
-      const lines = pending.split('\n');
-      pending = lines.pop() ?? '';
-      for (const line of lines) {
-        if (!line.startsWith('data:')) continue;
-        const data = line.slice(5).trim();
-        if (data === '[DONE]') return;
-        try { const delta = JSON.parse(data).delta; if (typeof delta === 'string') onDelta(delta); } catch { /* Keep-alive. */ }
-      }
-    }
+    await readChatStream(response, onDelta);
   },
 };

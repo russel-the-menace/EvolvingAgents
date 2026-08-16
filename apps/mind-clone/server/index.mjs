@@ -61,9 +61,10 @@ async function relevantContext(query) {
 async function streamDailyChat(session, response, query, model, dialogueContext = '') {
   const context = await relevantContext(query);
   const system = `You are MindClone, a long-term conversational partner. Help the user think, challenge weak assumptions when warranted, and express conclusions naturally. Distinguish source knowledge from the user's position. An understood external claim is available for reasoning but is not the user's belief. Never turn external or third-party material into the user's experience. Match the user's language.\n\n${dialogueContext}\n\n${context || 'No authorized long-term context is relevant yet.'}`;
-  const answer = await gateway.complete([{ role: 'system', content: system }, ...session.messages.slice(-24).map(({ role, content }) => ({ role, content }))], { quality: model === 'deepseek-high' ? 'High' : 'Medium' });
-  response.write(`data: ${JSON.stringify({ delta: answer })}\n\n`);
-  return answer;
+  return gateway.stream([{ role: 'system', content: system }, ...session.messages.slice(-24).map(({ role, content }) => ({ role, content }))], {
+    quality: model === 'deepseek-high' ? 'High' : 'Medium',
+    onDelta: (delta) => response.write(`data: ${JSON.stringify({ delta })}\n\n`),
+  });
 }
 
 app.post('/api/model/chat', async (request, response, next) => { try { response.json({ content: await gateway.complete(request.body.messages, { quality: request.body.quality === 'High' ? 'High' : 'Medium' }) }); } catch (error) { next(error); } });
@@ -253,7 +254,11 @@ app.post('/api/chat/sessions/:id/stream', async (request, response, next) => {
     });
     response.write('data: [DONE]\n\n'); response.end();
     return result;
-  } catch (error) { next(error); }
+  } catch (error) {
+    if (!response.headersSent) return next(error);
+    response.write(`data: ${JSON.stringify({ error: error instanceof Error ? error.message : 'Chat request failed.' })}\n\n`);
+    response.write('data: [DONE]\n\n'); response.end();
+  }
 });
 
 app.delete('/api/chat/sessions/:id', (request, response) => { repository.deleteSession(request.params.id); response.status(204).end(); });
