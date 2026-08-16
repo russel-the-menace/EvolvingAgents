@@ -1,6 +1,10 @@
 import 'dotenv/config';
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import express from 'express';
 import { allowedAuthorization, assertOwnershipNonEscalation, assertTransition, defaultAuthorization } from './domain/cognition.mjs';
 import { auditAnswer } from './domain/answer-audit.mjs';
@@ -15,6 +19,7 @@ import { createModelGateway, createOllamaGateway, createOpenAICompatibleGateway 
 import { createChatRuntime } from '@evolving-agents/chat-runtime';
 
 const app = express();
+const execFileAsync = promisify(execFile);
 const port = Number(process.env.PORT || 5270);
 const repository = openDatabase(
   process.env.MINDCLONE_DB_PATH || join(process.cwd(), 'data', 'mindclone.sqlite'),
@@ -55,6 +60,34 @@ function mapClaimToLegacy(claim) {
     owner: claim.owner,
     createdAt: claim.createdAt,
   };
+}
+
+async function extractMaterial(input, label) {
+  if (!input || typeof input !== 'object') throw new Error(`A ${label} is required.`);
+  if (typeof input.text === 'string' && input.text.trim()) return input.text.trim();
+  if (typeof input.data !== 'string' || !input.data) throw new Error(`The ${label} file is empty.`);
+  const encoded = input.data.includes(',') ? input.data.slice(input.data.indexOf(',') + 1) : input.data;
+  const bytes = Buffer.from(encoded, 'base64');
+  if (!bytes.length || bytes.length > 15 * 1024 * 1024) throw new Error(`The ${label} file is empty or too large.`);
+  const mime = String(input.mime || 'application/octet-stream').toLowerCase();
+  const dir = await mkdtemp(join(tmpdir(), 'mindclone-interview-'));
+  const path = join(dir, String(input.name || `${label}.bin`).replace(/[^a-z0-9._-]/gi, '_'));
+  try {
+    await writeFile(path, bytes);
+    if (mime === 'application/pdf' || path.toLowerCase().endsWith('.pdf')) {
+      return (await execFileAsync('pdftotext', ['-layout', path, '-'], { maxBuffer: 8 * 1024 * 1024 })).stdout.trim();
+    }
+    if (mime.startsWith('image/')) {
+      return (await execFileAsync('tesseract', [path, 'stdout', '-l', process.env.OCR_LANG || 'eng+chi_sim'], { maxBuffer: 8 * 1024 * 1024 })).stdout.trim();
+    }
+    return bytes.toString('utf8').trim();
+  } finally { await rm(dir, { recursive: true, force: true }); }
+}
+
+async function normalizeMaterial(text, label) {
+  if (!localModel || text.length < 20) return text;
+  const result = await localModel.complete([{ role: 'system', content: `Extract the readable ${label} content faithfully. Preserve names, dates, employers, skills and requirements. Return plain text only; do not invent or summarize.` }, { role: 'user', content: text.slice(0, 120000) }]);
+  return result.trim() || text;
 }
 
 async function relevantContext(query) {
@@ -206,14 +239,25 @@ app.patch('/api/memory/candidates/:id', (request, response, next) => {
 
 app.post('/api/scenes/compile', async (request, response, next) => {
   try {
-    const { jd, resume, audience = 'interviewer', goal = 'perform faithfully in the target interview', sceneType = 'interview' } = request.body;
-    if (!jd?.trim() || !resume?.trim()) return response.status(400).json({ error: 'A job description and the submitted resume are required.' });
+    const { audience = 'interviewer', goal = 'perform faithfully in the target interview', sceneType = 'interview' } = request.body;
+    const jd = await normalizeMaterial(await extractMaterial(request.body.jdInput || { text: request.body.jd }, 'job description'), 'job description');
+    const resume = await normalizeMaterial(await extractMaterial(request.body.resumeInput || { text: request.body.resume }, 'resume'), 'resume');
+    if (!jd.trim() || !resume.trim()) return response.status(400).json({ error: 'The job description and resume must contain readable text.' });
     const retrieved = await learningEngine.retrieve(`${sceneType} ${audience} ${goal} ${jd}`, { limit: 24 });
     const retrievedIds = new Set(retrieved.map((item) => item.claim.id));
     const claims = repository.listClaims().filter((claim) => retrievedIds.has(claim.id) || claim.kind === 'expression');
     const scene = compileSceneView({ sceneId: randomUUID(), sceneType, audience, goal, jd, resume, claims });
     repository.addScene(scene);
     response.status(201).json({ scene });
+  } catch (error) { next(error); }
+});
+
+app.get('/api/scenes', (_, response) => response.json({ interviews: repository.listScenes() }));
+app.get('/api/scenes/:id', (request, response, next) => {
+  try {
+    const scene = repository.getScene(request.params.id);
+    if (!scene) return response.status(404).json({ error: 'Interview was not found.' });
+    response.json({ scene, runs: repository.listAnswerRuns(scene.id).map((run) => ({ question: run.question, answer: run.answer || '' })) });
   } catch (error) { next(error); }
 });
 

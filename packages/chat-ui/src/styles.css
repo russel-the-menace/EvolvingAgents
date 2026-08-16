@@ -199,6 +199,11 @@
 .chat-session-menu button { display: flex; align-items: center; gap: 8px; border: 0; border-radius: 6px; padding: 8px; color: var(--chat-ink); background: transparent; text-align: left; font-size: 12px; }
 .chat-session-menu button:hover { background: var(--chat-muted-panel); }
 .chat-session-menu .danger { color: #c85252; }
+.chat-interviews-title { margin-top: 22px; }
+.chat-interview { display: flex; width: 100%; align-items: center; justify-content: space-between; gap: 8px; border: 0; border-radius: 4px; padding: 8px 10px; color: var(--chat-ink); background: transparent; text-align: left; font-size: 12px; }
+.chat-interview:hover, .chat-interview.active { background: var(--chat-sidebar-active); }
+.chat-interview span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chat-interview small { flex: 0 0 auto; color: var(--chat-muted); font-size: 10px; }
 
 .chat-sidebar-footer {
   display: flex;

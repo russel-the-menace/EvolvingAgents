@@ -10,7 +10,7 @@ import {
 import { streamCandidateAnswer } from './interview';
 import { memoryApi } from './memory-api';
 import { loadPacket, loadSettings, savePacket } from './storage';
-import type { DailyModel, DailySession, InterviewPacket, Message, Mode, Settings } from './types';
+import type { DailyModel, DailySession, InterviewPacket, InterviewSummary, Message, Mode, Settings, MaterialInput } from './types';
 
 const exampleJD = `Remote Backend Engineer
 Own server-side APIs, database design, performance tuning, and production reliability. Comfortable with a mainstream backend language, SQL, Redis, Docker, and distributed systems fundamentals; able to clarify requirements and deliver independently.`;
@@ -53,6 +53,8 @@ export function App() {
   const [mode, setMode] = useState<Mode>('daily');
   const [jd, setJd] = useState('');
   const [resume, setResume] = useState('');
+  const [jdInput, setJdInput] = useState<MaterialInput>({});
+  const [resumeInput, setResumeInput] = useState<MaterialInput>({});
   const [packet, setPacket] = useState<InterviewPacket | null>(null);
   const [settings, setSettings] = useState<Settings>(loadSettings);
   const [showSettings, setShowSettings] = useState(false);
@@ -60,6 +62,8 @@ export function App() {
   const [input, setInput] = useState('');
   const [streaming, setStreaming] = useState(false);
   const [error, setError] = useState('');
+  const [interviews, setInterviews] = useState<InterviewSummary[]>([]);
+  const [preparing, setPreparing] = useState(false);
   const preferences = useChatPreferences<DailyModel>({ themeKey: 'mindclone-theme', modelKey: 'mindclone.daily-model', sidebarWidthKey: 'mindclone-sidebar-width', defaultTheme: 'light', defaultModel: 'deepseek-medium', parseModel: (saved) => saved === 'deepseek-high' ? 'deepseek-high' : 'deepseek-medium' });
   const dailyChat = useChatController(dailyChatAdapter, preferences.model);
   const abortRef = useRef<AbortController | null>(null);
@@ -77,6 +81,7 @@ export function App() {
       setResume(stored.resume);
     }
   }, []);
+  useEffect(() => { void memoryApi.listInterviews().then(({ interviews: items }) => setInterviews(items)).catch(() => undefined); }, []);
 
 
   useEffect(() => {
@@ -111,7 +116,7 @@ export function App() {
     setShowFormalScrollButton(false);
   }
 
-  const ready = jd.trim().length > 40 && resume.trim().length > 40;
+  const ready = (jd.trim().length > 40 || Boolean(jdInput.data)) && (resume.trim().length > 40 || Boolean(resumeInput.data));
   const messageCount = messages.filter((message) => message.role === 'interviewer').length;
   const candidateDraft = useMemo(
     () => messages.at(-1)?.role === 'candidate' ? messages.at(-1)?.content ?? '' : '',
@@ -119,8 +124,10 @@ export function App() {
   );
 
   async function prepare() {
+    if (!jd.trim() || !resume.trim()) return;
+    setPreparing(true);
     try {
-      const { scene } = await memoryApi.compileScene({ jd, resume, audience: 'HR or hiring interviewer', goal: 'Answer as the scene-appropriate professional self while remaining consistent under follow-up.' });
+      const { scene } = await memoryApi.compileScene({ jdInput: { ...jdInput, text: jd || jdInput.text }, resumeInput: { ...resumeInput, text: resume || resumeInput.text }, audience: 'HR or hiring interviewer', goal: 'Answer as the scene-appropriate professional self while remaining consistent under follow-up.' });
       const focusAreas = [...scene.personalClaims, ...scene.knowledgeClaims].slice(0, 6).map((claim) => claim.title);
       const next: InterviewPacket = {
         id: scene.id,
@@ -138,10 +145,19 @@ export function App() {
       };
       setPacket(next);
       savePacket(next);
+      setInterviews((current) => [{ id: scene.id, sceneType: 'interview', audience: 'HR or hiring interviewer', jd, resume, createdAt: next.preparedAt }, ...current.filter((item) => item.id !== scene.id)]);
       setError('');
     } catch (caught) {
       setError((caught as Error).message);
-    }
+    } finally { setPreparing(false); }
+  }
+
+  async function openInterview(id: string) {
+    const { scene, runs } = await memoryApi.getInterview(id);
+    const next: InterviewPacket = { ...scene, sceneId: scene.id, preparedAt: scene.createdAt, focusAreas: [...scene.personalClaims, ...scene.knowledgeClaims].slice(0, 6).map((claim) => claim.title), questionTypes: ['Role fit', 'Industry judgment', 'Experience deep dive', 'Follow-up'], brief: 'This interview uses the submitted resume and job description as a frozen scene.', writeBack: false };
+    setPacket(next); setJd(scene.jd); setResume(scene.resume); savePacket(next);
+    setMessages(runs.flatMap((run) => [{ id: crypto.randomUUID(), role: 'interviewer' as const, content: run.question, createdAt: next.preparedAt }, { id: crypto.randomUUID(), role: 'candidate' as const, content: run.answer, createdAt: next.preparedAt }]));
+    setMode('formal'); setError('');
   }
 
   function enterFormal() {
@@ -235,11 +251,11 @@ export function App() {
 
   return (
     <main className={`app-shell ${preferences.sidebarCollapsed ? 'sidebar-collapsed' : ''}`} style={{ '--app-sidebar-width': `${preferences.sidebarWidth}px` } as CSSProperties}>
-      <AppSidebar sessions={dailyChat.sessions} activeSessionId={dailyChat.activeSessionId} newChatActive={dailyChat.newChatActive} mode={mode} hasPacket={Boolean(packet)}
+      <AppSidebar sessions={dailyChat.sessions} interviews={interviews} activeSessionId={dailyChat.activeSessionId} newChatActive={dailyChat.newChatActive} mode={mode} hasPacket={Boolean(packet)}
         sidebarWidth={preferences.sidebarWidth} onSidebarWidthChange={preferences.setSidebarWidth}
         onToggleSidebar={() => preferences.setSidebarCollapsed((current) => !current)} onModeChange={setMode} onOpenSettings={() => setShowSettings(true)}
         onNewChat={() => { dailyChat.newChat(); setMode('daily'); }}
-        onSelectSession={(id) => { dailyChat.selectSession(id); setMode('daily'); }}
+        onSelectSession={(id) => { dailyChat.selectSession(id); setMode('daily'); }} onSelectInterview={(id) => void openInterview(id)}
         onUpdate={(session, values) => void dailyChat.updateSession(session, values)} onDelete={(session) => void dailyChat.deleteSession(session)} />
       {preferences.sidebarCollapsed && <button className="sidebar-reopen" title="Expand sidebar" onClick={() => preferences.setSidebarCollapsed(false)}><PanelLeftOpen size={19} /></button>}
       <section className="workspace">
@@ -250,7 +266,7 @@ export function App() {
         ) : mode === 'prepare' ? (
           <PrepareView
             jd={jd} resume={resume} packet={packet} ready={ready}
-            onJdChange={setJd} onResumeChange={setResume} onPrepare={() => void prepare()}
+            onJdChange={(value) => { setJd(value); setJdInput({ text: value }); }} onResumeChange={(value) => { setResume(value); setResumeInput({ text: value }); }} onJdFile={setJdInput} onResumeFile={setResumeInput} onPrepare={() => void prepare()}
             onEnter={enterFormal} onUseExample={() => { setJd(exampleJD); setResume(exampleResume); }}
           />
         ) : packet ? (
@@ -264,6 +280,7 @@ export function App() {
         ) : null}
       </section>
 
+      {preparing && <div className="loading-backdrop" role="status" aria-live="polite"><div className="loading-dialog"><span className="loading-spinner" /><h2>正在准备 Live interview</h2><p>加载本地模型并解析简历与 JD...</p></div></div>}
       {showSettings && <SettingsDialog theme={preferences.theme} onThemeChange={preferences.setTheme} onClose={() => setShowSettings(false)} />}
     </main>
   );
@@ -286,14 +303,14 @@ function extractChatGPTConversations(value: unknown) {
   });
 }
 
-function AppSidebar({ sessions, activeSessionId, newChatActive, mode, hasPacket, sidebarWidth, onSidebarWidthChange, onToggleSidebar, onModeChange, onOpenSettings, onNewChat, onSelectSession, onUpdate, onDelete }: {
-  sessions: DailySession[]; activeSessionId: string | null; newChatActive: boolean; mode: Mode; hasPacket: boolean; sidebarWidth: number;
+function AppSidebar({ sessions, interviews, activeSessionId, newChatActive, mode, hasPacket, sidebarWidth, onSidebarWidthChange, onToggleSidebar, onModeChange, onOpenSettings, onNewChat, onSelectSession, onSelectInterview, onUpdate, onDelete }: {
+  sessions: DailySession[]; interviews: InterviewSummary[]; activeSessionId: string | null; newChatActive: boolean; mode: Mode; hasPacket: boolean; sidebarWidth: number;
   onSidebarWidthChange: (width: number) => void; onToggleSidebar: () => void; onModeChange: (mode: Mode) => void; onOpenSettings: () => void; onNewChat: () => void; onSelectSession: (id: string) => void;
-  onUpdate: (session: DailySession, values: Partial<Pick<DailySession, 'title' | 'pinned'>>) => void; onDelete: (session: DailySession) => void;
+  onSelectInterview: (id: string) => void; onUpdate: (session: DailySession, values: Partial<Pick<DailySession, 'title' | 'pinned'>>) => void; onDelete: (session: DailySession) => void;
 }) {
   function renameSession(session: DailySession) { const title = window.prompt('Rename conversation', session.title)?.trim(); if (title && title !== session.title) onUpdate(session, { title }); }
   function deleteSession(session: DailySession) { if (window.confirm(`Delete “${session.title}” and all messages in it? Learned claims remain available unless explicitly superseded in conversation.`)) onDelete(session); }
-  return <ChatSidebar brand="MindClone" brandIcon={<Sparkles size={21} />} sessions={sessions} activeSessionId={newChatActive ? null : activeSessionId} width={sidebarWidth} onWidthChange={onSidebarWidthChange} onCollapse={onToggleSidebar} onNewChat={onNewChat} onSelectSession={onSelectSession} onSettings={onOpenSettings} status="Local engine" nav={<><button className={mode === 'prepare' ? 'active' : ''} onClick={() => onModeChange('prepare')}><FileText size={16} />Interview prep</button><button className={mode === 'formal' ? 'active' : ''} disabled={!hasPacket} onClick={() => hasPacket && onModeChange('formal')}><BotMessageSquare size={16} />Live interview</button></>} onPin={(session) => onUpdate(session as DailySession, { pinned: !session.pinned })} onRename={(session) => renameSession(session as DailySession)} onDelete={(session) => deleteSession(session as DailySession)} />;
+  return <ChatSidebar brand="MindClone" brandIcon={<Sparkles size={21} />} sessions={sessions} interviews={interviews} activeSessionId={newChatActive ? null : activeSessionId} activeInterviewId={mode === 'formal' ? (undefined) : null} onSelectInterview={onSelectInterview} width={sidebarWidth} onWidthChange={onSidebarWidthChange} onCollapse={onToggleSidebar} onNewChat={onNewChat} onSelectSession={onSelectSession} onSettings={onOpenSettings} status="Local engine" nav={<button className={mode === 'prepare' || mode === 'formal' ? 'active' : ''} onClick={() => onModeChange('prepare')}><BotMessageSquare size={16} />Live interview</button>} onPin={(session) => onUpdate(session as DailySession, { pinned: !session.pinned })} onRename={(session) => renameSession(session as DailySession)} onDelete={(session) => deleteSession(session as DailySession)} />;
 }
 
 function DailyChatView({ messages, input, streaming, error, model, onModelChange, onInputChange, onSend, onError, onImport }: {
@@ -359,9 +376,11 @@ function DailyChatView({ messages, input, streaming, error, model, onModelChange
 function PrepareView(props: {
   jd: string; resume: string; packet: InterviewPacket | null; ready: boolean;
   onJdChange: (value: string) => void; onResumeChange: (value: string) => void;
+  onJdFile: (value: MaterialInput) => void; onResumeFile: (value: MaterialInput) => void;
   onPrepare: () => void; onEnter: () => void; onUseExample: () => void;
 }) {
-  const { jd, resume, packet, ready, onJdChange, onResumeChange, onPrepare, onEnter, onUseExample } = props;
+  const { jd, resume, packet, ready, onJdChange, onResumeChange, onJdFile, onResumeFile, onPrepare, onEnter, onUseExample } = props;
+  async function readFile(file: File, setFile: (value: MaterialInput) => void) { const data = await new Promise<string>((resolve, reject) => { const reader = new FileReader(); reader.onerror = () => reject(reader.error); reader.onload = () => resolve(String(reader.result)); reader.readAsDataURL(file); }); setFile({ name: file.name, mime: file.type, data }); }
   return <div className="prepare-layout">
     <header className="page-header">
       <div><p className="eyebrow">INTERVIEW PACKET</p><h1>本次面试准备</h1><p className="subtle">先确定 JD 和投递简历，再进入低延迟正式会话。</p></div>
@@ -369,8 +388,8 @@ function PrepareView(props: {
     </header>
     <div className="prepare-grid">
       <div className="input-stack">
-        <label className="input-card"><span>职位描述 <small>JD</small></span><textarea value={jd} onChange={(event) => onJdChange(event.target.value)} placeholder="粘贴本次面试的 JD" /></label>
-        <label className="input-card"><span>本次投递简历 <small>RESUME</small></span><textarea value={resume} onChange={(event) => onResumeChange(event.target.value)} placeholder="粘贴或导入投递给这家公司的简历文本" /></label>
+        <label className="input-card"><span>职位描述 <small>JD</small></span><textarea value={jd} onChange={(event) => onJdChange(event.target.value)} placeholder="粘贴本次面试的 JD" /><input className="material-file" type="file" accept="text/plain,.txt,.md,application/pdf,image/*" onChange={(event) => { const file = event.target.files?.[0]; if (file) void readFile(file, onJdFile); event.currentTarget.value = ''; }} /></label>
+        <label className="input-card"><span>本次投递简历 <small>RESUME</small></span><textarea value={resume} onChange={(event) => onResumeChange(event.target.value)} placeholder="粘贴或导入投递给这家公司的简历文本" /><input className="material-file" type="file" accept="text/plain,.txt,.md,application/pdf,image/*" onChange={(event) => { const file = event.target.files?.[0]; if (file) void readFile(file, onResumeFile); event.currentTarget.value = ''; }} /></label>
         <button className="primary-button" disabled={!ready} onClick={onPrepare}><ListChecks size={18} /> 编译场景身份 <ArrowRight size={17} /></button>
       </div>
       <div className="brief-panel">

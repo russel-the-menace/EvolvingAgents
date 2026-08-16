@@ -1,5 +1,15 @@
 export type Mode = 'daily' | 'prepare' | 'formal';
 
+export type InterviewSummary = {
+  id: string;
+  sceneType: string;
+  audience: string;
+  jd: string;
+  resume: string;
+  createdAt: string;
+};
+export type MaterialInput = { text?: string; name?: string; mime?: string; data?: string };
+
 export type Settings = {
   baseUrl: string;
   model: string;

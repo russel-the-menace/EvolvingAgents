@@ -138,6 +138,13 @@ button:disabled { cursor: not-allowed; opacity: .45; }
 .theme-options button { border: 1px solid var(--mc-border); border-radius: 4px; padding: 8px 7px; color: var(--mc-ink); background: var(--mc-panel); font-size: 12px; }
 .theme-options button:hover, .theme-options button.selected { border-color: var(--mc-action); color: var(--mc-bg); background: var(--mc-action); }
 .hidden-input { display: none; }
+.material-file { margin-top: 10px; color: var(--mc-muted); font-size: 11px; }
+.loading-backdrop { position: fixed; inset: 0; z-index: 20; display: grid; place-items: center; background: rgba(0, 0, 0, .48); }
+.loading-dialog { width: min(360px, calc(100vw - 40px)); border: 1px solid var(--mc-border); border-radius: 7px; padding: 30px; color: var(--mc-ink); background: var(--mc-panel); text-align: center; box-shadow: 0 20px 60px rgba(0, 0, 0, .25); }
+.loading-dialog h2 { margin: 16px 0 8px; font-size: 19px; }
+.loading-dialog p { margin: 0; color: var(--mc-muted); font-size: 13px; }
+.loading-spinner { display: inline-block; width: 28px; height: 28px; border: 3px solid var(--mc-border); border-top-color: var(--mc-action); border-radius: 50%; animation: loading-spin .8s linear infinite; }
+@keyframes loading-spin { to { transform: rotate(360deg); } }
 
 .sidebar-reopen { position: fixed; top: 16px; left: 16px; z-index: 5; display: grid; width: 36px; height: 36px; place-items: center; border: 1px solid var(--mc-border); border-radius: 8px; padding: 0; color: var(--mc-muted); background: var(--mc-panel); box-shadow: 0 1px 4px rgba(0, 0, 0, .08); }
 .sidebar-reopen:hover { color: var(--mc-ink); background: var(--mc-panel-muted); }

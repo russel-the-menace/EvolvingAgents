@@ -1,4 +1,4 @@
-import type { AnswerPlan, Claim, DailyModel, DailySession, FormalContextMessage, InterviewPacket, MemoryDocument } from './types';
+import type { AnswerPlan, Claim, DailyModel, DailySession, FormalContextMessage, InterviewPacket, InterviewSummary, MemoryDocument, MaterialInput } from './types';
 import { readChatStream } from '@evolving-agents/chat-ui';
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
@@ -27,8 +27,10 @@ export const memoryApi = {
     request<{ title: string; content: string; sourceUrl: string }>('/memory/short-videos/prepare', { method: 'POST', body: JSON.stringify({ shareText }) }),
   transcribeShortVideo: (shareText: string) =>
     request<{ title: string; content: string; sourceUrl: string }>('/memory/short-videos/transcribe', { method: 'POST', body: JSON.stringify({ shareText }) }),
-  compileScene: (payload: { jd: string; resume: string; audience?: string; goal?: string; sceneType?: string }) =>
+  compileScene: (payload: { jd?: string; resume?: string; jdInput?: MaterialInput; resumeInput?: MaterialInput; audience?: string; goal?: string; sceneType?: string }) =>
     request<{ scene: Omit<InterviewPacket, 'preparedAt' | 'focusAreas' | 'questionTypes' | 'brief' | 'sceneId'> & { id: string; writeBack: false; knowledgeClaims: Claim[]; personalClaims: Claim[]; expressionClaims: Claim[] } }>('/scenes/compile', { method: 'POST', body: JSON.stringify(payload) }),
+  listInterviews: () => request<{ interviews: InterviewSummary[] }>('/scenes'),
+  getInterview: (id: string) => request<{ scene: InterviewSummary & { knowledgeClaims: Claim[]; personalClaims: Claim[]; expressionClaims: Claim[] }; runs: Array<{ question: string; answer: string }> }>(`/scenes/${id}`),
   planAnswer: (sceneId: string, question: string) =>
     request<{ plan: AnswerPlan; claims: Claim[]; transcriptMessages: FormalContextMessage[] }>(`/scenes/${sceneId}/plan`, { method: 'POST', body: JSON.stringify({ question }) }),
   completeAnswer: (sceneId: string, payload: { question: string; plan: AnswerPlan; answer: string }) =>

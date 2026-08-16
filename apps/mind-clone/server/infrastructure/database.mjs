@@ -190,6 +190,8 @@ function createRepository(db, learningStore, chatHistory) {
       (id, scene_type, audience, goal, jd, resume, snapshot_json, write_back, created_at, expires_at)
       VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?)`)
       .run(scene.id, scene.sceneType, scene.audience, scene.goal, scene.jd, scene.resume, JSON.stringify(scene), new Date().toISOString(), scene.expiresAt || null),
+    listScenes: () => db.prepare('SELECT id, scene_type, audience, jd, resume, created_at FROM scenes ORDER BY created_at DESC')
+      .all().map((row) => ({ id: row.id, sceneType: row.scene_type, audience: row.audience, jd: row.jd, resume: row.resume, createdAt: row.created_at })),
     getScene: (id) => { const row = db.prepare('SELECT * FROM scenes WHERE id = ?').get(id); return row ? json(row.snapshot_json, {}) : null; },
     addInquiry: (item) => {
       const record = { id: randomUUID(), status: 'queued', createdAt: new Date().toISOString(), ...item };
