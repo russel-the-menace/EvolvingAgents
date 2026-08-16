@@ -76,3 +76,14 @@ test('conversation summaries are versioned and preserve covered message ids', ()
   assert.equal(repository.db.prepare('SELECT COUNT(*) AS count FROM context_summaries WHERE superseded_at IS NOT NULL').get().count, 1);
   repository.close();
 });
+
+test('scene summaries preserve answer-run provenance without changing the scene', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'mindclone-scene-summary-test-'));
+  const repository = openDatabase(join(directory, 'mindclone.sqlite'), join(directory, 'missing.json'));
+  repository.addScene({ id: 'scene-1', sceneType: 'interview', audience: 'HR', goal: 'answer', jd: 'JD', resume: 'Resume', writeBack: false });
+  repository.replaceSceneSummary({ sceneId: 'scene-1', content: 'Ledger [run-1]', answerRunIds: ['run-1'], coveredThroughOrdinal: 0 });
+  const summary = repository.getActiveSceneSummary('scene-1');
+  assert.deepEqual(summary.answerRunIds, ['run-1']);
+  assert.equal(repository.getScene('scene-1').writeBack, false);
+  repository.close();
+});

@@ -33,7 +33,7 @@ export function openDatabase(path, legacyPath) {
     );
     CREATE TABLE IF NOT EXISTS answer_runs (
       id TEXT PRIMARY KEY, scene_id TEXT REFERENCES scenes(id), question TEXT NOT NULL,
-      plan_json TEXT NOT NULL, answer TEXT, audit_json TEXT, created_at TEXT NOT NULL
+      context_run_id TEXT, plan_json TEXT NOT NULL, answer TEXT, audit_json TEXT, created_at TEXT NOT NULL
     );
     CREATE TABLE IF NOT EXISTS context_runs (
       id TEXT PRIMARY KEY, session_id TEXT REFERENCES sessions(id) ON DELETE CASCADE,
@@ -55,6 +55,12 @@ export function openDatabase(path, legacyPath) {
       covered_through_ordinal INTEGER NOT NULL, version INTEGER NOT NULL,
       created_at TEXT NOT NULL, superseded_at TEXT
     );
+    CREATE TABLE IF NOT EXISTS scene_summaries (
+      id TEXT PRIMARY KEY, scene_id TEXT NOT NULL REFERENCES scenes(id) ON DELETE CASCADE,
+      content TEXT NOT NULL, answer_run_ids_json TEXT NOT NULL,
+      covered_through_ordinal INTEGER NOT NULL, version INTEGER NOT NULL,
+      created_at TEXT NOT NULL, superseded_at TEXT
+    );
     CREATE TABLE IF NOT EXISTS sessions (
       id TEXT PRIMARY KEY, title TEXT NOT NULL, pinned INTEGER NOT NULL DEFAULT 0,
       created_at TEXT NOT NULL, updated_at TEXT NOT NULL
@@ -69,6 +75,8 @@ export function openDatabase(path, legacyPath) {
   if (!inquiryColumns.has('presented_at')) db.exec('ALTER TABLE inquiry_items ADD COLUMN presented_at TEXT');
   if (!inquiryColumns.has('response_text')) db.exec('ALTER TABLE inquiry_items ADD COLUMN response_text TEXT');
   if (!inquiryColumns.has('resolution')) db.exec('ALTER TABLE inquiry_items ADD COLUMN resolution TEXT');
+  const answerRunColumns = new Set(db.prepare('PRAGMA table_info(answer_runs)').all().map((row) => row.name));
+  if (!answerRunColumns.has('context_run_id')) db.exec('ALTER TABLE answer_runs ADD COLUMN context_run_id TEXT');
   const learningStore = createSqliteLearningStore(db);
   const chatHistory = createChatHistoryStore(db);
 
@@ -203,10 +211,15 @@ function createRepository(db, learningStore, chatHistory) {
       .run(resolution === 'deferred' ? 'deferred' : 'resolved', resolution, responseText, new Date().toISOString(), id),
     addAnswerRun: (run) => {
       const id = randomUUID();
-      db.prepare('INSERT INTO answer_runs (id, scene_id, question, plan_json, answer, audit_json, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)')
-        .run(id, run.sceneId || null, run.question, JSON.stringify(run.plan), run.answer || null, JSON.stringify(run.audit || {}), new Date().toISOString());
+      db.prepare('INSERT INTO answer_runs (id, scene_id, context_run_id, question, plan_json, answer, audit_json, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
+        .run(id, run.sceneId || null, run.contextRunId || run.plan?.contextRunId || null, run.question,
+          JSON.stringify(run.plan), run.answer || null, JSON.stringify(run.audit || {}), new Date().toISOString());
       return id;
     },
+    listAnswerRuns: (sceneId) => db.prepare('SELECT * FROM answer_runs WHERE scene_id = ? ORDER BY created_at, rowid').all(sceneId)
+      .map((row, ordinal) => ({ id: row.id, sceneId: row.scene_id, contextRunId: row.context_run_id,
+        question: row.question, plan: json(row.plan_json, {}), answer: row.answer, audit: json(row.audit_json, {}),
+        createdAt: row.created_at, ordinal })),
     addContextRun: (run) => {
       const id = run.id || randomUUID();
       const createdAt = run.createdAt || new Date().toISOString();
@@ -265,6 +278,27 @@ function createRepository(db, learningStore, chatHistory) {
           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
           .run(id, summary.sessionId, summary.summaryType || 'conversation', summary.content,
             JSON.stringify(summary.messageIds || []), summary.coveredThroughOrdinal, (current?.version || 0) + 1, now);
+        db.exec('COMMIT');
+      } catch (error) { db.exec('ROLLBACK'); throw error; }
+      return id;
+    },
+    getActiveSceneSummary: (sceneId) => {
+      const row = db.prepare('SELECT * FROM scene_summaries WHERE scene_id = ? AND superseded_at IS NULL ORDER BY version DESC LIMIT 1').get(sceneId);
+      return row && { id: row.id, sceneId: row.scene_id, content: row.content,
+        answerRunIds: json(row.answer_run_ids_json), coveredThroughOrdinal: row.covered_through_ordinal,
+        version: row.version, createdAt: row.created_at, supersededAt: row.superseded_at };
+    },
+    replaceSceneSummary: (summary) => {
+      const current = db.prepare('SELECT * FROM scene_summaries WHERE scene_id = ? AND superseded_at IS NULL ORDER BY version DESC LIMIT 1').get(summary.sceneId);
+      const now = new Date().toISOString(); const id = summary.id || randomUUID();
+      db.exec('BEGIN IMMEDIATE');
+      try {
+        if (current) db.prepare('UPDATE scene_summaries SET superseded_at = ? WHERE id = ?').run(now, current.id);
+        db.prepare(`INSERT INTO scene_summaries
+          (id, scene_id, content, answer_run_ids_json, covered_through_ordinal, version, created_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?)`)
+          .run(id, summary.sceneId, summary.content, JSON.stringify(summary.answerRunIds || []),
+            summary.coveredThroughOrdinal, (current?.version || 0) + 1, now);
         db.exec('COMMIT');
       } catch (error) { db.exec('ROLLBACK'); throw error; }
       return id;

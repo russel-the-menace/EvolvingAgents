@@ -51,7 +51,10 @@ export type AnswerPlan = {
   personalClaimIds: string[];
   experiencePolicy: string;
   followupConstraints: string[];
+  contextRunId: string;
 };
+
+export type FormalContextMessage = { role: 'user' | 'assistant'; content: string };
 
 export type Message = {
   id: string;

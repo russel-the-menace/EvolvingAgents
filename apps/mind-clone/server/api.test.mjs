@@ -55,12 +55,22 @@ test('HTTP flow preserves ownership and audits a bounded scene', async () => {
     const { scene } = await sceneResponse.json();
     assert.equal(scene.writeBack, false);
 
+    const planResponse = await fetch(`${baseUrl}/scenes/${scene.id}/plan`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ question: '你怎么理解人力资源管理？' }),
+    });
+    assert.equal(planResponse.status, 200);
+    const planned = await planResponse.json();
+    assert(planned.plan.contextRunId);
+    assert.equal(planned.transcriptMessages.at(-1).role, 'user');
+    assert.equal(repository.getContextRun(planned.plan.contextRunId).sceneId, scene.id);
+
     const completeResponse = await fetch(`${baseUrl}/scenes/${scene.id}/complete`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         question: '你怎么理解人力资源管理？',
-        plan: { knowledgeClaimIds: [], personalClaimIds: [], rules: { writeBack: false } },
+        plan: planned.plan,
         answer: '我曾带领120人的HR团队完成200%的增长。',
       }),
     });
@@ -68,6 +78,11 @@ test('HTTP flow preserves ownership and audits a bounded scene', async () => {
     const { audit } = await completeResponse.json();
     assert.equal(audit.passed, false);
     assert.deepEqual(audit.violations[0].values, ['120', '200%']);
+    const transcriptResponse = await fetch(`${baseUrl}/scenes/${scene.id}/transcript`);
+    const transcript = await transcriptResponse.json();
+    assert.equal(transcript.runs.length, 1);
+    assert.equal(transcript.runs[0].contextRunId, planned.plan.contextRunId);
+    assert.match(transcript.runs[0].answer, /120/);
   } finally {
     await new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
     repository.close();

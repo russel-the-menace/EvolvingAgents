@@ -26,3 +26,24 @@ export async function refreshConversationSummary({ repository, gateway, sessionI
   return repository.getActiveContextSummary(sessionId) || { id, content, messageIds, coveredThroughOrdinal: throughOrdinal };
 }
 
+export async function refreshSceneSummary({ repository, gateway, sceneId, keepRecent = 4, minNewRuns = 4 }) {
+  const runs = repository.listAnswerRuns(sceneId);
+  const throughOrdinal = runs.length - keepRecent - 1;
+  if (throughOrdinal < 0) return null;
+  const existing = repository.getActiveSceneSummary(sceneId);
+  const afterOrdinal = existing?.coveredThroughOrdinal ?? -1;
+  if (throughOrdinal - afterOrdinal < minNewRuns) return existing || null;
+  const newRuns = runs.filter((run) => run.ordinal > afterOrdinal && run.ordinal <= throughOrdinal);
+  if (!newRuns.length) return existing || null;
+  const transcript = newRuns.flatMap((run) => [
+    { id: `${run.id}:question`, role: 'interviewer', content: run.question, createdAt: run.createdAt },
+    { id: `${run.id}:answer`, role: 'candidate', content: run.answer || '', createdAt: run.createdAt },
+  ]);
+  const content = await gateway.complete([
+    { role: 'system', content: 'You maintain a faithful interview consistency ledger.' },
+    { role: 'user', content: `${existing?.content ? `Existing ledger:\n${existing.content}\n\n` : ''}Summarize the following completed interview turns. Preserve answer-run IDs, dates, numbers, claims already made, commitments, unresolved questions, and contradictions. Do not invent experience and do not promote generated answers into longitudinal user memory.\n\n${transcript.map((item) => `[${item.id}] ${item.role}\n${item.content}`).join('\n\n')}\n\nReturn only the updated ledger.` },
+  ]);
+  const answerRunIds = [...new Set([...(existing?.answerRunIds || []), ...newRuns.map((run) => run.id)])];
+  repository.replaceSceneSummary({ sceneId, content, answerRunIds, coveredThroughOrdinal: throughOrdinal });
+  return repository.getActiveSceneSummary(sceneId);
+}

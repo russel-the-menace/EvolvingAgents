@@ -1,4 +1,4 @@
-import type { AnswerPlan, Claim, DailyModel, DailySession, InterviewPacket, MemoryDocument } from './types';
+import type { AnswerPlan, Claim, DailyModel, DailySession, FormalContextMessage, InterviewPacket, MemoryDocument } from './types';
 import { readChatStream } from '@evolving-agents/chat-ui';
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
@@ -30,7 +30,7 @@ export const memoryApi = {
   compileScene: (payload: { jd: string; resume: string; audience?: string; goal?: string; sceneType?: string }) =>
     request<{ scene: Omit<InterviewPacket, 'preparedAt' | 'focusAreas' | 'questionTypes' | 'brief' | 'sceneId'> & { id: string; writeBack: false; knowledgeClaims: Claim[]; personalClaims: Claim[]; expressionClaims: Claim[] } }>('/scenes/compile', { method: 'POST', body: JSON.stringify(payload) }),
   planAnswer: (sceneId: string, question: string) =>
-    request<{ plan: AnswerPlan; claims: Claim[] }>(`/scenes/${sceneId}/plan`, { method: 'POST', body: JSON.stringify({ question }) }),
+    request<{ plan: AnswerPlan; claims: Claim[]; transcriptMessages: FormalContextMessage[] }>(`/scenes/${sceneId}/plan`, { method: 'POST', body: JSON.stringify({ question }) }),
   completeAnswer: (sceneId: string, payload: { question: string; plan: AnswerPlan; answer: string }) =>
     request<{ runId: string; audit: { passed: boolean; violations: Array<{ type: string }> } }>(`/scenes/${sceneId}/complete`, { method: 'POST', body: JSON.stringify(payload) }),
   listSessions: () => request<{ sessions: DailySession[] }>('/chat/sessions'),

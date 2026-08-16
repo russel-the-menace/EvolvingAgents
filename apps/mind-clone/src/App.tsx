@@ -181,9 +181,9 @@ export function App() {
     abortRef.current = controller;
 
     try {
-      const { plan, claims } = await memoryApi.planAnswer(packet.sceneId, question);
+      const { plan, claims, transcriptMessages } = await memoryApi.planAnswer(packet.sceneId, question);
       let completedAnswer = '';
-      await streamCandidateAnswer(settings, packet, plan, claims, nextMessages.slice(0, -1), (delta) => {
+      await streamCandidateAnswer(settings, packet, plan, claims, transcriptMessages, (delta) => {
         completedAnswer += delta;
         setMessages((current) => current.map((message) =>
           message.id === answerMessage.id ? { ...message, content: message.content + delta } : message,

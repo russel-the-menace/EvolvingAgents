@@ -10,7 +10,7 @@ import { extractDouyinShare, resolveDouyinLink, transcribeShortVideo } from './i
 import { createMindCloneLearningEngine } from './adapters/mindclone-learning.mjs';
 import { applyInquiryReply, classifyInquiryReply, inquiryDialogueContext } from './domain/inquiry-dialogue.mjs';
 import { compileTranscript, contextAuditText } from './domain/context-compiler.mjs';
-import { refreshConversationSummary } from './domain/context-summarization.mjs';
+import { refreshConversationSummary, refreshSceneSummary } from './domain/context-summarization.mjs';
 import { createModelGateway, createOllamaGateway, createOpenAICompatibleGateway } from '@evolving-agents/model-gateway';
 import { createChatRuntime } from '@evolving-agents/chat-runtime';
 
@@ -219,10 +219,27 @@ app.post('/api/scenes/:id/plan', (request, response, next) => {
   try {
     const scene = repository.getScene(request.params.id);
     if (!scene) return response.status(404).json({ error: 'Scene snapshot was not found.' });
-    const plan = makeAnswerPlan({ question: String(request.body.question || ''), scene });
+    const question = String(request.body.question || '');
+    const basePlan = makeAnswerPlan({ question, scene });
     const claims = repository.listClaims();
-    const selected = claims.filter((claim) => [...plan.knowledgeClaimIds, ...plan.personalClaimIds].includes(claim.id));
-    response.json({ plan, scene, claims: selected });
+    const selected = claims.filter((claim) => [...basePlan.knowledgeClaimIds, ...basePlan.personalClaimIds].includes(claim.id));
+    const priorMessages = repository.listAnswerRuns(scene.id).flatMap((run) => [
+      { id: `${run.id}:question`, role: 'user', content: run.question, createdAt: run.createdAt },
+      { id: `${run.id}:answer`, role: 'assistant', content: run.answer || '', createdAt: run.createdAt },
+    ]);
+    const transcript = compileTranscript([...priorMessages, { id: randomUUID(), role: 'user', content: question }], {
+      budgetChars: 16_000, recentCount: 6, summary: repository.getActiveSceneSummary(scene.id),
+    });
+    const contextRunId = repository.addContextRun({ sceneId: scene.id, question, ...transcript, items: [
+      { type: 'scene_fact', id: `${scene.id}:jd`, content: scene.jd, selectionReason: 'active_scene' },
+      { type: 'scene_fact', id: `${scene.id}:resume`, content: scene.resume, selectionReason: 'active_scene' },
+      ...(transcript.summary ? [{ type: 'summary', id: transcript.summary.id, content: transcript.summary.content, selectionReason: 'covers_omitted_formal_history' }] : []),
+      ...transcript.messages.map((message) => ({ type: 'formal_message', id: message.id, content: message.content, selectionReason: 'formal_transcript_budget' })),
+      ...selected.flatMap((claim) => [{ type: 'claim', id: claim.id, content: claim.proposition, selectionReason: 'answer_plan' },
+        ...repository.evidenceForClaim(claim.id).map((item) => ({ type: 'evidence', id: item.id, evidenceId: item.id, sourceId: item.source?.id, content: item.text, selectionReason: 'supports_answer_claim' }))]),
+    ] });
+    const plan = { ...basePlan, contextRunId };
+    response.json({ plan, scene, claims: selected, transcriptMessages: transcript.messages.map(({ role, content }) => ({ role, content })) });
   } catch (error) { next(error); }
 });
 
@@ -232,10 +249,16 @@ app.post('/api/scenes/:id/complete', (request, response, next) => {
     if (!scene) return response.status(404).json({ error: 'Scene snapshot was not found.' });
     const { question, plan, answer } = request.body;
     const audit = auditAnswer({ answer, scene, plan, claims: repository.listClaims() });
-    const runId = repository.addAnswerRun({ sceneId: scene.id, question, plan, answer, audit });
+    const runId = repository.addAnswerRun({ sceneId: scene.id, contextRunId: plan.contextRunId, question, plan, answer, audit });
+    if (localModel) void refreshSceneSummary({ repository, gateway: localModel, sceneId: scene.id })
+      .catch((error) => console.error('Scene summary refresh failed:', error.message));
     response.json({ runId, audit });
   } catch (error) { next(error); }
 });
+
+app.get('/api/scenes/:id/transcript', (request, response) => response.json({
+  runs: repository.listAnswerRuns(request.params.id), summary: repository.getActiveSceneSummary(request.params.id),
+}));
 
 app.post('/api/memory/short-videos/prepare', async (request, response, next) => {
   try {

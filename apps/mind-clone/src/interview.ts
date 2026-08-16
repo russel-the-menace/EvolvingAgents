@@ -1,5 +1,4 @@
-import type { AnswerPlan, Claim, InterviewPacket, Message, Settings } from './types';
-import { compileFormalTranscript } from './context';
+import type { AnswerPlan, Claim, FormalContextMessage, InterviewPacket, Settings } from './types';
 
 function claimLines(ids: string[], claims: Claim[]) {
   const allowed = new Set(ids);
@@ -44,15 +43,13 @@ export async function streamCandidateAnswer(
   packet: InterviewPacket,
   plan: AnswerPlan,
   claims: Claim[],
-  messages: Message[],
+  messages: FormalContextMessage[],
   onDelta: (delta: string) => void,
   signal: AbortSignal,
 ) {
-  const transcript = compileFormalTranscript(messages);
   const requestMessages = [
     { role: 'system', content: systemPrompt(packet, plan, claims) },
-    { role: 'system', content: `Transcript context: ${transcript.messages.length}/${transcript.totalMessages} messages, ${transcript.usedChars}/${transcript.budgetChars} chars. Older messages remain in the formal transcript but were omitted from this working prompt and must not be invented.` },
-    ...transcript.messages.map((message) => ({ role: message.role === 'interviewer' ? 'user' : 'assistant', content: message.content })),
+    ...messages,
   ];
   const response = await fetch('/api/model/chat', {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, signal,
