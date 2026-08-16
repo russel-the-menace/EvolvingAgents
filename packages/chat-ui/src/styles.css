@@ -279,6 +279,17 @@
 .chat-message-actions button { display: grid; width: 28px; height: 28px; place-items: center; border: 0; border-radius: 6px; padding: 0; color: var(--chat-muted); background: transparent; }
 .chat-message-actions button:hover { color: var(--chat-ink); background: var(--chat-muted-panel); }
 
+.attachment-area { position: static; }
+.hidden-input { display: none; }
+.plus-button { position: absolute; top: 50%; left: 10px; display: grid; width: 28px; height: 28px; place-items: center; border: 0; border-radius: 50%; padding: 0; color: var(--chat-muted); background: transparent; transform: translateY(-50%); transition: top .18s ease, color .16s ease; }
+.plus-button:hover, .plus-button.open { color: var(--chat-ink); }
+.attachment-menu { position: absolute; bottom: calc(100% + 10px); left: 0; z-index: 8; width: min(320px, calc(100vw - 52px)); border: 1px solid var(--chat-border); border-radius: 7px; padding: 8px; color: var(--chat-ink); background: var(--chat-panel); box-shadow: 0 12px 35px rgba(0, 0, 0, .16); }
+.attachment-menu-title { padding: 4px 7px 6px; color: var(--chat-muted); font-size: 11px; font-weight: 700; }
+.attachment-menu > button { display: flex; width: 100%; align-items: center; gap: 10px; border: 0; border-radius: 4px; padding: 10px 7px; color: var(--chat-ink); background: transparent; text-align: left; font-size: 13px; }
+.attachment-menu > button:hover:not(:disabled) { background: var(--chat-muted-panel); }
+.attachment-menu > button:disabled { opacity: .6; }
+.attachment-menu > p { margin: 8px 7px 3px; color: var(--chat-muted); font-size: 11px; line-height: 1.45; }
+
 .chat-selection-ask {
   position: fixed;
   z-index: 20;

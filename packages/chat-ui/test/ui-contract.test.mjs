@@ -14,6 +14,8 @@ test('shared chat keeps the MindClone layout and reading contracts', () => {
     '.chat-table-scroll',
     '.chat-selection-ask',
     '.chat-composer-quote',
+    '.attachment-menu',
+    '.plus-button',
     '.app-shell.sidebar-collapsed > .chat-sidebar { display: none; }',
   ]) assert.ok(styles.includes(rule), `missing shared UI contract: ${rule}`);
 });
