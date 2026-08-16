@@ -1,4 +1,4 @@
-import { createLearningEngine, locateEvidence } from '@evolving-agents/learning-engine';
+import { createLearningEngine, locateEvidence, parseModelJson } from '@evolving-agents/learning-engine';
 import { defaultAuthorization } from '../domain/cognition.mjs';
 
 function sourceIsExternal(source) {
@@ -21,7 +21,7 @@ function extractionPrompt(source, chunk, context = {}) {
 function createDeepSeekExtractor(gateway) {
   return {
     async extract({ source, chunk, context }) {
-      const parsed = JSON.parse(await gateway.complete([{ role: 'user', content: extractionPrompt(source, chunk, context) }], { quality: 'High' }));
+      const parsed = parseModelJson(await gateway.complete([{ role: 'user', content: extractionPrompt(source, chunk, context) }], { quality: 'High' }));
       return Array.isArray(parsed.claims) ? parsed.claims : [];
     },
   };

@@ -10,6 +10,7 @@ test('planning prompt requires evidence-grounded output', () => {
 
 test('parses fenced JSON returned by an extraction model', () => {
   assert.deepEqual(parseJsonResponse('```json\n[{"title":"Deadline"}]\n```'), [{ title: 'Deadline' }]);
+  assert.deepEqual(parseJsonResponse('[{"title":"Deadline"}]\nThe extracted claim is above.'), [{ title: 'Deadline' }]);
 });
 
 test('only learns long messages that explicitly look like supplied source material', () => {

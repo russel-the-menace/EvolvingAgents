@@ -1,7 +1,7 @@
 import { createServer } from 'node:http';
 import { mkdirSync } from 'node:fs';
 import { DatabaseSync } from 'node:sqlite';
-import { createSqliteLearningStore } from '@evolving-agents/learning-engine';
+import { createSqliteLearningStore, parseModelJson } from '@evolving-agents/learning-engine';
 import { createCompetitionPlanningEngine } from '../src/learning.mjs';
 import { createChatHistoryStore } from '@evolving-agents/chat-history';
 import { createModelGateway } from '@evolving-agents/model-gateway';
@@ -29,8 +29,7 @@ function chatEvidencePrompt(evidence) {
 }
 
 export function parseJsonResponse(content) {
-  const cleaned = String(content || '').replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim();
-  return JSON.parse(cleaned);
+  return parseModelJson(content);
 }
 
 function extractionPrompt(title, content) {
@@ -59,13 +58,15 @@ async function createCampusAnswer(messages, quality, stream) {
   if (!['Medium', 'High'].includes(quality)) throw new Error('Quality must be Medium or High.');
   const latestUser = [...messages].reverse().find((message) => message.role === 'user');
   if (latestUser && shouldLearnConversation(latestUser.content)) {
-    const privateProfile = /(我的技能|我的时间|我的兴趣|我每周|我的背景)/u.test(latestUser.content);
-    const title = `${privateProfile ? '对话中的个人资料' : '对话中的竞赛资料'} ${new Date().toISOString().slice(0, 10)}`;
-    const proposals = parseJsonResponse(await callGateway([{ role: 'system', content: 'You extract conservative structured competition facts or user profile constraints.' }, { role: 'user', content: extractionPrompt(title, latestUser.content) }], quality));
-    if (Array.isArray(proposals) && proposals.length) {
-      const ingested = await knowledgeEngine.ingest({ title, content: latestUser.content, sourceType: privateProfile ? 'conversation_profile' : 'conversation_competition', sourceActor: privateProfile ? 'user' : 'conversation', metadata: { domain: privateProfile ? 'user_profile' : 'competition', accessScope: privateProfile ? 'private_profile' : 'public', proposals } });
-      await knowledgeEngine.learn(ingested.source.id);
-    }
+    try {
+      const privateProfile = /(我的技能|我的时间|我的兴趣|我每周|我的背景)/u.test(latestUser.content);
+      const title = `${privateProfile ? '对话中的个人资料' : '对话中的竞赛资料'} ${new Date().toISOString().slice(0, 10)}`;
+      const proposals = parseJsonResponse(await callGateway([{ role: 'system', content: 'You extract conservative structured competition facts or user profile constraints.' }, { role: 'user', content: extractionPrompt(title, latestUser.content) }], quality));
+      if (Array.isArray(proposals) && proposals.length) {
+        const ingested = await knowledgeEngine.ingest({ title, content: latestUser.content, sourceType: privateProfile ? 'conversation_profile' : 'conversation_competition', sourceActor: privateProfile ? 'user' : 'conversation', metadata: { domain: privateProfile ? 'user_profile' : 'competition', accessScope: privateProfile ? 'private_profile' : 'public', proposals } });
+        await knowledgeEngine.learn(ingested.source.id);
+      }
+    } catch (error) { console.error('Conversation learning skipped:', error instanceof Error ? error.message : error); }
   }
   const results = latestUser ? await knowledgeEngine.retrieve(latestUser.content, { limit: 20, context: { accessScopes: ['public', 'private_profile'] } }) : [];
   const evidence = knowledgeEngine.buildEvidenceContext(results);
