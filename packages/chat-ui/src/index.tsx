@@ -18,7 +18,7 @@ export type ChatAdapter<Session extends ChatSession> = {
   createSession: () => Promise<Session>;
   updateSession: (sessionId: string, values: Partial<Pick<Session, 'title' | 'pinned'>>) => Promise<Session>;
   deleteSession: (sessionId: string) => Promise<void>;
-  send: (request: { sessionId: string; content: string; model: string; replaceFromMessageId?: string; signal: AbortSignal; onDelta: (delta: string) => void }) => Promise<void>;
+  send: (request: { sessionId: string; content: string; model: string; context?: unknown; replaceFromMessageId?: string; signal: AbortSignal; onDelta: (delta: string) => void }) => Promise<void>;
 };
 
 export async function readChatStream(response: Response, onDelta: (delta: string) => void) {
@@ -78,7 +78,7 @@ export function useChatController<Session extends ChatSession>(adapter: ChatAdap
   function newChat() { setInputs((current) => ({ ...current, __new__: '' })); setNewChatActive(true); setActiveSessionId(null); setError(''); }
   function selectSession(id: string) { setNewChatActive(false); setActiveSessionId(id); setError(''); }
 
-  async function send(contentOverride?: string, replaceFromMessageId?: string) {
+  async function send(contentOverride?: string, replaceFromMessageId?: string, context?: unknown) {
     const content = (contentOverride ?? input).trim();
     if (!content) return;
     let sessionId = newChatActive ? null : activeSessionId;
@@ -100,7 +100,7 @@ export function useChatController<Session extends ChatSession>(adapter: ChatAdap
     dispatchDraft({ type: 'start', sessionId, messages: [...branchMessages, userMessage, answerMessage] });
     setInputs((current) => ({ ...current, [inputKey]: '', [sessionId]: '' })); setError('');
     try {
-      await adapter.send({ sessionId, content, model, replaceFromMessageId, signal: new AbortController().signal, onDelta: (delta) => dispatchDraft({ type: 'delta', sessionId, messageId: answerMessage.id, delta }) });
+      await adapter.send({ sessionId, content, model, context, replaceFromMessageId, signal: new AbortController().signal, onDelta: (delta) => dispatchDraft({ type: 'delta', sessionId, messageId: answerMessage.id, delta }) });
       await refreshSessions();
       dispatchDraft({ type: 'finish', sessionId });
     } catch (caught) {

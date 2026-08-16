@@ -289,6 +289,10 @@
 .attachment-menu > button:hover:not(:disabled) { background: var(--chat-muted-panel); }
 .attachment-menu > button:disabled { opacity: .6; }
 .attachment-menu > p { margin: 8px 7px 3px; color: var(--chat-muted); font-size: 11px; line-height: 1.45; }
+.attachment-chip { position: absolute; top: 8px; right: 10px; left: 10px; display: grid; height: 35px; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 8px; border-bottom: 1px solid var(--chat-border); padding: 0 2px 7px; color: var(--chat-muted); }
+.attachment-chip > span { overflow: hidden; color: var(--chat-ink); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.attachment-chip > button { display: grid; width: 26px; height: 26px; place-items: center; border: 0; border-radius: 6px; padding: 0; color: var(--chat-muted); background: transparent; }
+.attachment-chip > button:hover { color: var(--chat-ink); background: var(--chat-muted-panel); }
 
 .chat-selection-ask {
   position: fixed;
@@ -345,6 +349,9 @@
 .chat-composer.expanded { padding: 12px 14px 46px; }
 .chat-composer.expanded > textarea { overflow-y: auto; }
 .chat-composer.quoted { min-height: 106px; align-items: flex-start; padding: 51px 14px 46px; }
+.chat-composer:has(.attachment-chip) { min-height: 106px; align-items: flex-start; padding: 51px 14px 46px; }
+.chat-composer.quoted:has(.attachment-chip) { min-height: 141px; padding-top: 86px; }
+.chat-composer.quoted .attachment-chip { top: 43px; }
 .chat-composer-quote { position: absolute; top: 8px; right: 10px; left: 10px; display: grid; height: 35px; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 8px; border-bottom: 1px solid var(--chat-border); padding: 0 2px 7px; color: var(--chat-muted); }
 .chat-composer-quote > span { overflow: hidden; color: var(--chat-ink); font-size: 12px; line-height: 1.4; text-overflow: ellipsis; white-space: nowrap; }
 .chat-composer-quote > button { display: grid; width: 26px; height: 26px; place-items: center; border: 0; border-radius: 6px; padding: 0; color: var(--chat-muted); background: transparent; }
@@ -364,7 +371,7 @@
 
 .chat-send { position: absolute; top: 50%; right: 10px; display: grid; width: 28px; height: 28px; place-items: center; border: 1px solid var(--chat-action); border-radius: 50%; padding: 0; color: var(--chat-bg); background: var(--chat-action); transform: translateY(-50%); transition: top .18s ease, background .18s ease; }
 .chat-send:disabled { border-color: #c4c4c4; color: #fff; background: #c4c4c4; }
-.chat-composer.expanded .chat-model, .chat-composer.expanded .chat-send, .chat-composer.expanded .plus-button, .chat-composer.quoted .chat-model, .chat-composer.quoted .chat-send, .chat-composer.quoted .plus-button { top: calc(100% - 23px); }
+.chat-composer.expanded .chat-model, .chat-composer.expanded .chat-send, .chat-composer.expanded .plus-button, .chat-composer.quoted .chat-model, .chat-composer.quoted .chat-send, .chat-composer.quoted .plus-button, .chat-composer:has(.attachment-chip) .chat-model, .chat-composer:has(.attachment-chip) .chat-send, .chat-composer:has(.attachment-chip) .plus-button { top: calc(100% - 23px); }
 
 .chat-scroll-latest { position: absolute; bottom: 92px; left: 50%; z-index: 3; display: grid; width: 34px; height: 34px; place-items: center; border: 1px solid var(--chat-border); border-radius: 50%; padding: 0; opacity: 0; color: var(--chat-ink); background: var(--chat-panel); box-shadow: 0 4px 14px rgba(0, 0, 0, .16); pointer-events: none; transform: translate(-50%, 6px) scale(.94); transition: opacity .2s ease, transform .2s ease; }
 .chat-scroll-latest.visible { opacity: 1; pointer-events: auto; transform: translate(-50%, 0) scale(1); }
