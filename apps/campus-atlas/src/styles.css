@@ -75,12 +75,6 @@ button { cursor: pointer; }
 .dialog-actions { display: flex; justify-content: flex-end; margin-top: 25px; }
 .ghost-button:hover { background: var(--panel-muted); }
 
-.campus-notebooks { display: grid; gap: 1px; margin-top: 10px; }
-.campus-notebooks > div { padding: 4px 10px 5px; color: var(--chat-sidebar-muted); font-size: 12px; font-weight: 600; }
-.campus-notebooks > button { display: flex; height: 28px; align-items: center; gap: 7px; border: 0; border-radius: 8px; padding: 3px 10px; color: var(--chat-sidebar-ink); background: transparent; text-align: left; font-size: 12px; }
-.campus-notebooks > button:disabled { cursor: default; opacity: .72; }
-.campus-notebooks svg { flex: none; }
-
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: .001ms !important; animation-iteration-count: 1 !important; transition-duration: .001ms !important; }
 }

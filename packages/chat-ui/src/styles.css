@@ -57,7 +57,6 @@
   height: 100vh;
   flex-direction: column;
   padding: 25px 15px;
-  border-right: 1px solid color-mix(in srgb, var(--chat-border) 72%, transparent);
   color: var(--chat-sidebar-ink);
   background: var(--chat-sidebar);
 }
@@ -69,7 +68,7 @@
   gap: 10px;
   padding: 0 34px 25px 8px;
   color: var(--chat-sidebar-ink);
-  font-size: 19px;
+  font-size: 12px;
   font-weight: 700;
 }
 
@@ -95,7 +94,6 @@
   gap: 1px;
   margin: 0 0 12px;
   padding: 0 0 12px;
-  border-bottom: 1px solid var(--chat-border);
 }
 
 .chat-nav > button {
@@ -121,6 +119,11 @@
 
 .chat-nav > button:disabled { color: var(--chat-sidebar-muted); }
 .chat-nav > button > svg { width: 16px; height: 16px; }
+.chat-notebooks { display: grid; gap: 1px; margin: 4px 0 12px; }
+.chat-notebooks > div { padding: 4px 10px 5px; color: var(--chat-sidebar-muted); font-size: 12px; font-weight: 600; }
+.chat-notebooks > button { display: flex; height: 28px; align-items: center; gap: 7px; border: 0; border-radius: 8px; padding: 3px 10px; color: var(--chat-sidebar-ink); background: transparent; text-align: left; font-size: 12px; }
+.chat-notebooks > button:disabled { cursor: default; opacity: .72; }
+.chat-notebooks > button > svg { width: 16px; height: 16px; flex: none; }
 
 .chat-recents {
   min-height: 0;
@@ -130,7 +133,7 @@
 }
 
 .chat-recents::-webkit-scrollbar { display: none; }
-.chat-recents-title { height: 27px; padding: 4px 8px 10px; color: var(--chat-sidebar-ink); font-size: 16px; font-weight: 500; line-height: 1; }
+.chat-recents-title { height: 27px; padding: 4px 10px 5px; color: var(--chat-sidebar-muted); font-size: 12px; font-weight: 600; line-height: normal; }
 .chat-recents > p { padding: 7px 10px; color: var(--chat-sidebar-muted); font-size: 12px; line-height: 1.6; }
 
 .chat-session {
@@ -204,7 +207,6 @@
   gap: 10px;
   margin-top: auto;
   padding: 18px 8px 2px;
-  border-top: 1px solid var(--chat-border);
   color: var(--chat-sidebar-muted);
   font-size: 12px;
 }
