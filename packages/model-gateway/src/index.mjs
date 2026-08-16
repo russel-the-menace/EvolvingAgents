@@ -128,12 +128,13 @@ export function createOpenAICompatibleGateway({ baseUrl, model, apiKey = 'local'
   };
 }
 
-export function createOllamaGateway({ baseUrl = 'http://127.0.0.1:11434', model, timeoutMs = 120_000, fetchImpl = fetch }) {
+export function createOllamaGateway({ baseUrl = 'http://127.0.0.1:11434', model, contextTokens = 8192, maxOutputTokens = 768, timeoutMs = 120_000, fetchImpl = fetch }) {
   if (!baseUrl || !model) throw new Error('Ollama baseUrl and model are required.');
   const endpoint = `${baseUrl.replace(/\/$/, '')}/api/chat`;
   const request = (messages, stream, signal) => fetchImpl(endpoint, {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ model, messages, stream, think: false }), signal: requestSignal(signal, timeoutMs),
+    body: JSON.stringify({ model, messages, stream, think: false,
+      options: { num_ctx: contextTokens, num_predict: maxOutputTokens } }), signal: requestSignal(signal, timeoutMs),
   });
   return {
     async complete(messages, { signal } = {}) {

@@ -23,7 +23,9 @@ const repository = openDatabase(
 const gateway = createModelGateway({ baseUrl: process.env.GATEWAY_BASE_URL || 'https://feiwan.online', apiKey: process.env.GATEWAY_API_KEY || 'yeatom' });
 const localModel = process.env.LOCAL_MODEL_BASE_URL && process.env.LOCAL_MODEL_NAME
   ? (process.env.LOCAL_MODEL_PROVIDER === 'ollama'
-    ? createOllamaGateway({ baseUrl: process.env.LOCAL_MODEL_BASE_URL, model: process.env.LOCAL_MODEL_NAME })
+    ? createOllamaGateway({ baseUrl: process.env.LOCAL_MODEL_BASE_URL, model: process.env.LOCAL_MODEL_NAME,
+      contextTokens: Number(process.env.LOCAL_MODEL_CONTEXT_TOKENS || 8192),
+      maxOutputTokens: Number(process.env.LOCAL_MODEL_MAX_OUTPUT_TOKENS || 768) })
     : createOpenAICompatibleGateway({ baseUrl: process.env.LOCAL_MODEL_BASE_URL, model: process.env.LOCAL_MODEL_NAME, apiKey: process.env.LOCAL_MODEL_API_KEY || 'local' }))
   : null;
 const chatRuntime = createChatRuntime(repository, { titleLength: 28 });

@@ -44,7 +44,8 @@ test('uses Ollama native chat with thinking disabled', async () => {
   } });
   assert.equal(await gateway.complete([{ role: 'user', content: 'hello' }]), 'local answer');
   assert.equal(request.url, 'http://127.0.0.1:11434/api/chat');
-  assert.deepEqual(JSON.parse(request.options.body), { model: 'qwen3:8b', messages: [{ role: 'user', content: 'hello' }], stream: false, think: false });
+  assert.deepEqual(JSON.parse(request.options.body), { model: 'qwen3:8b', messages: [{ role: 'user', content: 'hello' }], stream: false,
+    think: false, options: { num_ctx: 8192, num_predict: 768 } });
 });
 
 test('preserves gateway status and error messages', async () => {
