@@ -30,12 +30,15 @@ function takeFromEnd(items, budget, used) {
  */
 export function compileTranscript(messages, options = {}) {
   const budgetChars = Math.max(2_000, options.budgetChars || 24_000);
+  const summary = options.summary?.content ? { ...options.summary, content: String(options.summary.content) } : null;
+  const summaryChars = Math.min(chars(summary?.content), Math.floor(budgetChars / 3));
+  const messageBudget = budgetChars - summaryChars;
   const normalized = (messages || []).map(normalizeMessage).filter((item) => item.content.trim());
   const recentCount = Math.max(1, options.recentCount || 8);
   const recent = normalized.slice(-recentCount);
   const older = normalized.slice(0, Math.max(0, normalized.length - recent.length));
-  const recentResult = takeFromEnd(recent, budgetChars, 0);
-  const olderBudget = Math.max(0, budgetChars - recentResult.used);
+  const recentResult = takeFromEnd(recent, messageBudget, 0);
+  const olderBudget = Math.max(0, messageBudget - recentResult.used);
   const olderResult = olderBudget ? takeFromEnd(older, olderBudget, 0) : { selected: [], used: 0 };
   const selectedIds = new Set([...olderResult.selected, ...recentResult.selected].map((item) => item.id));
   const selected = normalized.filter((item) => selectedIds.has(item.id));
@@ -45,8 +48,9 @@ export function compileTranscript(messages, options = {}) {
   return {
     messages: selected,
     omitted,
+    summary: omitted.length && summary ? { ...summary, content: summary.content.slice(0, summaryChars) } : null,
     budgetChars,
-    usedChars: selected.reduce((total, item) => total + chars(item.content), 0),
+    usedChars: selected.reduce((total, item) => total + chars(item.content), 0) + (omitted.length && summary ? summaryChars : 0),
     totalMessages: normalized.length,
     omittedMessages: omitted.length,
     strategy: omitted.length ? 'bounded_transcript' : 'full_transcript',
@@ -57,4 +61,3 @@ export function contextAuditText(context) {
   return `Context audit: strategy=${context.strategy}; messages=${context.messages.length}/${context.totalMessages}; usedChars=${context.usedChars}/${context.budgetChars}; omitted=${context.omittedMessages}.`
     + (context.omittedMessages ? ' Older messages were retained in storage but omitted from this working prompt pending summary/evidence retrieval.' : '');
 }
-

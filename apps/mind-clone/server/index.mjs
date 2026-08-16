@@ -10,6 +10,7 @@ import { extractDouyinShare, resolveDouyinLink, transcribeShortVideo } from './i
 import { createMindCloneLearningEngine } from './adapters/mindclone-learning.mjs';
 import { applyInquiryReply, classifyInquiryReply, inquiryDialogueContext } from './domain/inquiry-dialogue.mjs';
 import { compileTranscript, contextAuditText } from './domain/context-compiler.mjs';
+import { refreshConversationSummary } from './domain/context-summarization.mjs';
 import { createModelGateway, createOllamaGateway, createOpenAICompatibleGateway } from '@evolving-agents/model-gateway';
 import { createChatRuntime } from '@evolving-agents/chat-runtime';
 
@@ -67,18 +68,20 @@ async function relevantContext(query) {
 
 async function streamDailyChat(session, response, query, model, dialogueContext = '') {
   const context = await relevantContext(query);
-  const transcript = compileTranscript(session.messages, { budgetChars: 24_000, recentCount: 8 });
+  const summary = repository.getActiveContextSummary(session.id);
+  const transcript = compileTranscript(session.messages, { budgetChars: 24_000, recentCount: 8, summary });
   repository.addContextRun({
     sessionId: session.id, question: query, ...transcript,
     items: [
       ...transcript.messages.map((message) => ({ type: 'message', id: message.id, content: message.content, selectionReason: 'transcript_budget' })),
+      ...(transcript.summary ? [{ type: 'summary', id: transcript.summary.id, content: transcript.summary.content, selectionReason: 'covers_omitted_history' }] : []),
       ...context.ranked.flatMap(({ claim, evidence }) => [
         { type: 'claim', id: claim.id, content: claim.proposition, selectionReason: 'query_retrieval' },
         ...(evidence || []).map((item) => ({ type: 'evidence', id: item.id, sourceId: item.source?.id, evidenceId: item.id, content: item.text, selectionReason: 'supports_claim' })),
       ]),
     ],
   });
-  const system = `You are MindClone, a long-term conversational partner. Help the user think, challenge weak assumptions when warranted, and express conclusions naturally. Distinguish source knowledge from the user's position. An understood external claim is available for reasoning but is not the user's belief. Never turn external or third-party material into the user's experience. Match the user's language.\n\n${contextAuditText(transcript)}\n${dialogueContext}\n\n${context.text || 'No authorized long-term context is relevant yet.'}`;
+  const system = `You are MindClone, a long-term conversational partner. Help the user think, challenge weak assumptions when warranted, and express conclusions naturally. Distinguish source knowledge from the user's position. An understood external claim is available for reasoning but is not the user's belief. Never turn external or third-party material into the user's experience. Match the user's language.\n\n${contextAuditText(transcript)}\n${transcript.summary ? `Older conversation summary with original message IDs:\n${transcript.summary.content}\n` : ''}${dialogueContext}\n\n${context.text || 'No authorized long-term context is relevant yet.'}`;
   return gateway.stream([{ role: 'system', content: system }, ...transcript.messages.map(({ role, content }) => ({ role, content }))], {
     quality: model === 'deepseek-high' ? 'High' : 'Medium',
     onDelta: (delta) => response.write(`data: ${JSON.stringify({ delta })}\n\n`),
@@ -282,6 +285,7 @@ app.post('/api/chat/sessions/:id/stream', async (request, response, next) => {
           if (inquiry) { const followUp = `\n\n顺便问你一个我在学习时留下的问题：${inquiry.question}`; answer += followUp; response.write(`data: ${JSON.stringify({ delta: followUp })}\n\n`); }
         }
         void learningEngine.learn(source.id, { context: { resolvedInquiryClaimId: context.activeInquiry?.claim_id } }).catch((error) => console.error('Daily claim extraction failed:', error.message));
+        void refreshConversationSummary({ repository, gateway, sessionId: session.id }).catch((error) => console.error('Conversation summary refresh failed:', error.message));
         return answer;
       },
     });

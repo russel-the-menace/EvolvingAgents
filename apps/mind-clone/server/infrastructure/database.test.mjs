@@ -62,3 +62,17 @@ test('context runs preserve selected items and omitted-history reasons', () => {
   assert.deepEqual(repository.listContextRuns(session.id), [runId]);
   repository.close();
 });
+
+test('conversation summaries are versioned and preserve covered message ids', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'mindclone-summary-test-'));
+  const repository = openDatabase(join(directory, 'mindclone.sqlite'), join(directory, 'missing.json'));
+  const session = repository.createSession();
+  const firstId = repository.replaceContextSummary({ sessionId: session.id, content: 'First', messageIds: ['m1'], coveredThroughOrdinal: 0 });
+  const secondId = repository.replaceContextSummary({ sessionId: session.id, content: 'Second', messageIds: ['m1', 'm2'], coveredThroughOrdinal: 1 });
+  const active = repository.getActiveContextSummary(session.id);
+  assert.notEqual(firstId, secondId);
+  assert.equal(active.version, 2);
+  assert.deepEqual(active.messageIds, ['m1', 'm2']);
+  assert.equal(repository.db.prepare('SELECT COUNT(*) AS count FROM context_summaries WHERE superseded_at IS NOT NULL').get().count, 1);
+  repository.close();
+});

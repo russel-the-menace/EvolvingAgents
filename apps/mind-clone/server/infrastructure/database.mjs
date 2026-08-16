@@ -49,6 +49,12 @@ export function openDatabase(path, legacyPath) {
       char_count INTEGER NOT NULL, content TEXT NOT NULL,
       PRIMARY KEY (run_id, ordinal)
     );
+    CREATE TABLE IF NOT EXISTS context_summaries (
+      id TEXT PRIMARY KEY, session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+      summary_type TEXT NOT NULL, content TEXT NOT NULL, message_ids_json TEXT NOT NULL,
+      covered_through_ordinal INTEGER NOT NULL, version INTEGER NOT NULL,
+      created_at TEXT NOT NULL, superseded_at TEXT
+    );
     CREATE TABLE IF NOT EXISTS sessions (
       id TEXT PRIMARY KEY, title TEXT NOT NULL, pinned INTEGER NOT NULL DEFAULT 0,
       created_at TEXT NOT NULL, updated_at TEXT NOT NULL
@@ -236,6 +242,33 @@ function createRepository(db, learningStore, chatHistory) {
     },
     listContextRuns: (sessionId) => db.prepare('SELECT id FROM context_runs WHERE session_id = ? ORDER BY created_at DESC').all(sessionId)
       .map((row) => row.id),
+    listMessagesForSummary: (sessionId, afterOrdinal = -1, throughOrdinal = Number.MAX_SAFE_INTEGER) => db.prepare(
+      'SELECT id, role, content, created_at, ordinal FROM messages WHERE session_id = ? AND ordinal > ? AND ordinal <= ? ORDER BY ordinal',
+    ).all(sessionId, afterOrdinal, throughOrdinal).map((row) => ({
+      id: row.id, role: row.role, content: row.content, createdAt: row.created_at, ordinal: row.ordinal,
+    })),
+    getActiveContextSummary: (sessionId) => {
+      const row = db.prepare('SELECT * FROM context_summaries WHERE session_id = ? AND superseded_at IS NULL ORDER BY version DESC LIMIT 1').get(sessionId);
+      return row && { id: row.id, sessionId: row.session_id, summaryType: row.summary_type, content: row.content,
+        messageIds: json(row.message_ids_json), coveredThroughOrdinal: row.covered_through_ordinal,
+        version: row.version, createdAt: row.created_at, supersededAt: row.superseded_at };
+    },
+    replaceContextSummary: (summary) => {
+      const current = db.prepare('SELECT * FROM context_summaries WHERE session_id = ? AND superseded_at IS NULL ORDER BY version DESC LIMIT 1').get(summary.sessionId);
+      const now = new Date().toISOString();
+      const id = summary.id || randomUUID();
+      db.exec('BEGIN IMMEDIATE');
+      try {
+        if (current) db.prepare('UPDATE context_summaries SET superseded_at = ? WHERE id = ?').run(now, current.id);
+        db.prepare(`INSERT INTO context_summaries
+          (id, session_id, summary_type, content, message_ids_json, covered_through_ordinal, version, created_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
+          .run(id, summary.sessionId, summary.summaryType || 'conversation', summary.content,
+            JSON.stringify(summary.messageIds || []), summary.coveredThroughOrdinal, (current?.version || 0) + 1, now);
+        db.exec('COMMIT');
+      } catch (error) { db.exec('ROLLBACK'); throw error; }
+      return id;
+    },
     listSessions: () => db.prepare('SELECT * FROM sessions ORDER BY pinned DESC, updated_at DESC').all().map((row) => mapSession(db, row)),
     getSession: (id) => { const row = db.prepare('SELECT * FROM sessions WHERE id = ?').get(id); return row && mapSession(db, row); },
     createSession: () => {
