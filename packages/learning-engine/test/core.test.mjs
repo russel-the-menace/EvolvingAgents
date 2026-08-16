@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { DatabaseSync } from 'node:sqlite';
-import { createLearningEngine, createSqliteLearningStore } from '../src/index.mjs';
+import { createLearningEngine, createSqliteLearningStore, parseModelJson } from '../src/index.mjs';
 
 function fixture(overrides = {}) {
   const db = new DatabaseSync(':memory:');
@@ -84,4 +84,8 @@ test('relearning replaces stale derivations and retains evidence offsets', async
   assert.equal(store.getClaim(firstId), undefined);
   assert.match(second.claims[0].proposition, /^v2:/);
   db.close();
+});
+
+test('parses the first complete JSON value from a verbose model response', () => {
+  assert.deepEqual(parseModelJson('```json\n[{"quote":"brackets [stay] in strings"}]\n```\nExtra explanation.'), [{ quote: 'brackets [stay] in strings' }]);
 });
