@@ -43,3 +43,22 @@ test('re-extraction removes stale claims, search rows, and inquiries', () => {
   assert.equal(repository.db.prepare('SELECT COUNT(*) AS count FROM claim_search').get().count, 0);
   repository.close();
 });
+
+test('context runs preserve selected items and omitted-history reasons', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'mindclone-context-run-test-'));
+  const repository = openDatabase(join(directory, 'mindclone.sqlite'), join(directory, 'missing.json'));
+  const session = repository.createSession();
+  const runId = repository.addContextRun({
+    sessionId: session.id, question: 'What changed?', strategy: 'bounded_transcript', budgetChars: 2000,
+    usedChars: 1200, totalMessages: 40, omittedMessages: 30,
+    omitted: [{ id: 'm1', reason: 'working_context_budget' }],
+    items: [{ type: 'message', id: 'm40', content: 'Latest fact', selectionReason: 'transcript_budget' }],
+  });
+  const run = repository.getContextRun(runId);
+  assert.equal(run.sessionId, session.id);
+  assert.equal(run.omittedMessages, 30);
+  assert.deepEqual(run.omitted, [{ id: 'm1', reason: 'working_context_budget' }]);
+  assert.equal(run.items[0].content, 'Latest fact');
+  assert.deepEqual(repository.listContextRuns(session.id), [runId]);
+  repository.close();
+});

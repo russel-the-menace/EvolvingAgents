@@ -35,6 +35,20 @@ export function openDatabase(path, legacyPath) {
       id TEXT PRIMARY KEY, scene_id TEXT REFERENCES scenes(id), question TEXT NOT NULL,
       plan_json TEXT NOT NULL, answer TEXT, audit_json TEXT, created_at TEXT NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS context_runs (
+      id TEXT PRIMARY KEY, session_id TEXT REFERENCES sessions(id) ON DELETE CASCADE,
+      scene_id TEXT REFERENCES scenes(id) ON DELETE CASCADE, question TEXT NOT NULL,
+      strategy TEXT NOT NULL, budget_chars INTEGER NOT NULL, used_chars INTEGER NOT NULL,
+      total_messages INTEGER NOT NULL DEFAULT 0, omitted_messages INTEGER NOT NULL DEFAULT 0,
+      omitted_json TEXT NOT NULL DEFAULT '[]', created_at TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS context_run_items (
+      run_id TEXT NOT NULL REFERENCES context_runs(id) ON DELETE CASCADE,
+      ordinal INTEGER NOT NULL, item_type TEXT NOT NULL, item_id TEXT,
+      source_id TEXT, evidence_id TEXT, selection_reason TEXT NOT NULL,
+      char_count INTEGER NOT NULL, content TEXT NOT NULL,
+      PRIMARY KEY (run_id, ordinal)
+    );
     CREATE TABLE IF NOT EXISTS sessions (
       id TEXT PRIMARY KEY, title TEXT NOT NULL, pinned INTEGER NOT NULL DEFAULT 0,
       created_at TEXT NOT NULL, updated_at TEXT NOT NULL
@@ -187,6 +201,41 @@ function createRepository(db, learningStore, chatHistory) {
         .run(id, run.sceneId || null, run.question, JSON.stringify(run.plan), run.answer || null, JSON.stringify(run.audit || {}), new Date().toISOString());
       return id;
     },
+    addContextRun: (run) => {
+      const id = run.id || randomUUID();
+      const createdAt = run.createdAt || new Date().toISOString();
+      db.exec('BEGIN IMMEDIATE');
+      try {
+        db.prepare(`INSERT INTO context_runs
+          (id, session_id, scene_id, question, strategy, budget_chars, used_chars, total_messages, omitted_messages, omitted_json, created_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+          .run(id, run.sessionId || null, run.sceneId || null, run.question, run.strategy,
+            run.budgetChars, run.usedChars, run.totalMessages || 0, run.omittedMessages || 0,
+            JSON.stringify(run.omitted || []), createdAt);
+        const insertItem = db.prepare(`INSERT INTO context_run_items
+          (run_id, ordinal, item_type, item_id, source_id, evidence_id, selection_reason, char_count, content)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+        for (const [ordinal, item] of (run.items || []).entries()) insertItem.run(
+          id, ordinal, item.type, item.id || null, item.sourceId || null, item.evidenceId || null,
+          item.selectionReason || 'selected', String(item.content || '').length, String(item.content || ''),
+        );
+        db.exec('COMMIT');
+      } catch (error) { db.exec('ROLLBACK'); throw error; }
+      return id;
+    },
+    getContextRun: (id) => {
+      const row = db.prepare('SELECT * FROM context_runs WHERE id = ?').get(id);
+      if (!row) return null;
+      const items = db.prepare('SELECT * FROM context_run_items WHERE run_id = ? ORDER BY ordinal').all(id)
+        .map((item) => ({ type: item.item_type, id: item.item_id, sourceId: item.source_id, evidenceId: item.evidence_id,
+          selectionReason: item.selection_reason, charCount: item.char_count, content: item.content }));
+      return { id: row.id, sessionId: row.session_id, sceneId: row.scene_id, question: row.question,
+        strategy: row.strategy, budgetChars: row.budget_chars, usedChars: row.used_chars,
+        totalMessages: row.total_messages, omittedMessages: row.omitted_messages,
+        omitted: json(row.omitted_json), createdAt: row.created_at, items };
+    },
+    listContextRuns: (sessionId) => db.prepare('SELECT id FROM context_runs WHERE session_id = ? ORDER BY created_at DESC').all(sessionId)
+      .map((row) => row.id),
     listSessions: () => db.prepare('SELECT * FROM sessions ORDER BY pinned DESC, updated_at DESC').all().map((row) => mapSession(db, row)),
     getSession: (id) => { const row = db.prepare('SELECT * FROM sessions WHERE id = ?').get(id); return row && mapSession(db, row); },
     createSession: () => {

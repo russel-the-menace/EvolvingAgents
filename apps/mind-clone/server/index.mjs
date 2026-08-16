@@ -61,13 +61,23 @@ async function relevantContext(query) {
   const sections = [];
   if (personal.length) sections.push(`User-owned authorized cognition:\n${personal.join('\n')}`);
   if (knowledge.length) sections.push(`External understood knowledge for reasoning only. Never claim its experiences as the user's:\n${knowledge.join('\n')}`);
-  return sections.join('\n\n');
+  return { text: sections.join('\n\n'), ranked };
 }
 
 async function streamDailyChat(session, response, query, model, dialogueContext = '') {
   const context = await relevantContext(query);
   const transcript = compileTranscript(session.messages, { budgetChars: 24_000, recentCount: 8 });
-  const system = `You are MindClone, a long-term conversational partner. Help the user think, challenge weak assumptions when warranted, and express conclusions naturally. Distinguish source knowledge from the user's position. An understood external claim is available for reasoning but is not the user's belief. Never turn external or third-party material into the user's experience. Match the user's language.\n\n${contextAuditText(transcript)}\n${dialogueContext}\n\n${context || 'No authorized long-term context is relevant yet.'}`;
+  repository.addContextRun({
+    sessionId: session.id, question: query, ...transcript,
+    items: [
+      ...transcript.messages.map((message) => ({ type: 'message', id: message.id, content: message.content, selectionReason: 'transcript_budget' })),
+      ...context.ranked.flatMap(({ claim, evidence }) => [
+        { type: 'claim', id: claim.id, content: claim.proposition, selectionReason: 'query_retrieval' },
+        ...(evidence || []).map((item) => ({ type: 'evidence', id: item.id, sourceId: item.source?.id, evidenceId: item.id, content: item.text, selectionReason: 'supports_claim' })),
+      ]),
+    ],
+  });
+  const system = `You are MindClone, a long-term conversational partner. Help the user think, challenge weak assumptions when warranted, and express conclusions naturally. Distinguish source knowledge from the user's position. An understood external claim is available for reasoning but is not the user's belief. Never turn external or third-party material into the user's experience. Match the user's language.\n\n${contextAuditText(transcript)}\n${dialogueContext}\n\n${context.text || 'No authorized long-term context is relevant yet.'}`;
   return gateway.stream([{ role: 'system', content: system }, ...transcript.messages.map(({ role, content }) => ({ role, content }))], {
     quality: model === 'deepseek-high' ? 'High' : 'Medium',
     onDelta: (delta) => response.write(`data: ${JSON.stringify({ delta })}\n\n`),
@@ -87,6 +97,16 @@ app.get('/api/memory', (_, response) => {
   const claims = repository.listClaims();
   response.json({ documents: repository.listSources(), claims, memories: claims.map(mapClaimToLegacy), inquiries: repository.listInquiries() });
 });
+
+app.get('/api/context-runs/:id', (request, response) => {
+  const run = repository.getContextRun(request.params.id);
+  if (!run) return response.status(404).json({ error: 'Context run was not found.' });
+  response.json({ run });
+});
+
+app.get('/api/chat/sessions/:id/context-runs', (request, response) => response.json({
+  runIds: repository.listContextRuns(request.params.id),
+}));
 
 app.post('/api/memory/documents', async (request, response, next) => {
   try {
