@@ -87,3 +87,26 @@ test('scene summaries preserve answer-run provenance without changing the scene'
   assert.equal(repository.getScene('scene-1').writeBack, false);
   repository.close();
 });
+
+test('editing a branch removes derived cognition, summaries, and prompt copies for deleted messages', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'mindclone-branch-cleanup-test-'));
+  const repository = openDatabase(join(directory, 'mindclone.sqlite'), join(directory, 'missing.json'));
+  const session = repository.createSession();
+  const first = repository.addMessage(session.id, { role: 'user', content: 'Keep this' });
+  const keptAnswer = repository.addMessage(session.id, { role: 'assistant', content: 'Kept answer' });
+  const deleted = repository.addMessage(session.id, { role: 'user', content: 'Delete this' });
+  repository.addMessage(session.id, { role: 'assistant', content: 'Deleted answer' });
+  const source = repository.addSource({ title: 'Derived turn', sourceType: 'conversation', content: 'Delete this', metadata: { directConversation: true, sessionId: session.id, userMessageId: deleted.id } });
+  const evidenceId = repository.addEvidence({ sourceId: source.id, text: 'Delete this', owner: 'user' });
+  repository.addClaim({ title: 'Deleted claim', proposition: 'Delete this', kind: 'viewpoint', owner: 'user', epistemicStatus: 'endorsed', authorizationScope: 'personal_view' }, evidenceId);
+  repository.replaceContextSummary({ sessionId: session.id, content: 'Contains deleted text', messageIds: [deleted.id], coveredThroughOrdinal: 2 });
+  repository.addContextRun({ sessionId: session.id, question: 'Delete this', strategy: 'full_transcript', budgetChars: 2000, usedChars: 20, totalMessages: 4, items: [{ type: 'message', id: deleted.id, content: 'Delete this' }] });
+
+  assert.equal(repository.truncateSession(session.id, deleted.id), true);
+  assert.deepEqual(repository.getSession(session.id).messages.map((message) => message.id), [first.id, keptAnswer.id]);
+  assert.equal(repository.getSource(source.id), undefined);
+  assert.equal(repository.listClaims().length, 0);
+  assert.equal(repository.getActiveContextSummary(session.id), undefined);
+  assert.deepEqual(repository.listContextRuns(session.id), []);
+  repository.close();
+});

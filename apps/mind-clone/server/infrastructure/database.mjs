@@ -136,6 +136,19 @@ function mapSession(db, row) {
   return { id: row.id, title: row.title, pinned: Boolean(row.pinned), createdAt: row.created_at, updatedAt: row.updated_at, messages };
 }
 
+function deleteConversationSources(db, learningStore, sessionId, messageIds) {
+  if (!messageIds.length) return 0;
+  const placeholders = messageIds.map(() => '?').join(',');
+  const sourceIds = db.prepare(`SELECT id FROM sources
+    WHERE json_extract(metadata_json, '$.sessionId') = ?
+    AND json_extract(metadata_json, '$.userMessageId') IN (${placeholders})`).all(sessionId, ...messageIds).map((row) => row.id);
+  for (const sourceId of sourceIds) {
+    learningStore.deleteClaimsForSource(sourceId);
+    db.prepare('DELETE FROM sources WHERE id = ?').run(sourceId);
+  }
+  return sourceIds.length;
+}
+
 function createRepository(db, learningStore, chatHistory) {
   return {
     ...learningStore,
@@ -332,6 +345,20 @@ function createRepository(db, learningStore, chatHistory) {
     },
     deleteSession: (id) => db.prepare('DELETE FROM sessions WHERE id = ?').run(id),
     ...chatHistory,
+    truncateSession: (sessionId, messageId) => {
+      const row = db.prepare('SELECT ordinal FROM messages WHERE id = ? AND session_id = ?').get(messageId, sessionId);
+      if (!row) return false;
+      const messageIds = db.prepare('SELECT id FROM messages WHERE session_id = ? AND ordinal >= ?').all(sessionId, row.ordinal).map((item) => item.id);
+      deleteConversationSources(db, learningStore, sessionId, messageIds);
+      db.prepare('DELETE FROM context_runs WHERE session_id = ?').run(sessionId);
+      db.prepare('DELETE FROM context_summaries WHERE session_id = ?').run(sessionId);
+      return chatHistory.truncateSession(sessionId, messageId);
+    },
+    deleteSession: (id) => {
+      const messageIds = db.prepare('SELECT id FROM messages WHERE session_id = ?').all(id).map((item) => item.id);
+      deleteConversationSources(db, learningStore, id, messageIds);
+      return chatHistory.deleteSession(id);
+    },
     close: () => db.close(),
   };
 }

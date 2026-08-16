@@ -303,7 +303,8 @@ app.post('/api/chat/sessions/:id/stream', async (request, response, next) => {
       },
       afterAnswer: async ({ content: initialAnswer, session, context }) => {
         let answer = initialAnswer;
-        const { source } = await learningEngine.ingest({ id: randomUUID(), title: `Daily chat: ${session.title}`, sourceType: 'conversation', content: `User: ${String(request.body.content).trim()}\n\nMindClone: ${answer}`, sourceActor: 'user_and_mindclone', metadata: { directConversation: true }, createdAt: new Date().toISOString() }, { deduplicate: false });
+        const userMessage = [...session.messages].reverse().find((message) => message.role === 'user');
+        const { source } = await learningEngine.ingest({ id: randomUUID(), title: `Daily chat: ${session.title}`, sourceType: 'conversation', content: `User: ${String(request.body.content).trim()}\n\nMindClone: ${answer}`, sourceActor: 'user_and_mindclone', metadata: { directConversation: true, sessionId: session.id, userMessageId: userMessage?.id }, createdAt: new Date().toISOString() }, { deduplicate: false });
         if (context.activeInquiry) applyInquiryReply({ repository, inquiry: context.activeInquiry, reply: context.inquiryReply, evidenceSourceId: source.id });
         if (!context.activeInquiry) {
           const inquiry = repository.presentNextInquiry(session.id);
