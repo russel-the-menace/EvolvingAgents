@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { createModelGateway, createOpenAICompatibleGateway, responseDelta, responseText } from '../src/index.mjs';
+import { createModelGateway, createOllamaGateway, createOpenAICompatibleGateway, responseDelta, responseText } from '../src/index.mjs';
 
 test('extracts an OpenAI-compatible assistant response', () => {
   assert.equal(responseText({ choices: [{ message: { content: 'Policy answer' } }] }), 'Policy answer');
@@ -34,6 +34,17 @@ test('sends OpenAI-compatible local model requests with a model name', async () 
   assert.equal(request.url, 'http://127.0.0.1:11434/v1/chat/completions');
   assert.equal(request.options.headers.Authorization, 'Bearer local');
   assert.deepEqual(JSON.parse(request.options.body), { model: 'qwen3:8b', messages: [{ role: 'user', content: 'hello' }], stream: false });
+});
+
+test('uses Ollama native chat with thinking disabled', async () => {
+  let request;
+  const gateway = createOllamaGateway({ model: 'qwen3:8b', fetchImpl: async (url, options) => {
+    request = { url, options };
+    return { ok: true, json: async () => ({ message: { role: 'assistant', content: 'local answer' }, done: true }) };
+  } });
+  assert.equal(await gateway.complete([{ role: 'user', content: 'hello' }]), 'local answer');
+  assert.equal(request.url, 'http://127.0.0.1:11434/api/chat');
+  assert.deepEqual(JSON.parse(request.options.body), { model: 'qwen3:8b', messages: [{ role: 'user', content: 'hello' }], stream: false, think: false });
 });
 
 test('preserves gateway status and error messages', async () => {

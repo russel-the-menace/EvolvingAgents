@@ -10,7 +10,7 @@ import { extractDouyinShare, resolveDouyinLink, transcribeShortVideo } from './i
 import { createMindCloneLearningEngine } from './adapters/mindclone-learning.mjs';
 import { applyInquiryReply, classifyInquiryReply, inquiryDialogueContext } from './domain/inquiry-dialogue.mjs';
 import { compileTranscript, contextAuditText } from './domain/context-compiler.mjs';
-import { createModelGateway, createOpenAICompatibleGateway } from '@evolving-agents/model-gateway';
+import { createModelGateway, createOllamaGateway, createOpenAICompatibleGateway } from '@evolving-agents/model-gateway';
 import { createChatRuntime } from '@evolving-agents/chat-runtime';
 
 const app = express();
@@ -21,7 +21,9 @@ const repository = openDatabase(
 );
 const gateway = createModelGateway({ baseUrl: process.env.GATEWAY_BASE_URL || 'https://feiwan.online', apiKey: process.env.GATEWAY_API_KEY || 'yeatom' });
 const localModel = process.env.LOCAL_MODEL_BASE_URL && process.env.LOCAL_MODEL_NAME
-  ? createOpenAICompatibleGateway({ baseUrl: process.env.LOCAL_MODEL_BASE_URL, model: process.env.LOCAL_MODEL_NAME, apiKey: process.env.LOCAL_MODEL_API_KEY || 'local' })
+  ? (process.env.LOCAL_MODEL_PROVIDER === 'ollama'
+    ? createOllamaGateway({ baseUrl: process.env.LOCAL_MODEL_BASE_URL, model: process.env.LOCAL_MODEL_NAME })
+    : createOpenAICompatibleGateway({ baseUrl: process.env.LOCAL_MODEL_BASE_URL, model: process.env.LOCAL_MODEL_NAME, apiKey: process.env.LOCAL_MODEL_API_KEY || 'local' }))
   : null;
 const chatRuntime = createChatRuntime(repository, { titleLength: 28 });
 const learningEngine = createMindCloneLearningEngine(repository, gateway);

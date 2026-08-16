@@ -127,3 +127,52 @@ export function createOpenAICompatibleGateway({ baseUrl, model, apiKey = 'local'
     },
   };
 }
+
+export function createOllamaGateway({ baseUrl = 'http://127.0.0.1:11434', model, timeoutMs = 120_000, fetchImpl = fetch }) {
+  if (!baseUrl || !model) throw new Error('Ollama baseUrl and model are required.');
+  const endpoint = `${baseUrl.replace(/\/$/, '')}/api/chat`;
+  const request = (messages, stream, signal) => fetchImpl(endpoint, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ model, messages, stream, think: false }), signal: requestSignal(signal, timeoutMs),
+  });
+  return {
+    async complete(messages, { signal } = {}) {
+      if (!Array.isArray(messages) || !messages.length) throw new Error('Gateway messages must be a non-empty array.');
+      const response = await request(messages, false, signal);
+      if (!response.ok) throw await gatewayError(response);
+      const body = await response.json().catch(() => ({}));
+      const content = body?.message?.content;
+      if (typeof content !== 'string' || !content.trim()) throw new Error('Ollama returned no assistant message.');
+      return content;
+    },
+    async stream(messages, { signal, onDelta = () => {} } = {}) {
+      if (!Array.isArray(messages) || !messages.length) throw new Error('Gateway messages must be a non-empty array.');
+      const response = await request(messages, true, signal);
+      if (!response.ok) throw await gatewayError(response);
+      if (!response.body) throw new Error('Ollama returned no response stream.');
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let pending = '';
+      let answer = '';
+      const consume = (line) => {
+        if (!line.trim()) return false;
+        const body = JSON.parse(line);
+        if (body.error) throw new Error(body.error);
+        const delta = body.message?.content;
+        if (typeof delta === 'string' && delta) { answer += delta; onDelta(delta); }
+        return Boolean(body.done);
+      };
+      while (true) {
+        const { value, done } = await reader.read();
+        pending += decoder.decode(value, { stream: !done });
+        const lines = pending.split(/\r?\n/);
+        pending = lines.pop() ?? '';
+        for (const line of lines) if (consume(line)) return answer;
+        if (done) break;
+      }
+      if (pending && consume(pending)) return answer;
+      if (!answer.trim()) throw new Error('Ollama returned no assistant message.');
+      return answer;
+    },
+  };
+}
