@@ -29,6 +29,19 @@ test('preserves gateway status and error messages', async () => {
   await assert.rejects(() => gateway.complete([{ role: 'user', content: 'hello' }]), (error) => error.status === 429 && error.message === 'rate limited');
 });
 
+test('uploads files through the gateway file endpoint', async () => {
+  let request;
+  const gateway = createModelGateway({ baseUrl: 'https://gateway.example/', apiKey: 'secret', fetchImpl: async (url, options) => {
+    request = { url, options };
+    return { ok: true, json: async () => ({ id: 'file_123' }) };
+  } });
+  assert.equal(await gateway.uploadFile({ name: 'guide.pdf', type: 'application/pdf', data: new Uint8Array([1, 2, 3]) }), 'file_123');
+  assert.equal(request.url, 'https://gateway.example/v1/files');
+  assert.equal(request.options.headers.Authorization, 'Bearer secret');
+  assert.equal(request.options.body.get('purpose'), 'user_data');
+  assert.equal(request.options.body.get('file').name, 'guide.pdf');
+});
+
 test('streams split SSE events and returns the complete answer', async () => {
   const encoder = new TextEncoder();
   const chunks = ['data: {"choices":[{"delta":{"content":"Hel', 'lo"}}]}\n\ndata: {"choices":[{"delta":{"content":" world"}}]}\r\n\r\ndata: [DONE]\n\n'];

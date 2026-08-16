@@ -22,8 +22,20 @@ async function gatewayError(response) {
 
 export function createModelGateway({ baseUrl, apiKey, provider = 'deepseek', timeoutMs = 120_000, fetchImpl = fetch }) {
   if (!baseUrl || !apiKey) throw new Error('Gateway baseUrl and apiKey are required.');
-  const endpoint = `${baseUrl.replace(/\/$/, '')}/v1/chat/completions`;
+  const root = baseUrl.replace(/\/$/, '');
+  const endpoint = `${root}/v1/chat/completions`;
   return {
+    async uploadFile({ name, type, data }, { signal } = {}) {
+      if (!name || !type || !(data instanceof Uint8Array) || !data.length) throw new Error('Gateway file name, type, and data are required.');
+      const form = new FormData();
+      form.append('purpose', 'user_data');
+      form.append('file', new Blob([data], { type }), name);
+      const response = await fetchImpl(`${root}/v1/files`, { method: 'POST', headers: { Authorization: `Bearer ${apiKey}` }, body: form, signal: requestSignal(signal, timeoutMs) });
+      if (!response.ok) throw await gatewayError(response);
+      const body = await response.json().catch(() => ({}));
+      if (typeof body.id !== 'string' || !body.id) throw new Error('Gateway returned no file ID.');
+      return body.id;
+    },
     async complete(messages, { quality = 'Medium', signal } = {}) {
       if (!Array.isArray(messages) || !messages.length) throw new Error('Gateway messages must be a non-empty array.');
       const response = await fetchImpl(endpoint, { method: 'POST', headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ provider, quality, messages }), signal: requestSignal(signal, timeoutMs) });
