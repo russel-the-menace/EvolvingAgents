@@ -9,6 +9,7 @@ import { openDatabase } from './infrastructure/database.mjs';
 import { extractDouyinShare, resolveDouyinLink, transcribeShortVideo } from './infrastructure/video-transcription.mjs';
 import { createMindCloneLearningEngine } from './adapters/mindclone-learning.mjs';
 import { applyInquiryReply, classifyInquiryReply, inquiryDialogueContext } from './domain/inquiry-dialogue.mjs';
+import { compileTranscript, contextAuditText } from './domain/context-compiler.mjs';
 import { createModelGateway } from '@evolving-agents/model-gateway';
 import { createChatRuntime } from '@evolving-agents/chat-runtime';
 
@@ -50,8 +51,8 @@ function mapClaimToLegacy(claim) {
 
 async function relevantContext(query) {
   const ranked = await learningEngine.retrieve(query, { limit: 12 });
-  const personal = ranked.filter(({ claim }) => claim.owner === 'user').map(({ claim }) => `- [${claim.id}] ${claim.kind}: ${clip(claim.proposition, 360)}`);
-  const knowledge = ranked.filter(({ claim }) => claim.owner !== 'user').map(({ claim }) => `- [${claim.id}] ${claim.kind}: ${clip(claim.proposition, 360)}`);
+  const personal = ranked.filter(({ claim }) => claim.owner === 'user').map(({ claim, evidence }) => `- [${claim.id}] ${claim.kind}: ${clip(claim.proposition, 360)}\n  Source evidence: ${clip(evidence?.map((item) => item.text).join(' | '), 600)}`);
+  const knowledge = ranked.filter(({ claim }) => claim.owner !== 'user').map(({ claim, evidence }) => `- [${claim.id}] ${claim.kind}: ${clip(claim.proposition, 360)}\n  Source evidence: ${clip(evidence?.map((item) => item.text).join(' | '), 600)}`);
   const sections = [];
   if (personal.length) sections.push(`User-owned authorized cognition:\n${personal.join('\n')}`);
   if (knowledge.length) sections.push(`External understood knowledge for reasoning only. Never claim its experiences as the user's:\n${knowledge.join('\n')}`);
@@ -60,8 +61,9 @@ async function relevantContext(query) {
 
 async function streamDailyChat(session, response, query, model, dialogueContext = '') {
   const context = await relevantContext(query);
-  const system = `You are MindClone, a long-term conversational partner. Help the user think, challenge weak assumptions when warranted, and express conclusions naturally. Distinguish source knowledge from the user's position. An understood external claim is available for reasoning but is not the user's belief. Never turn external or third-party material into the user's experience. Match the user's language.\n\n${dialogueContext}\n\n${context || 'No authorized long-term context is relevant yet.'}`;
-  return gateway.stream([{ role: 'system', content: system }, ...session.messages.slice(-24).map(({ role, content }) => ({ role, content }))], {
+  const transcript = compileTranscript(session.messages, { budgetChars: 24_000, recentCount: 8 });
+  const system = `You are MindClone, a long-term conversational partner. Help the user think, challenge weak assumptions when warranted, and express conclusions naturally. Distinguish source knowledge from the user's position. An understood external claim is available for reasoning but is not the user's belief. Never turn external or third-party material into the user's experience. Match the user's language.\n\n${contextAuditText(transcript)}\n${dialogueContext}\n\n${context || 'No authorized long-term context is relevant yet.'}`;
+  return gateway.stream([{ role: 'system', content: system }, ...transcript.messages.map(({ role, content }) => ({ role, content }))], {
     quality: model === 'deepseek-high' ? 'High' : 'Medium',
     onDelta: (delta) => response.write(`data: ${JSON.stringify({ delta })}\n\n`),
   });
