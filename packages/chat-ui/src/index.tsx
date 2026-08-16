@@ -2,6 +2,8 @@ import { Children, isValidElement, useCallback, useEffect, useLayoutEffect, useR
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { ArrowDown, ChevronDown, Copy, MoreHorizontal, PanelLeftClose, Pencil, Pin, Plus, SendHorizontal, Settings2, Trash2 } from 'lucide-react';
+import { normalizeChatMarkdown } from './markdown';
+export { normalizeChatMarkdown } from './markdown';
 
 export type ChatMessage = { id: string; role: 'user' | 'assistant'; content: string; createdAt?: string };
 export type ChatSession = { id: string; title: string; pinned?: boolean; createdAt?: string; updatedAt?: string; messages: ChatMessage[] };
@@ -131,7 +133,7 @@ export function MarkdownText({ content }: { content: string }) {
       return <p className={standaloneStrong ? 'standalone-strong' : undefined}>{children}</p>;
     },
     table: ({ children }) => <div className="chat-table-scroll"><table>{children}</table></div>,
-  }}>{content}</ReactMarkdown></div>;
+  }}>{normalizeChatMarkdown(content)}</ReactMarkdown></div>;
 }
 export function ThinkingIndicator() { return <span className="chat-thinking" role="status" aria-label="Thinking"><span>Thinking</span><i /><i /><i /></span>; }
 
