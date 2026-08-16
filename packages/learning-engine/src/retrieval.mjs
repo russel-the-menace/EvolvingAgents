@@ -29,6 +29,21 @@ function mergeCandidates(groups) {
   return [...merged.values()];
 }
 
+function matchesFilters(candidate, options) {
+  if (options.sourceIds?.length && !candidate.evidence.some((item) => options.sourceIds.includes(item.source?.id || item.sourceId))) return false;
+  if (options.owners?.length && !options.owners.includes(candidate.claim.owner)) return false;
+  if (options.authorizationScopes?.length && !options.authorizationScopes.includes(candidate.claim.authorizationScope)) return false;
+  if (options.sceneId && candidate.claim.sceneId !== options.sceneId) return false;
+  return true;
+}
+
+function withOriginalContext(store, candidate, options) {
+  if (!options.includeOriginal || typeof store.evidenceContext !== 'function') return candidate;
+  return { ...candidate, evidence: candidate.evidence.map((item) => ({
+    ...item, originalContext: store.evidenceContext(item.id, { paddingChars: options.paddingChars }),
+  })) };
+}
+
 export async function retrieveKnowledge({ store, policy, reranker, retrievers }, query, options = {}) {
   const limit = Math.max(1, options.limit || 8);
   const candidateLimit = Math.max(limit, options.candidateLimit || limit * 12);
@@ -42,7 +57,7 @@ export async function retrieveKnowledge({ store, policy, reranker, retrievers },
     store, query, limit: candidateLimit, context, now,
   }))));
   const eligible = [];
-  for (const candidate of candidates.filter((item) => validAt(item.claim, now))) {
+  for (const candidate of candidates.filter((item) => validAt(item.claim, now) && matchesFilters(item, options))) {
     if (await policy.canRetrieve({ ...candidate, query, now, context })) eligible.push(candidate);
   }
   let ranked = eligible.map((candidate) => ({
@@ -52,9 +67,10 @@ export async function retrieveKnowledge({ store, policy, reranker, retrievers },
   ranked = ranked.filter((candidate) => candidate.score > 0 || options.includeZeroScore);
   if (reranker) {
     const reranked = await reranker({ query, candidates: ranked, context, limit });
-    return (reranked || []).slice(0, limit);
+    return (reranked || []).slice(0, limit).map((candidate) => withOriginalContext(store, candidate, options));
   }
-  return ranked.sort((left, right) => right.score - left.score).slice(0, limit);
+  return ranked.sort((left, right) => right.score - left.score).slice(0, limit)
+    .map((candidate) => withOriginalContext(store, candidate, options));
 }
 
 export function buildEvidenceContext(results) {

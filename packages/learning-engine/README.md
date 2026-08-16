@@ -51,6 +51,13 @@ const results = await engine.retrieve(question, {
 });
 
 const evidence = engine.buildEvidenceContext(results);
+
+const grounded = await engine.retrieveEvidence(question, {
+  sourceIds: optionalNotebookOrSceneSourceIds,
+  owners: ['user', 'external'],
+  authorizationScopes: ['personal_view', 'reasoning_use'],
+  paddingChars: 600,
+});
 ```
 
 ## Consuming The Package

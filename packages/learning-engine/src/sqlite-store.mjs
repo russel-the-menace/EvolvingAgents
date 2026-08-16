@@ -193,6 +193,23 @@ export function createSqliteLearningStore(db) {
       JOIN sources ON sources.id = evidence_units.source_id WHERE claim_evidence.claim_id = ? ORDER BY evidence_units.ordinal`)
       .all(claimId).map((row) => ({ ...mapEvidence(row), source: { id: row.s_id, title: row.s_title, sourceType: row.s_type,
         sourceUri: row.s_uri, sourceActor: row.s_actor, metadata: json(row.s_metadata, {}), createdAt: row.s_created, checksum: row.s_checksum } })),
+    evidenceContext: (evidenceId, options = {}) => {
+      const row = db.prepare(`SELECT evidence_units.*, sources.title AS source_title, sources.content AS source_content,
+        sources.source_type, sources.source_uri, sources.source_actor, sources.metadata_json
+        FROM evidence_units JOIN sources ON sources.id = evidence_units.source_id WHERE evidence_units.id = ?`).get(evidenceId);
+      if (!row) return null;
+      const paddingChars = Math.max(0, options.paddingChars ?? 600);
+      const sourceContent = String(row.source_content || '');
+      const located = row.start_offset == null ? sourceContent.indexOf(row.text) : row.start_offset;
+      const evidenceStart = located >= 0 ? located : 0;
+      const evidenceEnd = row.end_offset ?? evidenceStart + String(row.text || '').length;
+      const startOffset = Math.max(0, evidenceStart - paddingChars);
+      const endOffset = Math.min(sourceContent.length, evidenceEnd + paddingChars);
+      return { evidenceId: row.id, sourceId: row.source_id, sourceTitle: row.source_title,
+        sourceType: row.source_type, sourceUri: row.source_uri, sourceActor: row.source_actor,
+        sourceMetadata: json(row.metadata_json, {}), text: sourceContent.slice(startOffset, endOffset), startOffset, endOffset,
+        evidenceStartOffset: row.start_offset, evidenceEndOffset: row.end_offset };
+    },
     searchClaims: (query, options = {}) => {
       const limit = Math.max(1, options.limit || 100);
       const terms = tokenize(query);

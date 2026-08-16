@@ -89,3 +89,18 @@ test('relearning replaces stale derivations and retains evidence offsets', async
 test('parses the first complete JSON value from a verbose model response', () => {
   assert.deepEqual(parseModelJson('```json\n[{"quote":"brackets [stay] in strings"}]\n```\nExtra explanation.'), [{ quote: 'brackets [stay] in strings' }]);
 });
+
+test('retrieves evidence with source filters and original text neighborhood', async () => {
+  const { db, engine } = fixture();
+  const first = await engine.ingest({ title: 'First source', sourceType: 'note', sourceActor: 'user', content: `Before context. Unique grounded fact. ${'x'.repeat(500)} After context.` });
+  const second = await engine.ingest({ title: 'Second source', sourceType: 'note', sourceActor: 'external', content: 'Unique grounded fact from another source.' });
+  await engine.learn(first.source.id);
+  await engine.learn(second.source.id);
+  const results = await engine.retrieveEvidence('Unique grounded fact', { sourceIds: [first.source.id], owners: ['user'], paddingChars: 20, limit: 4 });
+  assert.equal(results.length, 1);
+  assert.equal(results[0].claim.owner, 'user');
+  assert.equal(results[0].evidence[0].source.id, first.source.id);
+  assert.match(results[0].evidence[0].originalContext.text, /Unique grounded fact/);
+  assert(results[0].evidence[0].originalContext.text.length < first.source.content.length);
+  db.close();
+});

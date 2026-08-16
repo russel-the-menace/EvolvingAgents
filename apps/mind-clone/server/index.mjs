@@ -55,9 +55,10 @@ function mapClaimToLegacy(claim) {
 }
 
 async function relevantContext(query) {
-  const ranked = await learningEngine.retrieve(query, { limit: 12 });
-  const personal = ranked.filter(({ claim }) => claim.owner === 'user').map(({ claim, evidence }) => `- [${claim.id}] ${claim.kind}: ${clip(claim.proposition, 360)}\n  Source evidence: ${clip(evidence?.map((item) => item.text).join(' | '), 600)}`);
-  const knowledge = ranked.filter(({ claim }) => claim.owner !== 'user').map(({ claim, evidence }) => `- [${claim.id}] ${claim.kind}: ${clip(claim.proposition, 360)}\n  Source evidence: ${clip(evidence?.map((item) => item.text).join(' | '), 600)}`);
+  const ranked = await learningEngine.retrieveEvidence(query, { limit: 12, paddingChars: 400 });
+  const evidenceText = (evidence) => evidence?.map((item) => item.originalContext?.text || item.text).join(' | ');
+  const personal = ranked.filter(({ claim }) => claim.owner === 'user').map(({ claim, evidence }) => `- [${claim.id}] ${claim.kind}: ${clip(claim.proposition, 360)}\n  Source evidence: ${clip(evidenceText(evidence), 600)}`);
+  const knowledge = ranked.filter(({ claim }) => claim.owner !== 'user').map(({ claim, evidence }) => `- [${claim.id}] ${claim.kind}: ${clip(claim.proposition, 360)}\n  Source evidence: ${clip(evidenceText(evidence), 600)}`);
   const sections = [];
   if (personal.length) sections.push(`User-owned authorized cognition:\n${personal.join('\n')}`);
   if (knowledge.length) sections.push(`External understood knowledge for reasoning only. Never claim its experiences as the user's:\n${knowledge.join('\n')}`);

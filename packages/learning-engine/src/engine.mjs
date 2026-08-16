@@ -84,6 +84,9 @@ export function createLearningEngine(options) {
     retrieve: (query, retrieveOptions) => retrieveKnowledge({
       store: options.store, policy, reranker: options.reranker, retrievers: options.retrievers,
     }, query, retrieveOptions),
+    retrieveEvidence: (query, retrieveOptions = {}) => retrieveKnowledge({
+      store: options.store, policy, reranker: options.reranker, retrievers: options.retrievers,
+    }, query, { ...retrieveOptions, includeOriginal: true }),
     buildEvidenceContext,
   };
   return engine;
