@@ -11,6 +11,7 @@ const port = Number(process.env.CAMPUS_ATLAS_API_PORT || 5445);
 const gatewayBaseUrl = (process.env.GATEWAY_BASE_URL || 'https://feiwan.online').replace(/\/$/, '');
 const gatewayApiKey = process.env.GATEWAY_API_KEY || 'yeatom';
 const gateway = createModelGateway({ baseUrl: gatewayBaseUrl, apiKey: gatewayApiKey });
+const documentGateway = createModelGateway({ baseUrl: gatewayBaseUrl, apiKey: gatewayApiKey, provider: 'overseas', timeoutMs: 300_000 });
 const databasePath = process.env.CAMPUS_ATLAS_DB || 'data/campus-atlas.sqlite';
 mkdirSync(databasePath.slice(0, databasePath.lastIndexOf('/')) || '.', { recursive: true });
 const db = new DatabaseSync(databasePath);
@@ -32,8 +33,8 @@ export function parseJsonResponse(content) {
   return parseModelJson(content);
 }
 
-function extractionPrompt(title, content) {
-  return `从下面的竞赛资料中抽取事实 claims，只返回 JSON 数组。每项必须有 title、proposition、kind、sourceQuote、tags、validFrom、validTo、confidence。不要补充资料中不存在的日期或资格条件。\n标题：${title}\n资料：${content.slice(0, 50000)}`;
+export function extractionPrompt(title, content) {
+  return `从下面的竞赛资料中抽取事实 claims，只返回 JSON 数组。每项必须有 title、proposition、kind、sourceQuote、tags、validFrom、validTo、confidence。不要补充资料中不存在的日期或资格条件。赛事日期、报名截止日期写入 proposition 或 attributes，不是知识有效期；只有原文明确说明政策/规则的生效或失效区间时才填写 validFrom/validTo，否则必须为 null。\n标题：${title}\n资料：${content.slice(0, 50000)}`;
 }
 
 export function shouldLearnConversation(text) {
@@ -47,10 +48,21 @@ async function callGateway(messages, quality = 'Medium') {
 function sendJson(response, status, body) { response.writeHead(status, { 'Content-Type': 'application/json' }); response.end(JSON.stringify(body)); }
 function sendEvent(response, body) { response.write(`data: ${typeof body === 'string' ? body : JSON.stringify(body)}\n\n`); }
 
-async function requestBody(request) {
+async function requestBody(request, maxBytes = 1_000_000) {
   let raw = '';
-  for await (const chunk of request) { raw += chunk; if (raw.length > 1_000_000) throw new Error('Request body is too large.'); }
+  for await (const chunk of request) { raw += chunk; if (raw.length > maxBytes) throw new Error('Request body is too large.'); }
   return JSON.parse(raw);
+}
+
+export function decodePdfUpload(payload) {
+  const filename = String(payload?.filename || '').split(/[\\/]/).pop()?.slice(0, 180) || '';
+  if (!filename || payload?.mimeType !== 'application/pdf') throw new Error('A PDF file is required.');
+  const match = String(payload.fileData || '').match(/^data:application\/pdf;base64,([A-Za-z0-9+/=\r\n]+)$/);
+  if (!match) throw new Error('The PDF data is invalid.');
+  const data = Buffer.from(match[1], 'base64');
+  if (!data.length || data.length > 10 * 1024 * 1024) throw new Error('PDF files must be 10 MB or smaller.');
+  if (data.subarray(0, 5).toString() !== '%PDF-') throw new Error('The selected file is not a valid PDF.');
+  return { filename, data };
 }
 
 async function createCampusAnswer(messages, quality, stream) {
@@ -97,6 +109,24 @@ const server = createServer(async (request, response) => {
     return sendJson(response, session ? 200 : 404, session ? { session } : { error: 'Conversation was not found.' });
   }
   if (sessionRoute && request.method === 'DELETE') { chatHistory.deleteSession(sessionRoute[1]); response.writeHead(204); return response.end(); }
+  if (request.method === 'POST' && request.url === '/api/knowledge/files') {
+    try {
+      const { filename, data } = decodePdfUpload(await requestBody(request, 14_500_000));
+      const fileId = await documentGateway.uploadFile({ name: filename, type: 'application/pdf', data });
+      const content = await documentGateway.complete([{ role: 'user', content: [
+        { type: 'text', text: 'Extract all accessible text from this PDF faithfully into Markdown. Preserve headings, tables, dates, requirements, and source wording. Do not summarize, infer, or add commentary.' },
+        { type: 'file', file: { file_id: fileId } },
+      ] }], { quality: 'High' });
+      if (content.trim().length < 20) throw new Error('The PDF contained no readable text.');
+      const extracted = parseJsonResponse(await callGateway([{ role: 'system', content: 'You extract conservative structured facts from user-provided documents.' }, { role: 'user', content: extractionPrompt(filename, content) }], 'High'));
+      if (!Array.isArray(extracted)) throw new Error('DeepSeek extraction must return a JSON array.');
+      if (!extracted.length) throw new Error('No facts could be learned from this PDF.');
+      const proposals = extracted.map((proposal) => ({ ...proposal, epistemicStatus: proposal.epistemicStatus || 'user_asserted' }));
+      const ingested = await knowledgeEngine.ingest({ title: filename, content, sourceType: 'uploaded_pdf', sourceActor: 'user', metadata: { domain: 'user_document', accessScope: 'private_profile', filename, proposals } });
+      const learned = await knowledgeEngine.learn(ingested.source.id);
+      return sendJson(response, 200, { source: learned.source, claims: learned.claims, characters: content.length });
+    } catch (error) { return sendJson(response, error.status || 400, { error: error instanceof Error ? error.message : 'PDF learning failed.' }); }
+  }
   if (request.method === 'POST' && request.url === '/api/knowledge/ingest') {
     try {
       const payload = await requestBody(request);
