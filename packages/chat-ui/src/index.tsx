@@ -15,6 +15,35 @@ export type ChatAdapter<Session extends ChatSession> = {
   send: (request: { sessionId: string; content: string; model: string; replaceFromMessageId?: string; signal: AbortSignal; onDelta: (delta: string) => void }) => Promise<void>;
 };
 
+export async function readChatStream(response: Response, onDelta: (delta: string) => void) {
+  if (!response.ok || !response.body) {
+    const payload = await response.json().catch(() => null);
+    throw new Error(payload?.error || `Chat service error (${response.status})`);
+  }
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let pending = '';
+  const consume = (line: string) => {
+    if (!line.startsWith('data:')) return false;
+    const data = line.slice(5).trim();
+    if (data === '[DONE]') return true;
+    if (!data) return false;
+    const payload = JSON.parse(data);
+    if (payload.error) throw new Error(payload.error);
+    if (typeof payload.delta === 'string') onDelta(payload.delta);
+    return false;
+  };
+  while (true) {
+    const { value, done } = await reader.read();
+    pending += decoder.decode(value, { stream: !done });
+    const lines = pending.split(/\r?\n/);
+    pending = lines.pop() ?? '';
+    for (const line of lines) if (consume(line)) return;
+    if (done) break;
+  }
+  if (pending) consume(pending);
+}
+
 export function useChatController<Session extends ChatSession>(adapter: ChatAdapter<Session>, model: string) {
   const [sessions, setSessions] = useState<Session[]>([]);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
