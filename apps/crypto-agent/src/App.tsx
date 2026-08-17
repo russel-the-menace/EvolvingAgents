@@ -125,8 +125,8 @@ export function App() {
   useEffect(() => {
     let active = true;
     const notify = (title: string, body: string) => {
-      window.cryptoAgent?.notify(title, body);
-      if (typeof Notification !== 'undefined' && Notification.permission === 'granted') new Notification(title, { body });
+      if (window.cryptoAgent) window.cryptoAgent.notify(title, body);
+      else if (typeof Notification !== 'undefined' && Notification.permission === 'granted') new Notification(title, { body });
     };
     void api<{ items: NewsItem[] }>('/news?mode=startup').then((result) => {
       if (!active) return;
@@ -140,7 +140,7 @@ export function App() {
     stream.addEventListener('ready', add);
     const onBreaking = (event: MessageEvent<string>) => { const item = (JSON.parse(event.data) as { item: NewsItem }).item; notify('CryptoAgent 爆炸性新闻', item.title); };
     stream.addEventListener('breaking', onBreaking);
-    if (typeof Notification !== 'undefined' && Notification.permission === 'default') void Notification.requestPermission().catch(() => {});
+    if (!window.cryptoAgent && typeof Notification !== 'undefined' && Notification.permission === 'default') void Notification.requestPermission().catch(() => {});
     return () => { active = false; stream.close(); };
   }, []);
   useEffect(() => { document.documentElement.dataset.theme = theme; window.localStorage.setItem('crypto-agent-theme', theme); }, [theme]);
