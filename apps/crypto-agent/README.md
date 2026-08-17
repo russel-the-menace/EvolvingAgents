@@ -25,6 +25,8 @@ npm run dev -- crypto-agent
 
 Open `http://127.0.0.1:5450`. Without a model gateway, explicit market instructions such as `用 50 USDT 市价买入 BTC` still work. Configuring `GATEWAY_BASE_URL` and `GATEWAY_API_KEY` enables natural-language clarification and LIMIT order extraction; Binance credentials are never sent to the model.
 
+The model control uses the gateway's transparent `openai` provider payload. It exposes `GPT-5.6 Luna`, `GPT-5.6 Sol`, and `GPT-5.6 Terra`, with independent `Light`, `Medium`, `High`, `Extra High` (`xhigh`), and `Ultra` reasoning choices. The selected values are sent as `model` and `reasoning_effort`.
+
 For a resident macOS window, use `npm run desktop -- crypto-agent`. Closing the window hides it while the app remains available from the Dock; use `Cmd+Q` to exit.
 
 To create a normal double-clickable Apple Silicon app/DMG, run `npm run dist:mac -- crypto-agent`. The output is `dist/CryptoAgent-0.1.0-arm64.dmg`. For a packaged app, place the ignored `.env` at `~/Library/Application Support/CryptoAgent/.env`; the app starts its local API itself and never bundles that file.

@@ -12,9 +12,14 @@ const liveTradingEnabled = environment === 'live' && process.env.BINANCE_LIVE_TR
 const allowedSymbols = (process.env.BINANCE_SYMBOLS || 'BTCUSDT,ETHUSDT').split(',').map((item) => item.trim().toUpperCase()).filter(Boolean);
 const maxOrderUsdt = Number(process.env.MAX_ORDER_USDT || 100);
 const configured = Boolean(process.env.BINANCE_API_KEY && process.env.BINANCE_SECRET_KEY);
+const gatewayProvider = process.env.GATEWAY_PROVIDER || 'openai';
+const modelOptions = ['gpt-5.6-luna', 'gpt-5.6-sol', 'gpt-5.6-terra'];
+const reasoningOptions = ['light', 'medium', 'high', 'xhigh', 'ultra'];
+const defaultModel = modelOptions.includes(process.env.GATEWAY_MODEL) ? process.env.GATEWAY_MODEL : 'gpt-5.6-luna';
+const defaultReasoning = reasoningOptions.includes(process.env.GATEWAY_REASONING_EFFORT) ? process.env.GATEWAY_REASONING_EFFORT : 'medium';
 const binance = createBinanceSpotClient({ apiKey: process.env.BINANCE_API_KEY, secretKey: process.env.BINANCE_SECRET_KEY, environment });
 const gateway = process.env.GATEWAY_BASE_URL && process.env.GATEWAY_API_KEY
-  ? createModelGateway({ baseUrl: process.env.GATEWAY_BASE_URL, apiKey: process.env.GATEWAY_API_KEY })
+  ? createModelGateway({ baseUrl: process.env.GATEWAY_BASE_URL, apiKey: process.env.GATEWAY_API_KEY, provider: gatewayProvider, model: defaultModel, reasoningEffort: defaultReasoning })
   : null;
 const drafts = new Map();
 
@@ -54,7 +59,7 @@ export function createCryptoServer() {
   return createServer(async (request, response) => {
     try {
       if (request.method === 'GET' && request.url === '/api/status') {
-        return sendJson(response, 200, { configured, environment, liveTradingEnabled, allowedSymbols, maxOrderUsdt });
+        return sendJson(response, 200, { configured, environment, liveTradingEnabled, allowedSymbols, maxOrderUsdt, model: { provider: gatewayProvider, models: modelOptions, reasoning: reasoningOptions, defaultModel, defaultReasoning } });
       }
       if (request.method === 'GET' && request.url === '/api/account') {
         if (!configured) return sendJson(response, 503, { error: 'Configure Binance credentials in apps/crypto-agent/.env.' });
@@ -84,7 +89,9 @@ export function createCryptoServer() {
         const message = String(payload.message || '').trim();
         if (!message) return sendJson(response, 400, { error: 'A message is required.' });
         let parsed;
-        if (gateway) parsed = parseModelJson(await gateway.complete([{ role: 'system', content: tradePrompt(message, allowedSymbols) }], { quality: payload.quality === 'High' ? 'High' : 'Medium' }));
+        const model = modelOptions.includes(payload.model) ? payload.model : defaultModel;
+        const reasoningEffort = reasoningOptions.includes(payload.reasoning_effort) ? payload.reasoning_effort : defaultReasoning;
+        if (gateway) parsed = parseModelJson(await gateway.complete([{ role: 'system', content: tradePrompt(message, allowedSymbols) }], { model, reasoningEffort }));
         else parsed = { reply: '', intent: fallbackIntent(message) };
         if (!parsed?.intent) return sendJson(response, 200, { reply: parsed?.reply || '请明确交易方向、交易对和数量，例如“用 50 USDT 市价买入 BTC”。' });
         const draft = await createDraft(parsed.intent);

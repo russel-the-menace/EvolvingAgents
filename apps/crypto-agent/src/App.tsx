@@ -1,14 +1,25 @@
 import { useEffect, useState } from 'react';
-import { ArrowDownLeft, ArrowUpRight, Bot, Check, CircleDollarSign, Monitor, Moon, RefreshCw, SendHorizontal, ShieldCheck, Sun, Wallet } from 'lucide-react';
+import { ArrowDownLeft, ArrowUpRight, Bot, Check, ChevronDown, ChevronRight, CircleDollarSign, Monitor, Moon, RefreshCw, SendHorizontal, ShieldCheck, Sun, Wallet } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 
-type Status = { configured: boolean; environment: 'testnet' | 'live'; liveTradingEnabled: boolean; allowedSymbols: string[]; maxOrderUsdt: number };
+type ModelId = 'gpt-5.6-luna' | 'gpt-5.6-sol' | 'gpt-5.6-terra';
+type ReasoningId = 'light' | 'medium' | 'high' | 'xhigh' | 'ultra';
+type Status = { configured: boolean; environment: 'testnet' | 'live'; liveTradingEnabled: boolean; allowedSymbols: string[]; maxOrderUsdt: number; model?: { provider: string; models: ModelId[]; reasoning: ReasoningId[]; defaultModel: ModelId; defaultReasoning: ReasoningId } };
 type Balance = { asset: string; free: string; locked: string };
 type Draft = { id: string; intent: { symbol: string; side: 'BUY' | 'SELL'; type: string; quantity?: string; quoteOrderQty?: string; price?: string }; estimate: { estimatedPrice: number; estimatedNotional: number; baseQuantity: number; baseAsset: string; quoteAsset: string }; environment: string };
 type Message = { id: string; role: 'user' | 'assistant'; content: string; draft?: Draft; order?: Record<string, unknown> };
 type ChartPoint = { time: number; close: number };
 type Theme = 'light' | 'dark' | 'system';
+
+function formatNumber(value: number | string, maximumFractionDigits = 8) {
+  return Number(value).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits });
+}
+
+function modelLabel(model: ModelId, prefix = 'GPT-') {
+  const family = model.replace('gpt-', '').replace('-', ' ');
+  return `${prefix}${family[0].toUpperCase()}${family.slice(1)}`;
+}
 
 async function api<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`/api${path}`, { ...init, headers: { 'Content-Type': 'application/json', ...init?.headers } });
@@ -30,7 +41,7 @@ function OrderDraft({ draft, onConfirmed }: { draft: Draft; onConfirmed: (order:
   }
   return <section className={`order-draft ${side.toLowerCase()}`} aria-label="Order preview">
     <div className="order-heading"><span>{side === 'BUY' ? <ArrowDownLeft size={17} /> : <ArrowUpRight size={17} />}{side === 'BUY' ? '买入' : '卖出'} {draft.estimate.baseAsset}</span><small>{draft.environment === 'testnet' ? '测试网' : '实盘'}</small></div>
-    <dl><div><dt>订单类型</dt><dd>{draft.intent.type}</dd></div><div><dt>预估价格</dt><dd>{draft.estimate.estimatedPrice.toLocaleString(undefined, { maximumFractionDigits: 8 })} {draft.estimate.quoteAsset}</dd></div><div><dt>预估数量</dt><dd>{draft.estimate.baseQuantity.toPrecision(6)} {draft.estimate.baseAsset}</dd></div><div><dt>预估金额</dt><dd>{draft.estimate.estimatedNotional.toFixed(2)} {draft.estimate.quoteAsset}</dd></div></dl>
+    <dl><div><dt>订单类型</dt><dd>{draft.intent.type}</dd></div><div><dt>预估价格</dt><dd>{formatNumber(draft.estimate.estimatedPrice)} {draft.estimate.quoteAsset}</dd></div><div><dt>预估数量</dt><dd>{formatNumber(draft.estimate.baseQuantity)} {draft.estimate.baseAsset}</dd></div><div><dt>预估金额</dt><dd>{formatNumber(draft.estimate.estimatedNotional, 2)} {draft.estimate.quoteAsset}</dd></div></dl>
     <p><ShieldCheck size={15} /> 已通过本地风控和币安测试单校验。市价单最终成交价可能不同。</p>
     {error && <div className="inline-error">{error}</div>}
     <button className="confirm-order" disabled={state !== 'ready'} onClick={confirm}>{state === 'busy' ? <RefreshCw className="spin" size={17} /> : <Check size={17} />}{state === 'done' ? '已提交' : state === 'busy' ? '提交中' : `确认${draft.environment === 'testnet' ? '测试网' : '实盘'}订单`}</button>
@@ -75,7 +86,7 @@ function PriceChart({ symbol, environment }: { symbol: string; environment: 'tes
   const width = 720; const height = 150; const pad = 12;
   const values = points.map((point) => point.close); const min = Math.min(...values); const max = Math.max(...values); const range = max - min || 1;
   const path = points.map((point, index) => `${index ? 'L' : 'M'} ${(pad + index * ((width - pad * 2) / Math.max(points.length - 1, 1))).toFixed(2)} ${(height - pad - ((point.close - min) / range) * (height - pad * 2)).toFixed(2)}`).join(' ');
-  return <section className="price-chart" aria-label={`${symbol} 1 minute price chart`}><div className="chart-heading"><div><strong>{symbol}</strong><span>1m · Binance Spot</span></div>{values.length ? <b>{values.at(-1)?.toLocaleString(undefined, { maximumFractionDigits: 8 })} USDT</b> : <span>{error || '加载中'}</span>}</div>{values.length ? <svg viewBox={`0 0 ${width} ${height}`} role="img" aria-label={`${symbol} recent price`}><path className="chart-fill" d={`${path} L ${width - pad} ${height - pad} L ${pad} ${height - pad} Z`} /><path className="chart-line" d={path} /></svg> : <div className="chart-empty">{error || '读取行情中…'}</div>}</section>;
+  return <section className="price-chart" aria-label={`${symbol} 1 minute price chart`}><div className="chart-heading"><div><strong>{symbol}</strong><span>1m · Binance Spot</span></div>{values.length ? <b>{formatNumber(values.at(-1)!)} USDT</b> : <span>{error || '加载中'}</span>}</div>{values.length ? <svg viewBox={`0 0 ${width} ${height}`} role="img" aria-label={`${symbol} recent price`}><path className="chart-fill" d={`${path} L ${width - pad} ${height - pad} L ${pad} ${height - pad} Z`} /><path className="chart-line" d={path} /></svg> : <div className="chart-empty">{error || '读取行情中…'}</div>}</section>;
 }
 
 export function App() {
@@ -83,6 +94,9 @@ export function App() {
     const saved = window.localStorage.getItem('crypto-agent-theme');
     return saved === 'light' || saved === 'dark' || saved === 'system' ? saved : 'system';
   });
+  const [modelId, setModelId] = useState<ModelId>('gpt-5.6-luna');
+  const [reasoningEffort, setReasoningEffort] = useState<ReasoningId>('medium');
+  const [modelOpen, setModelOpen] = useState(false);
   const [status, setStatus] = useState<Status | null>(null);
   const [balances, setBalances] = useState<Balance[]>([]);
   const [messages, setMessages] = useState<Message[]>([]);
@@ -93,6 +107,7 @@ export function App() {
   async function refresh() {
     try {
       const next = await api<Status>('/status'); setStatus(next);
+      if (next.model) { setModelId((current) => next.model?.models.includes(current) ? current : next.model!.defaultModel); setReasoningEffort((current) => next.model?.reasoning.includes(current) ? current : next.model!.defaultReasoning); }
       if (next.configured) setBalances((await api<{ balances: Balance[] }>('/account')).balances);
     } catch (caught) { setError(caught instanceof Error ? caught.message : 'Unable to connect.'); }
   }
@@ -105,7 +120,7 @@ export function App() {
     const user: Message = { id: crypto.randomUUID(), role: 'user', content };
     setMessages((current) => [...current, user]); setInput(''); setBusy(true); setError('');
     try {
-      const result = await api<{ reply: string; draft?: Draft }>('/chat', { method: 'POST', body: JSON.stringify({ message: content }) });
+      const result = await api<{ reply: string; draft?: Draft }>('/chat', { method: 'POST', body: JSON.stringify({ message: content, model: modelId, reasoning_effort: reasoningEffort }) });
       setMessages((current) => [...current, { id: crypto.randomUUID(), role: 'assistant', content: result.reply, draft: result.draft }]);
     } catch (caught) { setError(caught instanceof Error ? caught.message : 'Unable to prepare the order.'); }
     finally { setBusy(false); }
@@ -115,11 +130,11 @@ export function App() {
     <aside className="portfolio">
       <header><CircleDollarSign size={23} /><div><strong>CryptoAgent</strong><span>Binance Spot</span></div></header>
       <section className="connection"><div><span className={status?.configured ? 'status-dot online' : 'status-dot'} />{status?.configured ? '已连接' : '未配置'}</div><small>{status?.environment === 'live' ? (status.liveTradingEnabled ? '实盘下单已开启' : '实盘只读') : 'Spot Testnet'}</small></section>
-      <section className="balance-section"><div className="section-title"><span><Wallet size={15} />可用余额</span><button title="刷新账户" aria-label="刷新账户" onClick={() => void refresh()}><RefreshCw size={15} /></button></div>{balances.length ? balances.slice(0, 12).map((balance) => <div className="balance" key={balance.asset}><strong>{balance.asset}</strong><span>{Number(balance.free).toLocaleString(undefined, { maximumFractionDigits: 8 })}</span></div>) : <p>{status?.configured ? '没有非零余额' : '在 .env 中配置 API key 后显示'}</p>}</section>
-      <section className="limits"><ShieldCheck size={16} /><div><strong>硬性风控</strong><span>现货 · 无杠杆 · 单笔 ≤ {status?.maxOrderUsdt ?? 100} USDT</span><span>{status?.allowedSymbols?.join(' / ') || 'BTCUSDT / ETHUSDT'}</span></div></section>
+      <section className="balance-section"><div className="section-title"><span><Wallet size={15} />可用余额</span><button title="刷新账户" aria-label="刷新账户" onClick={() => void refresh()}><RefreshCw size={15} /></button></div>{balances.length ? balances.slice(0, 12).map((balance) => <div className="balance" key={balance.asset}><strong>{balance.asset}</strong><span>{formatNumber(balance.free)}</span></div>) : <p>{status?.configured ? '没有非零余额' : '在 .env 中配置 API key 后显示'}</p>}</section>
+      <section className="limits"><ShieldCheck size={16} /><div><strong>硬性风控</strong><span>现货 · 无杠杆 · 单笔 ≤ {formatNumber(status?.maxOrderUsdt ?? 100, 2)} USDT</span><span>{status?.allowedSymbols?.join(' / ') || 'BTCUSDT / ETHUSDT'}</span></div></section>
     </aside>
     <section className="conversation">
-      <div className="conversation-top"><div><Bot size={18} /><strong>交易对话</strong></div><div className="top-actions"><div className="theme-control" role="group" aria-label="主题">{([['light', Sun, '浅色'], ['dark', Moon, '深色'], ['system', Monitor, '跟随系统']] as const).map(([value, Icon, label]) => <button key={value} className={theme === value ? 'selected' : ''} title={label} aria-label={label} onClick={() => setTheme(value)}><Icon size={14} /></button>)}</div><span>{status?.environment === 'live' ? 'LIVE' : 'TESTNET'}</span></div></div>
+      <div className="conversation-top"><div><Bot size={18} /><strong>交易对话</strong></div><div className="top-actions"><div className="model-picker"><button className="model-trigger" aria-haspopup="menu" aria-expanded={modelOpen} onClick={() => setModelOpen((open) => !open)}>5.6 {modelId.split('-').at(-1)![0].toUpperCase() + modelId.split('-').at(-1)!.slice(1)} · {reasoningEffort === 'xhigh' ? 'Extra High' : reasoningEffort[0].toUpperCase() + reasoningEffort.slice(1)}<ChevronDown size={15} /></button>{modelOpen && <div className="model-menu" role="menu"><div className="model-menu-label">Reasoning</div>{(status?.model?.reasoning || ['light', 'medium', 'high', 'xhigh', 'ultra']).map((option) => <button key={option} className={reasoningEffort === option ? 'selected' : ''} onClick={() => { setReasoningEffort(option); setModelOpen(false); }}>{option === 'xhigh' ? 'Extra High' : option[0].toUpperCase() + option.slice(1)}{reasoningEffort === option && <Check size={17} />}</button>)}<div className="model-menu-divider" /><div className="model-menu-label">Model</div>{(status?.model?.models || ['gpt-5.6-luna', 'gpt-5.6-sol', 'gpt-5.6-terra']).map((option) => <button key={option} className={modelId === option ? 'selected' : ''} onClick={() => { setModelId(option); setModelOpen(false); }}>{modelLabel(option)}<ChevronRight size={17} /></button>)}</div>}</div><div className="theme-control" role="group" aria-label="主题">{([['light', Sun, '浅色'], ['dark', Moon, '深色'], ['system', Monitor, '跟随系统']] as const).map(([value, Icon, label]) => <button key={value} className={theme === value ? 'selected' : ''} title={label} aria-label={label} onClick={() => setTheme(value)}><Icon size={14} /></button>)}</div><span>{status?.environment === 'live' ? 'LIVE' : 'TESTNET'}</span></div></div>
       <PriceChart symbol="BTCUSDT" environment={status?.environment || 'testnet'} />
       <div className="messages">
         {!messages.length && <div className="empty"><Bot size={35} /><h1>说出你想执行的现货交易</h1><p>例如：用 50 USDT 市价买入 BTC。信息不完整时，我会先追问，不会猜测金额。</p><div className="examples"><button onClick={() => setInput('用 50 USDT 市价买入 BTC')}>买入 50 USDT 的 BTC</button><button onClick={() => setInput('卖出 0.001 BTC')}>卖出 0.001 BTC</button></div></div>}

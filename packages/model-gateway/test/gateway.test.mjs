@@ -24,6 +24,16 @@ test('sends the configured provider, quality, and bearer token', async () => {
   assert.deepEqual(JSON.parse(request.options.body), { provider: 'deepseek', quality: 'High', messages: [{ role: 'user', content: 'hello' }] });
 });
 
+test('passes model and reasoning effort through to the upstream gateway', async () => {
+  let request;
+  const gateway = createModelGateway({ baseUrl: 'https://gateway.example', apiKey: 'secret', provider: 'openai', fetchImpl: async (url, options) => {
+    request = { url, options };
+    return { ok: true, json: async () => ({ choices: [{ message: { content: '{"ok":true}' } }] }) };
+  } });
+  await gateway.complete([{ role: 'user', content: 'hello' }], { model: 'gpt-5.6-sol', reasoningEffort: 'xhigh' });
+  assert.deepEqual(JSON.parse(request.options.body), { provider: 'openai', model: 'gpt-5.6-sol', reasoning_effort: 'xhigh', messages: [{ role: 'user', content: 'hello' }] });
+});
+
 test('sends OpenAI-compatible local model requests with a model name', async () => {
   let request;
   const gateway = createOpenAICompatibleGateway({ baseUrl: 'http://127.0.0.1:11434/v1/', model: 'qwen3:8b', fetchImpl: async (url, options) => {

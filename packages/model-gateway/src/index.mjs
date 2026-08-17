@@ -36,16 +36,18 @@ export function createModelGateway({ baseUrl, apiKey, provider = 'deepseek', tim
       if (typeof body.id !== 'string' || !body.id) throw new Error('Gateway returned no file ID.');
       return body.id;
     },
-    async complete(messages, { quality = 'Medium', signal } = {}) {
+    async complete(messages, { model, reasoningEffort, reasoning_effort, quality = 'Medium', signal } = {}) {
       if (!Array.isArray(messages) || !messages.length) throw new Error('Gateway messages must be a non-empty array.');
-      const response = await fetchImpl(endpoint, { method: 'POST', headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ provider, quality, messages }), signal: requestSignal(signal, timeoutMs) });
+      const routing = model || reasoningEffort || reasoning_effort ? { ...(model ? { model } : {}), ...((reasoningEffort || reasoning_effort) ? { reasoning_effort: reasoningEffort || reasoning_effort } : {}) } : { quality };
+      const response = await fetchImpl(endpoint, { method: 'POST', headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ provider, ...routing, messages }), signal: requestSignal(signal, timeoutMs) });
       if (!response.ok) throw await gatewayError(response);
       const body = await response.json().catch(() => ({}));
       return responseText(body);
     },
-    async stream(messages, { quality = 'Medium', signal, onDelta = () => {} } = {}) {
+    async stream(messages, { model, reasoningEffort, reasoning_effort, quality = 'Medium', signal, onDelta = () => {} } = {}) {
       if (!Array.isArray(messages) || !messages.length) throw new Error('Gateway messages must be a non-empty array.');
-      const response = await fetchImpl(endpoint, { method: 'POST', headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ provider, quality, messages, stream: true }), signal: requestSignal(signal, timeoutMs) });
+      const routing = model || reasoningEffort || reasoning_effort ? { ...(model ? { model } : {}), ...((reasoningEffort || reasoning_effort) ? { reasoning_effort: reasoningEffort || reasoning_effort } : {}) } : { quality };
+      const response = await fetchImpl(endpoint, { method: 'POST', headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ provider, ...routing, messages, stream: true }), signal: requestSignal(signal, timeoutMs) });
       if (!response.ok) throw await gatewayError(response);
       if (!response.body) throw new Error('Gateway returned no response stream.');
       const reader = response.body.getReader();
