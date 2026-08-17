@@ -57,6 +57,7 @@ export function createBinanceSpotClient({ apiKey, secretKey, environment = 'test
     environment,
     ping: () => request('GET', '/api/v3/ping'),
     ticker: (symbol) => request('GET', '/api/v3/ticker/bookTicker', { symbol }),
+    klines: (symbol, interval = '1m', limit = 120) => request('GET', '/api/v3/klines', { symbol, interval, limit }),
     exchangeInfo: (symbol) => request('GET', '/api/v3/exchangeInfo', { symbol }),
     account: () => request('GET', '/api/v3/account', { omitZeroBalances: true }, true),
     testOrder: (order) => request('POST', '/api/v3/order/test', order, true),

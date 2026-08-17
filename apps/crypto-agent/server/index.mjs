@@ -70,6 +70,14 @@ export function createCryptoServer() {
         if (!symbol || !allowedSymbols.includes(symbol)) return sendJson(response, 400, { error: 'Symbol is not allowed.' });
         return sendJson(response, 200, await binance.ticker(symbol));
       }
+      if (request.method === 'GET' && request.url?.startsWith('/api/klines?')) {
+        const query = new URL(request.url, 'http://localhost').searchParams;
+        const symbol = query.get('symbol')?.toUpperCase();
+        const interval = query.get('interval') || '1m';
+        if (!symbol || !allowedSymbols.includes(symbol)) return sendJson(response, 400, { error: 'Symbol is not allowed.' });
+        if (!['1m', '5m', '15m', '1h', '4h', '1d'].includes(interval)) return sendJson(response, 400, { error: 'Interval is not allowed.' });
+        return sendJson(response, 200, { symbol, interval, klines: await binance.klines(symbol, interval, 120) });
+      }
       if (request.method === 'POST' && request.url === '/api/chat') {
         if (!configured) return sendJson(response, 503, { error: 'Configure Binance credentials before preparing an order.' });
         const payload = await body(request);
