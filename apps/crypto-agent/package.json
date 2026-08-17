@@ -5,11 +5,29 @@
   "type": "module",
   "exports": "./src/learning.mjs",
   "scripts": {
-    "test": "node --test test/*.test.mjs",
-    "check": "node --check src/*.mjs test/*.mjs"
+    "dev": "concurrently -k \"npm:dev:api\" \"npm:dev:web\"",
+    "dev:api": "node --env-file-if-exists=.env server/index.mjs",
+    "dev:web": "vite --host 127.0.0.1",
+    "build": "tsc -b && vite build",
+    "test": "node --test test/*.test.mjs server/*.test.mjs",
+    "check": "node --check src/*.mjs server/*.mjs test/*.mjs server/*.test.mjs && tsc -b"
   },
   "dependencies": {
-    "@evolving-agents/learning-engine": "0.1.0"
+    "@evolving-agents/learning-engine": "0.1.0",
+    "@evolving-agents/model-gateway": "0.1.0",
+    "@vitejs/plugin-react": "latest",
+    "lucide-react": "latest",
+    "react": "latest",
+    "react-dom": "latest",
+    "react-markdown": "^10.1.0",
+    "remark-gfm": "^4.0.1",
+    "vite": "latest"
+  },
+  "devDependencies": {
+    "@types/react": "latest",
+    "@types/react-dom": "latest",
+    "concurrently": "latest",
+    "typescript": "latest"
   },
   "engines": {
     "node": ">=22.5"

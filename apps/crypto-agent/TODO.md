@@ -2,9 +2,9 @@
 
 ## Phase 0: Scope And Safety
 
-- [ ] Choose research-only, paper-trading, and live-trading trust boundaries.
+- [x] Choose research-only, paper-trading, and live-trading trust boundaries for the first Binance Spot client.
 - [ ] Define supported jurisdictions, exchanges, instruments, and prohibited actions.
-- [ ] Specify credential isolation; API keys must disable withdrawals and remain outside prompts and learning storage.
+- [x] Specify credential isolation; API keys must disable withdrawals and remain outside prompts and learning storage.
 - [ ] Define human approvals, maximum loss, maximum position, maximum leverage, stale-data shutdown, and a global kill switch.
 - [ ] Create a threat model for prompt injection, poisoned market content, compromised APIs, replayed orders, and key theft.
 
@@ -37,7 +37,7 @@
 
 ## Phase 4: Paper Trading
 
-- [ ] Build exchange adapters behind one typed contract.
+- [x] Build the first Binance Spot exchange adapter behind a narrow contract.
 - [ ] Maintain an append-only order, fill, position, balance, and reconciliation ledger.
 - [ ] Test idempotent submission, reconnects, rate limits, partial fills, rejects, clock drift, and duplicate events.
 - [ ] Run shadow and paper modes long enough to compare simulated and observed execution costs.

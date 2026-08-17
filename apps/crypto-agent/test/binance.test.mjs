@@ -1,0 +1,26 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { createHmac } from 'node:crypto';
+import { createBinanceSpotClient, signQuery } from '../src/binance.mjs';
+
+test('signQuery signs the exact encoded query', () => {
+  const signed = signQuery({ symbol: 'BTCUSDT', side: 'BUY', note: 'a b' }, 'secret');
+  const [query, signature] = signed.split('&signature=');
+  assert.equal(query, 'symbol=BTCUSDT&side=BUY&note=a+b');
+  assert.equal(signature, createHmac('sha256', 'secret').update(query).digest('hex'));
+});
+
+test('signed requests sync Binance time and keep credentials in headers', async () => {
+  const calls = [];
+  const fetchImpl = async (url, options) => {
+    calls.push({ url, options });
+    return new Response(JSON.stringify(url.endsWith('/api/v3/time') ? { serverTime: 2_000 } : { balances: [] }), { status: 200 });
+  };
+  const client = createBinanceSpotClient({ apiKey: 'public', secretKey: 'private', fetchImpl, now: () => 1_000 });
+  await client.account();
+  assert.equal(calls.length, 2);
+  assert.match(calls[1].url, /timestamp=2000/);
+  assert.match(calls[1].url, /signature=[a-f0-9]{64}$/);
+  assert.equal(calls[1].options.headers['X-MBX-APIKEY'], 'public');
+  assert.doesNotMatch(calls[1].url, /private/);
+});
