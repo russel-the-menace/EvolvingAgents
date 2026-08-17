@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { fallbackIntent, normalizeOrderIntent, validateOrder } from '../src/trading.mjs';
+import { fallbackIntent, hasUnsupportedRiskInstruction, normalizeOrderIntent, validateOrder } from '../src/trading.mjs';
 
 const symbolInfo = {
   symbol: 'BTCUSDT', status: 'TRADING', isSpotTradingAllowed: true, baseAsset: 'BTC', quoteAsset: 'USDT',
@@ -35,4 +35,9 @@ test('fallback parser handles explicit Chinese spot instructions only', () => {
   assert.deepEqual(fallbackIntent('用 50 USDT 市价买入 BTC'), { symbol: 'BTCUSDT', side: 'BUY', type: 'MARKET', quoteOrderQty: '50' });
   assert.deepEqual(fallbackIntent('卖出 0.001 BTC'), { symbol: 'BTCUSDT', side: 'SELL', type: 'MARKET', quantity: '0.001' });
   assert.equal(fallbackIntent('帮我买一点 BTC'), null);
+});
+
+test('high-risk leverage instructions never fall through to spot execution', () => {
+  assert.equal(hasUnsupportedRiskInstruction('开20x全仓 BTC'), true);
+  assert.equal(hasUnsupportedRiskInstruction('用 50 USDT 市价买入 BTC'), false);
 });

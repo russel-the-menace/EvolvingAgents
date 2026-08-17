@@ -1,4 +1,7 @@
 const DECIMAL = /^\d+(?:\.\d+)?$/;
+const UNSUPPORTED_RISK = /杠杆|全仓|逐仓|合约|永续|期货|融资|借贷|margin|futures|perpetual|leverage|\b\d+x\b/i;
+
+export function hasUnsupportedRiskInstruction(message) { return UNSUPPORTED_RISK.test(String(message || '')); }
 
 function decimal(value, name) {
   const text = String(value ?? '');

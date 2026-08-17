@@ -4,7 +4,7 @@ import { createModelGateway } from '@evolving-agents/model-gateway';
 import { parseModelJson } from '@evolving-agents/learning-engine';
 import { BinanceApiError, createBinanceSpotClient } from '../src/binance.mjs';
 import { auditBinancePermissions } from '../src/permissions.mjs';
-import { fallbackIntent, normalizeOrderIntent, tradePrompt, validateOrder } from '../src/trading.mjs';
+import { fallbackIntent, hasUnsupportedRiskInstruction, normalizeOrderIntent, tradePrompt, validateOrder } from '../src/trading.mjs';
 import { NewsService } from '../src/news.mjs';
 import { createNewsLearner } from '../src/news-learning.mjs';
 import { EmergencyPolicy } from '../src/emergency-policy.mjs';
@@ -73,7 +73,7 @@ async function createDraft(rawIntent) {
   const estimate = validateOrder(intent, { symbolInfo, ticker, balances: account.balances, maxOrderUsdt });
   await binance.testOrder(intent);
   cleanDrafts();
-  const draft = { id: randomUUID(), intent, estimate, environment, createdAt: Date.now(), state: 'pending' };
+  const draft = { id: randomUUID(), confirmationToken: randomUUID(), intent, estimate, environment, createdAt: Date.now(), state: 'pending' };
   drafts.set(draft.id, draft);
   return draft;
 }
@@ -141,6 +141,7 @@ export function createCryptoServer() {
         const payload = await body(request);
         const message = String(payload.message || '').trim();
         if (!message) return sendJson(response, 400, { error: 'A message is required.' });
+        if (hasUnsupportedRiskInstruction(message)) return sendJson(response, 200, { reply: '这条指令包含杠杆、合约或全仓风险。当前聊天执行器只支持现货，不能把它静默转换成现货订单。请先使用受控的风险策略流程。' });
         let parsed;
         const model = modelOptions.includes(payload.model) ? payload.model : defaultModel;
         const reasoningEffort = reasoningOptions.includes(payload.reasoning_effort) ? payload.reasoning_effort : defaultReasoning;
@@ -156,7 +157,7 @@ export function createCryptoServer() {
         const draft = drafts.get(confirm[1]);
         if (!draft || Date.now() - draft.createdAt > 5 * 60_000) return sendJson(response, 404, { error: 'Order draft expired or was not found.' });
         if (draft.state !== 'pending') return sendJson(response, 409, { error: 'This order draft was already handled.' });
-        if (payload.confirmation !== 'CONFIRM') return sendJson(response, 400, { error: 'Explicit confirmation is required.' });
+        if (payload.confirmation !== 'CONFIRM' || payload.confirmationToken !== draft.confirmationToken) return sendJson(response, 400, { error: 'Explicit confirmation for this exact order draft is required.' });
         if (environment === 'live' && !liveTradingEnabled) return sendJson(response, 403, { error: 'Live trading is locked. Set BINANCE_LIVE_TRADING=true only after completing the safety checklist.' });
         draft.state = 'submitting';
         try {

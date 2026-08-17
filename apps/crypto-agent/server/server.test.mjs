@@ -39,8 +39,9 @@ test('an expiring server-side draft can only submit once', async () => {
     const chat = await post(port, '/api/chat', { message: '用 50 USDT 市价买入 BTC' });
     assert.equal(chat.status, 200);
     const path = `/api/orders/${chat.body.draft.id}/confirm`;
-    assert.equal((await post(port, path, { confirmation: 'CONFIRM' })).status, 200);
-    assert.equal((await post(port, path, { confirmation: 'CONFIRM' })).status, 409);
+    assert.equal((await post(port, path, { confirmation: 'CONFIRM' })).status, 400);
+    assert.equal((await post(port, path, { confirmation: 'CONFIRM', confirmationToken: chat.body.draft.confirmationToken })).status, 200);
+    assert.equal((await post(port, path, { confirmation: 'CONFIRM', confirmationToken: chat.body.draft.confirmationToken })).status, 409);
     assert.equal(placed, 1);
   } finally {
     await new Promise((resolve) => server.close(resolve));

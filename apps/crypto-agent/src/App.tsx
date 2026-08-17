@@ -7,7 +7,7 @@ type ModelId = 'gpt-5.6-luna' | 'gpt-5.6-sol' | 'gpt-5.6-terra';
 type ReasoningId = 'low' | 'medium' | 'high' | 'xhigh' | 'max';
 type Status = { configured: boolean; environment: 'testnet' | 'live'; liveTradingEnabled: boolean; allowedSymbols: string[] | null; maxOrderUsdt: number; model?: { provider: string; models: ModelId[]; reasoning: ReasoningId[]; defaultModel: ModelId; defaultReasoning: ReasoningId } };
 type Balance = { asset: string; free: string; locked: string };
-type Draft = { id: string; intent: { symbol: string; side: 'BUY' | 'SELL'; type: string; quantity?: string; quoteOrderQty?: string; price?: string }; estimate: { estimatedPrice: number; estimatedNotional: number; baseQuantity: number; baseAsset: string; quoteAsset: string }; environment: string };
+type Draft = { id: string; confirmationToken: string; intent: { symbol: string; side: 'BUY' | 'SELL'; type: string; quantity?: string; quoteOrderQty?: string; price?: string }; estimate: { estimatedPrice: number; estimatedNotional: number; baseQuantity: number; baseAsset: string; quoteAsset: string }; environment: string };
 type Message = { id: string; role: 'user' | 'assistant'; content: string; draft?: Draft; order?: Record<string, unknown> };
 type ChartPoint = { time: number; close: number };
 type Theme = 'light' | 'dark' | 'system';
@@ -55,7 +55,7 @@ function OrderDraft({ draft, onConfirmed }: { draft: Draft; onConfirmed: (order:
   async function confirm() {
     setState('busy'); setError('');
     try {
-      const result = await api<{ order: Record<string, unknown> }>(`/orders/${draft.id}/confirm`, { method: 'POST', body: JSON.stringify({ confirmation: 'CONFIRM' }) });
+      const result = await api<{ order: Record<string, unknown> }>(`/orders/${draft.id}/confirm`, { method: 'POST', body: JSON.stringify({ confirmation: 'CONFIRM', confirmationToken: draft.confirmationToken }) });
       setState('done'); onConfirmed(result.order);
     } catch (caught) { setState('ready'); setError(caught instanceof Error ? caught.message : 'Order failed.'); }
   }
