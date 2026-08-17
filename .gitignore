@@ -7,6 +7,7 @@ tmp/
 
 # MindClone reference implementations are local read-only caches.
 apps/mind-clone/reference-project/
+apps/crypto-agent/reference-project/*/
 
 # App-local data: raw memories, API keys, recordings, and model caches.
 data/
