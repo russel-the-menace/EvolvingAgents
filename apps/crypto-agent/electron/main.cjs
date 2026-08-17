@@ -1,4 +1,4 @@
-const { app, BrowserWindow, nativeTheme } = require('electron');
+const { app, BrowserWindow, Menu, Notification, Tray, ipcMain, nativeImage, nativeTheme } = require('electron');
 const { fork } = require('node:child_process');
 const { createServer } = require('node:http');
 const { existsSync, readFileSync, createReadStream } = require('node:fs');
@@ -10,6 +10,8 @@ let mainWindow;
 let quitting = false;
 let apiProcess;
 let staticServer;
+let tray;
+let widgetWindow;
 
 function loadLocalEnv() {
   const candidates = [
@@ -63,7 +65,7 @@ function createWindow() {
     title: 'CryptoAgent',
     titleBarStyle: 'hiddenInset',
     backgroundColor: nativeTheme.shouldUseDarkColors ? '#101214' : '#f4f5f6',
-    webPreferences: { contextIsolation: true, nodeIntegration: false },
+    webPreferences: { contextIsolation: true, nodeIntegration: false, preload: join(__dirname, 'preload.cjs') },
   });
   mainWindow.loadURL('http://127.0.0.1:5450');
   mainWindow.on('closed', () => { mainWindow = null; });
@@ -74,17 +76,39 @@ function createWindow() {
   });
 }
 
+function createWidget() {
+  widgetWindow = new BrowserWindow({ width: 380, height: 245, resizable: false, show: false, alwaysOnTop: true, title: 'CryptoAgent K 线', webPreferences: { contextIsolation: true, nodeIntegration: false, preload: join(__dirname, 'preload.cjs') } });
+  widgetWindow.loadURL('http://127.0.0.1:5450/?widget=1');
+  widgetWindow.on('closed', () => { widgetWindow = null; });
+}
+
+function toggleWidget() {
+  if (!widgetWindow) return;
+  if (widgetWindow.isVisible()) widgetWindow.hide(); else widgetWindow.show();
+}
+
 app.whenReady().then(async () => {
   startApi();
   await startStaticServer();
   createWindow();
+  createWidget();
+  const trayIcon = nativeImage.createFromDataURL('data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 18 18"><path d="M2 13.5 6.5 9l3 2.5L16 5" fill="none" stroke="black" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>');
+  trayIcon.setTemplateImage(true);
+  tray = new Tray(trayIcon);
+  tray.setToolTip('CryptoAgent');
+  tray.setContextMenu(Menu.buildFromTemplate([{ label: '显示 CryptoAgent', click: () => mainWindow?.show() }, { label: '显示 K 线', click: toggleWidget }, { type: 'separator' }, { label: '退出', click: () => { quitting = true; app.quit(); } }]));
+  tray.on('click', toggleWidget);
+  ipcMain.on('news-notification', (_event, payload) => {
+    if (!payload?.title || !Notification.isSupported()) return;
+    new Notification({ title: payload.title, body: payload.body || '' }).show();
+  });
   app.on('activate', () => {
     if (!mainWindow) createWindow();
     else mainWindow.show();
   });
 });
 
-app.on('before-quit', () => { quitting = true; apiProcess?.kill(); staticServer?.close(); });
+app.on('before-quit', () => { quitting = true; tray?.destroy(); widgetWindow?.close(); apiProcess?.kill(); staticServer?.close(); });
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit();
 });

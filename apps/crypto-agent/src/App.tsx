@@ -13,6 +13,8 @@ type ChartPoint = { time: number; close: number };
 type Theme = 'light' | 'dark' | 'system';
 type NewsItem = { id: string; title: string; url: string; source: string; summary: string; publishedAt: string; urgency: 'normal' | 'breaking' };
 
+declare global { interface Window { cryptoAgent?: { notify: (title: string, body: string) => void } } }
+
 function formatNumber(value: number | string, maximumFractionDigits = 8) {
   return Number(value).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits });
 }
@@ -96,6 +98,7 @@ function PriceChart({ symbol, environment }: { symbol: string; environment: 'tes
 }
 
 export function App() {
+  if (new URLSearchParams(window.location.search).get('widget') === '1') return <main className="widget-shell"><PriceChart symbol="BTCUSDT" environment="live" /></main>;
   const [theme, setTheme] = useState<Theme>(() => {
     const saved = window.localStorage.getItem('crypto-agent-theme');
     return saved === 'light' || saved === 'dark' || saved === 'system' ? saved : 'system';
@@ -122,6 +125,7 @@ export function App() {
   useEffect(() => {
     let active = true;
     const notify = (title: string, body: string) => {
+      window.cryptoAgent?.notify(title, body);
       if (typeof Notification !== 'undefined' && Notification.permission === 'granted') new Notification(title, { body });
     };
     void api<{ items: NewsItem[] }>('/news?mode=startup').then((result) => {
