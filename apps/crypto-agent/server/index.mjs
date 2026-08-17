@@ -5,6 +5,7 @@ import { parseModelJson } from '@evolving-agents/learning-engine';
 import { BinanceApiError, createBinanceSpotClient } from '../src/binance.mjs';
 import { auditBinancePermissions } from '../src/permissions.mjs';
 import { fallbackIntent, normalizeOrderIntent, tradePrompt, validateOrder } from '../src/trading.mjs';
+import { NewsService } from '../src/news.mjs';
 
 const port = Number(process.env.CRYPTO_AGENT_API_PORT || 5451);
 const environment = process.env.BINANCE_ENV === 'live' ? 'live' : 'testnet';
@@ -24,6 +25,12 @@ const gateway = process.env.GATEWAY_BASE_URL && process.env.GATEWAY_API_KEY
   : null;
 const drafts = new Map();
 const symbolAllowed = (symbol) => !allowedSymbols || allowedSymbols.includes(symbol);
+const news = new NewsService({ feedUrls: (process.env.NEWS_RSS_URLS || '').split(',').map((item) => item.trim()).filter(Boolean), stateFile: process.env.NEWS_STATE_FILE || '', pollMs: Number(process.env.NEWS_POLL_MS || 300_000) });
+const newsClients = new Set();
+void news.load().then(() => news.start());
+news.subscribe((event) => { for (const response of newsClients) { response.write(`event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`); } });
+const digestTimer = setInterval(async () => { const items = await news.twoHourDigest(); if (!items.length) return; const event = { type: 'digest', items }; for (const response of newsClients) response.write(`event: digest\ndata: ${JSON.stringify(event)}\n\n`); }, 2 * 60 * 60 * 1000);
+digestTimer.unref?.();
 
 function sendJson(response, status, body) { response.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8' }); response.end(JSON.stringify(body)); }
 async function body(request) {
@@ -62,6 +69,15 @@ export function createCryptoServer() {
     try {
       if (request.method === 'GET' && request.url === '/api/status') {
         return sendJson(response, 200, { configured, environment, liveTradingEnabled, allowedSymbols, maxOrderUsdt, model: { provider: gatewayProvider, models: modelOptions, reasoning: reasoningOptions, defaultModel, defaultReasoning } });
+      }
+      if (request.method === 'GET' && request.url === '/api/news') {
+        const mode = new URL(request.url, 'http://localhost').searchParams.get('mode');
+        return sendJson(response, 200, { items: mode === 'startup' ? await news.startupDigest() : news.recent() });
+      }
+      if (request.method === 'GET' && request.url === '/api/news/stream') {
+        response.writeHead(200, { 'Content-Type': 'text/event-stream; charset=utf-8', 'Cache-Control': 'no-cache', Connection: 'keep-alive' });
+        response.write(`event: ready\ndata: ${JSON.stringify({ items: news.recent(10) })}\n\n`); newsClients.add(response);
+        request.on('close', () => newsClients.delete(response)); return;
       }
       if (request.method === 'GET' && request.url === '/api/account') {
         if (!configured) return sendJson(response, 503, { error: 'Configure Binance credentials in apps/crypto-agent/.env.' });

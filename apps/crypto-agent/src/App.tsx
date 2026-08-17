@@ -11,6 +11,7 @@ type Draft = { id: string; intent: { symbol: string; side: 'BUY' | 'SELL'; type:
 type Message = { id: string; role: 'user' | 'assistant'; content: string; draft?: Draft; order?: Record<string, unknown> };
 type ChartPoint = { time: number; close: number };
 type Theme = 'light' | 'dark' | 'system';
+type NewsItem = { id: string; title: string; url: string; source: string; summary: string; publishedAt: string; urgency: 'normal' | 'breaking' };
 
 function formatNumber(value: number | string, maximumFractionDigits = 8) {
   return Number(value).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits });
@@ -19,6 +20,11 @@ function formatNumber(value: number | string, maximumFractionDigits = 8) {
 function modelLabel(model: ModelId, prefix = 'GPT-') {
   const family = model.replace('gpt-', '').replace('-', ' ');
   return `${prefix}${family[0].toUpperCase()}${family.slice(1)}`;
+}
+
+function NewsPanel({ items }: { items: NewsItem[] }) {
+  if (!items.length) return null;
+  return <section className="news-panel" aria-label="市场新闻"><div className="news-heading"><strong>市场新闻</strong><span>实时源 · 两小时摘要</span></div>{items.slice(0, 6).map((item) => <article className={item.urgency === 'breaking' ? 'news-item breaking' : 'news-item'} key={item.id}><div><span>{item.source}</span><time>{new Date(item.publishedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</time></div><a href={item.url} target="_blank" rel="noreferrer">{item.title}</a></article>)}</section>;
 }
 
 async function api<T>(path: string, init?: RequestInit): Promise<T> {
@@ -103,6 +109,7 @@ export function App() {
   const [input, setInput] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const [news, setNews] = useState<NewsItem[]>([]);
 
   async function refresh() {
     try {
@@ -112,6 +119,16 @@ export function App() {
     } catch (caught) { setError(caught instanceof Error ? caught.message : 'Unable to connect.'); }
   }
   useEffect(() => { void refresh(); }, []);
+  useEffect(() => {
+    let active = true;
+    void api<{ items: NewsItem[] }>('/news?mode=startup').then((result) => { if (active) setNews(result.items); }).catch(() => {});
+    const stream = new EventSource('/api/news/stream');
+    const add = (event: MessageEvent<string>) => { const payload = JSON.parse(event.data) as { item?: NewsItem; items?: NewsItem[] }; const incoming = payload.item ? [payload.item] : payload.items || []; if (!incoming.length) return; setNews((current) => [...incoming, ...current.filter((item) => !incoming.some((next) => next.id === item.id))].slice(0, 30)); };
+    stream.addEventListener('breaking', add); stream.addEventListener('digest', add); stream.addEventListener('ready', add);
+    const onBreaking = (event: MessageEvent<string>) => { const item = (JSON.parse(event.data) as { item: NewsItem }).item; if (typeof Notification !== 'undefined' && Notification.permission === 'granted') new Notification('CryptoAgent 爆炸性新闻', { body: item.title }); };
+    stream.addEventListener('breaking', onBreaking);
+    return () => { active = false; stream.close(); };
+  }, []);
   useEffect(() => { document.documentElement.dataset.theme = theme; window.localStorage.setItem('crypto-agent-theme', theme); }, [theme]);
 
   async function send() {
@@ -136,6 +153,7 @@ export function App() {
     <section className="conversation">
       <div className="conversation-top"><div><Bot size={18} /><strong>交易对话</strong></div><div className="top-actions"><div className="model-picker"><button className="model-trigger" aria-haspopup="menu" aria-expanded={modelOpen} onClick={() => setModelOpen((open) => !open)}>5.6 {modelId.split('-').at(-1)![0].toUpperCase() + modelId.split('-').at(-1)!.slice(1)} · {({ low: 'Light', medium: 'Medium', high: 'High', xhigh: 'Extra High', max: 'Ultra' } as Record<ReasoningId, string>)[reasoningEffort]}<ChevronDown size={15} /></button>{modelOpen && <div className="model-menu" role="menu"><div className="model-menu-label">Reasoning</div>{(status?.model?.reasoning || ['low', 'medium', 'high', 'xhigh', 'max']).map((option) => <button key={option} className={reasoningEffort === option ? 'selected' : ''} onClick={() => { setReasoningEffort(option); setModelOpen(false); }}>{({ low: 'Light', medium: 'Medium', high: 'High', xhigh: 'Extra High', max: 'Ultra' } as Record<ReasoningId, string>)[option]}{reasoningEffort === option && <Check size={17} />}</button>)}<div className="model-menu-divider" /><div className="model-menu-label">Model</div>{(status?.model?.models || ['gpt-5.6-luna', 'gpt-5.6-sol', 'gpt-5.6-terra']).map((option) => <button key={option} className={modelId === option ? 'selected' : ''} onClick={() => { setModelId(option); setModelOpen(false); }}>{modelLabel(option)}<ChevronRight size={17} /></button>)}</div>}</div><div className="theme-control" role="group" aria-label="主题">{([['light', Sun, '浅色'], ['dark', Moon, '深色'], ['system', Monitor, '跟随系统']] as const).map(([value, Icon, label]) => <button key={value} className={theme === value ? 'selected' : ''} title={label} aria-label={label} onClick={() => setTheme(value)}><Icon size={14} /></button>)}</div><span>{status?.environment === 'live' ? 'LIVE' : 'TESTNET'}</span></div></div>
       <PriceChart symbol="BTCUSDT" environment={status?.environment || 'testnet'} />
+      <NewsPanel items={news} />
       <div className="messages">
         {!messages.length && <div className="empty"><Bot size={35} /><h1>说出你想执行的现货交易</h1><p>例如：用 50 USDT 市价买入 BTC。信息不完整时，我会先追问，不会猜测金额。</p><div className="examples"><button onClick={() => setInput('用 50 USDT 市价买入 BTC')}>买入 50 USDT 的 BTC</button><button onClick={() => setInput('卖出 0.001 BTC')}>卖出 0.001 BTC</button></div></div>}
         {messages.map((message) => <article className={`message ${message.role}`} key={message.id}><div className="bubble"><ReactMarkdown remarkPlugins={[remarkGfm]}>{message.content}</ReactMarkdown>{message.draft && <OrderDraft draft={message.draft} onConfirmed={(order) => { setMessages((current) => current.map((item) => item.id === message.id ? { ...item, order } : item)); void refresh(); }} />}{message.order && <div className="order-success"><Check size={16} />订单已提交 · ID {String(message.order.orderId || message.order.clientOrderId || 'accepted')}</div>}</div></article>)}
