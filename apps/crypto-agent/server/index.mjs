@@ -2,7 +2,7 @@ import { createServer } from 'node:http';
 import { randomUUID } from 'node:crypto';
 import { createModelGateway } from '@evolving-agents/model-gateway';
 import { parseModelJson } from '@evolving-agents/learning-engine';
-import { BinanceApiError, createBinanceSpotClient } from '../src/binance.mjs';
+import { BinanceApiError, createBinanceSpotClient, createBinanceUsdMClient } from '../src/binance.mjs';
 import { auditBinancePermissions } from '../src/permissions.mjs';
 import { fallbackIntent, hasUnsupportedRiskInstruction, normalizeOrderIntent, tradePrompt, validateOrder } from '../src/trading.mjs';
 import { NewsService } from '../src/news.mjs';
@@ -22,10 +22,12 @@ const reasoningOptions = ['low', 'medium', 'high', 'xhigh', 'max'];
 const defaultModel = modelOptions.includes(process.env.GATEWAY_MODEL) ? process.env.GATEWAY_MODEL : 'gpt-5.6-luna';
 const defaultReasoning = reasoningOptions.includes(process.env.GATEWAY_REASONING_EFFORT) ? process.env.GATEWAY_REASONING_EFFORT : 'medium';
 const binance = createBinanceSpotClient({ apiKey: process.env.BINANCE_API_KEY, secretKey: process.env.BINANCE_SECRET_KEY, environment });
+const futures = createBinanceUsdMClient({ apiKey: process.env.BINANCE_API_KEY, secretKey: process.env.BINANCE_SECRET_KEY, environment });
 const gateway = process.env.GATEWAY_BASE_URL && process.env.GATEWAY_API_KEY
   ? createModelGateway({ baseUrl: process.env.GATEWAY_BASE_URL, apiKey: process.env.GATEWAY_API_KEY, provider: gatewayProvider, model: defaultModel, reasoningEffort: defaultReasoning })
   : null;
 const drafts = new Map();
+const futuresDrafts = new Map();
 const symbolAllowed = (symbol) => !allowedSymbols || allowedSymbols.includes(symbol);
 const defaultNewsState = process.platform === 'darwin' && process.env.HOME ? `${process.env.HOME}/Library/Application Support/CryptoAgent/news-state.json` : '';
 const defaultNewsKnowledge = process.platform === 'darwin' && process.env.HOME ? `${process.env.HOME}/Library/Application Support/CryptoAgent/news-knowledge.sqlite` : '';
@@ -78,11 +80,28 @@ async function createDraft(rawIntent) {
   return draft;
 }
 
+function createFuturesDraft(raw) {
+  const symbol = String(raw?.symbol || '').toUpperCase();
+  const side = String(raw?.side || '').toUpperCase();
+  const type = String(raw?.type || 'MARKET').toUpperCase();
+  const marginType = String(raw?.marginType || 'ISOLATED').toUpperCase();
+  const leverage = Number(raw?.leverage || 1);
+  const quantity = String(raw?.quantity || '');
+  if (!symbol || !symbolAllowed(symbol)) throw new Error('Futures symbol is not in the trading allowlist.');
+  if (!['BUY', 'SELL'].includes(side) || type !== 'MARKET') throw new Error('Futures currently supports MARKET BUY or SELL only.');
+  if (!['ISOLATED', 'CROSSED'].includes(marginType)) throw new Error('marginType must be ISOLATED or CROSSED.');
+  if (!/^\d+(?:\.\d+)?$/.test(quantity) || Number(quantity) <= 0) throw new Error('Futures quantity must be a positive decimal.');
+  if (!Number.isInteger(leverage) || leverage < 1 || leverage > 50) throw new Error('Futures leverage must be an integer from 1x to 50x.');
+  const draft = { id: randomUUID(), confirmationToken: randomUUID(), intent: { symbol, side, type, quantity, leverage, marginType, reduceOnly: Boolean(raw.reduceOnly) }, environment, createdAt: Date.now(), state: 'pending' };
+  futuresDrafts.set(draft.id, draft);
+  return draft;
+}
+
 export function createCryptoServer() {
   return createServer(async (request, response) => {
     try {
       if (request.method === 'GET' && request.url === '/api/status') {
-        return sendJson(response, 200, { configured, environment, liveTradingEnabled, allowedSymbols, maxOrderUsdt, news: { configured: news.feedUrls.length > 0, learningEnabled: Boolean(newsLearner), pollMs: news.pollMs }, model: { provider: gatewayProvider, models: modelOptions, reasoning: reasoningOptions, defaultModel, defaultReasoning } });
+        return sendJson(response, 200, { configured, environment, liveTradingEnabled, allowedSymbols, maxOrderUsdt, futures: { configured, maxLeverage: 50, confirmationRequired: true }, news: { configured: news.feedUrls.length > 0, learningEnabled: Boolean(newsLearner), pollMs: news.pollMs }, model: { provider: gatewayProvider, models: modelOptions, reasoning: reasoningOptions, defaultModel, defaultReasoning } });
       }
       if (request.method === 'GET' && request.url === '/api/news') {
         const mode = new URL(request.url, 'http://localhost').searchParams.get('mode');
@@ -117,6 +136,36 @@ export function createCryptoServer() {
       if (request.method === 'GET' && request.url === '/api/account') {
         if (!configured) return sendJson(response, 503, { error: 'Configure Binance credentials in apps/crypto-agent/.env.' });
         return sendJson(response, 200, await accountSnapshot());
+      }
+      if (request.method === 'GET' && request.url === '/api/futures/account') {
+        if (!configured) return sendJson(response, 503, { error: 'Configure Binance credentials before reading Futures.' });
+        return sendJson(response, 200, await futures.account());
+      }
+      if (request.method === 'GET' && request.url?.startsWith('/api/futures/positions')) {
+        if (!configured) return sendJson(response, 503, { error: 'Configure Binance credentials before reading Futures.' });
+        const symbol = new URL(request.url, 'http://localhost').searchParams.get('symbol')?.toUpperCase();
+        return sendJson(response, 200, await futures.positionRisk(symbol));
+      }
+      if (request.method === 'POST' && request.url === '/api/futures/drafts') {
+        if (!configured) return sendJson(response, 503, { error: 'Configure Binance credentials before preparing a Futures order.' });
+        return sendJson(response, 200, { draft: createFuturesDraft(await body(request)) });
+      }
+      const futuresConfirm = request.url?.match(/^\/api\/futures\/drafts\/([^/]+)\/confirm$/);
+      if (request.method === 'POST' && futuresConfirm) {
+        const payload = await body(request);
+        const draft = futuresDrafts.get(futuresConfirm[1]);
+        if (!draft || Date.now() - draft.createdAt > 5 * 60_000) return sendJson(response, 404, { error: 'Futures draft expired or was not found.' });
+        if (draft.state !== 'pending') return sendJson(response, 409, { error: 'This Futures draft was already handled.' });
+        if (payload.confirmation !== 'CONFIRM' || payload.confirmationToken !== draft.confirmationToken) return sendJson(response, 400, { error: 'Explicit confirmation for this exact Futures draft is required.' });
+        if (!liveTradingEnabled) return sendJson(response, 403, { error: 'Live trading is locked; Futures submission is disabled.' });
+        draft.state = 'submitting';
+        try {
+          await futures.marginType(draft.intent.symbol, draft.intent.marginType);
+          await futures.leverage(draft.intent.symbol, draft.intent.leverage);
+          const order = await futures.placeOrder({ symbol: draft.intent.symbol, side: draft.intent.side, type: draft.intent.type, quantity: draft.intent.quantity, reduceOnly: draft.intent.reduceOnly ? 'true' : undefined, newClientOrderId: `ea_futures_${draft.id.replaceAll('-', '').slice(0, 20)}` });
+          draft.state = 'submitted';
+          return sendJson(response, 200, { order });
+        } catch (error) { draft.state = error instanceof BinanceApiError && error.executionUnknown ? 'unknown' : 'failed'; throw error; }
       }
       if (request.method === 'GET' && request.url === '/api/permissions') {
         if (!configured) return sendJson(response, 503, { error: 'Configure Binance credentials in apps/crypto-agent/.env.' });

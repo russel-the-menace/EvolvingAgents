@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createHmac } from 'node:crypto';
-import { createBinanceSpotClient, signQuery } from '../src/binance.mjs';
+import { createBinanceSpotClient, createBinanceUsdMClient, signQuery } from '../src/binance.mjs';
 
 test('signQuery signs the exact encoded query', () => {
   const signed = signQuery({ symbol: 'BTCUSDT', side: 'BUY', note: 'a b' }, 'secret');
@@ -23,4 +23,13 @@ test('signed requests sync Binance time and keep credentials in headers', async 
   assert.match(calls[1].url, /signature=[a-f0-9]{64}$/);
   assert.equal(calls[1].options.headers['X-MBX-APIKEY'], 'public');
   assert.doesNotMatch(calls[1].url, /private/);
+});
+
+test('USD-M Futures client uses the Futures time and account endpoints', async () => {
+  const calls = [];
+  const fetchImpl = async (url) => { calls.push(url); return new Response(JSON.stringify(url.endsWith('/fapi/v1/time') ? { serverTime: 2_000 } : { totalWalletBalance: '100' }), { status: 200 }); };
+  const client = createBinanceUsdMClient({ apiKey: 'public', secretKey: 'private', fetchImpl, now: () => 1_000 });
+  await client.account();
+  assert.match(calls[0], /testnet\.binancefuture\.com\/fapi\/v1\/time/);
+  assert.match(calls[1], /\/fapi\/v2\/account\?/);
 });
