@@ -7,6 +7,7 @@ import { auditBinancePermissions } from '../src/permissions.mjs';
 import { fallbackIntent, normalizeOrderIntent, tradePrompt, validateOrder } from '../src/trading.mjs';
 import { NewsService } from '../src/news.mjs';
 import { createNewsLearner } from '../src/news-learning.mjs';
+import { EmergencyPolicy } from '../src/emergency-policy.mjs';
 
 const port = Number(process.env.CRYPTO_AGENT_API_PORT || 5451);
 const environment = process.env.BINANCE_ENV === 'live' ? 'live' : 'testnet';
@@ -31,8 +32,17 @@ const defaultNewsKnowledge = process.platform === 'darwin' && process.env.HOME ?
 const newsLearner = createNewsLearner(process.env.NEWS_LEARNING_DB_FILE || defaultNewsKnowledge);
 const news = new NewsService({ feedUrls: (process.env.NEWS_RSS_URLS || '').split(',').map((item) => item.trim()).filter(Boolean), stateFile: process.env.NEWS_STATE_FILE || defaultNewsState, pollMs: Number(process.env.NEWS_POLL_MS || 300_000), learnItem: newsLearner?.learn });
 const newsClients = new Set();
+const emergency = new EmergencyPolicy({ budgetFraction: Number(process.env.EMERGENCY_BUDGET_FRACTION || 0.2), grantMs: Number(process.env.EMERGENCY_GRANT_MS || 30 * 60_000), cooldownMs: Number(process.env.EMERGENCY_COOLDOWN_MS || 15 * 60_000) });
 void news.load().then(() => news.start());
-news.subscribe((event) => { for (const response of newsClients) { response.write(`event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`); } });
+news.subscribe((event) => {
+  for (const response of newsClients) response.write(`event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`);
+  if (event.type === 'breaking' && configured) void accountSnapshot().then(({ balances }) => {
+    const equity = Number(balances.find((balance) => balance.asset === 'USDT')?.free || 0);
+    if (!(equity > 0)) return;
+    const pending = emergency.trigger({ item: event.item, equity });
+    for (const response of newsClients) response.write(`event: emergency\ndata: ${JSON.stringify(pending)}\n\n`);
+  }).catch(() => {});
+});
 const digestTimer = setInterval(async () => { const items = await news.twoHourDigest(); if (!items.length) return; const event = { type: 'digest', items }; for (const response of newsClients) response.write(`event: digest\ndata: ${JSON.stringify(event)}\n\n`); }, 2 * 60 * 60 * 1000);
 digestTimer.unref?.();
 
@@ -86,6 +96,23 @@ export function createCryptoServer() {
       }
       if (request.method === 'GET' && request.url === '/api/news/knowledge') {
         return sendJson(response, 200, { items: newsLearner?.store ? newsLearner.store.listSources().slice(0, 30) : [] });
+      }
+      if (request.method === 'GET' && request.url === '/api/emergency/status') return sendJson(response, 200, emergency.status());
+      if (request.method === 'POST' && request.url === '/api/emergency/confirm') {
+        const payload = await body(request);
+        return sendJson(response, 200, { grant: emergency.confirm(payload) });
+      }
+      if (request.method === 'POST' && request.url === '/api/emergency/revoke') {
+        const payload = await body(request);
+        return sendJson(response, 200, { revoked: emergency.revoke(String(payload.reason || 'manual')) });
+      }
+      if (request.method === 'POST' && request.url === '/api/emergency/order') {
+        if (!liveTradingEnabled) return sendJson(response, 403, { error: 'Live trading is locked; emergency orders remain disabled.' });
+        const payload = await body(request);
+        const draft = await createDraft(payload.intent);
+        emergency.consume({ grantId: String(payload.grantId || ''), notional: draft.estimate.estimatedNotional });
+        const order = await binance.placeOrder({ ...draft.intent, newClientOrderId: `ea_emergency_${draft.id.replaceAll('-', '').slice(0, 20)}` });
+        return sendJson(response, 200, { order, authorization: emergency.status().grant });
       }
       if (request.method === 'GET' && request.url === '/api/account') {
         if (!configured) return sendJson(response, 503, { error: 'Configure Binance credentials in apps/crypto-agent/.env.' });

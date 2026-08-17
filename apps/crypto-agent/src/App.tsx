@@ -12,6 +12,7 @@ type Message = { id: string; role: 'user' | 'assistant'; content: string; draft?
 type ChartPoint = { time: number; close: number };
 type Theme = 'light' | 'dark' | 'system';
 type NewsItem = { id: string; title: string; url: string; source: string; summary: string; publishedAt: string; urgency: 'normal' | 'breaking' };
+type EmergencyState = { pending?: { id: string; title: string; budget: number }; grant?: { id: string; remaining: number; expiresAt: number } | null };
 
 declare global { interface Window { cryptoAgent?: { notify: (title: string, body: string) => void } } }
 
@@ -27,6 +28,17 @@ function modelLabel(model: ModelId, prefix = 'GPT-') {
 function NewsPanel({ items }: { items: NewsItem[] }) {
   if (!items.length) return null;
   return <section className="news-panel" aria-label="市场新闻"><div className="news-heading"><strong>市场新闻</strong><span>实时源 · 两小时摘要</span></div>{items.slice(0, 6).map((item) => <article className={item.urgency === 'breaking' ? 'news-item breaking' : 'news-item'} key={item.id}><div><span>{item.source}</span><time>{new Date(item.publishedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</time></div><a href={item.url} target="_blank" rel="noreferrer">{item.title}</a></article>)}</section>;
+}
+
+function EmergencyPanel({ state, onChange }: { state: EmergencyState; onChange: (next: EmergencyState) => void }) {
+  const [busy, setBusy] = useState(false);
+  if (!state.pending && !state.grant) return null;
+  async function confirm() {
+    setBusy(true);
+    try { const result = await api<{ grant: EmergencyState['grant'] }>('/emergency/confirm', { method: 'POST', body: JSON.stringify({ confirmation: 'CONFIRM', allowLeverage: false, maxLeverage: 1 }) }); onChange({ grant: result.grant }); }
+    finally { setBusy(false); }
+  }
+  return <section className="emergency-panel" aria-label="紧急授权">{state.pending && <><strong>紧急新闻待确认</strong><span>{state.pending.title}</span><small>预授权预算 {formatNumber(state.pending.budget, 2)} USDT，仅限现货</small><button disabled={busy} onClick={() => void confirm()}>{busy ? '授权中' : '确认紧急授权'}</button></>}{state.grant && <><strong>紧急授权已启用</strong><span>剩余预算 {formatNumber(state.grant.remaining, 2)} USDT</span><button onClick={() => void api('/emergency/revoke', { method: 'POST', body: JSON.stringify({ reason: 'manual' }) }).then(() => onChange({}))}>撤销授权</button></>}</section>;
 }
 
 async function api<T>(path: string, init?: RequestInit): Promise<T> {
@@ -113,6 +125,7 @@ export function App() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [news, setNews] = useState<NewsItem[]>([]);
+  const [emergency, setEmergency] = useState<EmergencyState>({});
 
   async function refresh() {
     try {
@@ -138,6 +151,7 @@ export function App() {
     stream.addEventListener('breaking', add);
     stream.addEventListener('digest', (event) => { add(event); const payload = JSON.parse(event.data) as { items?: NewsItem[] }; if (payload.items?.length) notify('CryptoAgent 两小时新闻', `${payload.items.length} 条新新闻`); });
     stream.addEventListener('ready', add);
+    stream.addEventListener('emergency', (event) => { const next = JSON.parse(event.data) as EmergencyState; setEmergency(next); notify('CryptoAgent 紧急授权待确认', next.pending?.title || '检测到爆炸性新闻'); });
     const onBreaking = (event: MessageEvent<string>) => { const item = (JSON.parse(event.data) as { item: NewsItem }).item; notify('CryptoAgent 爆炸性新闻', item.title); };
     stream.addEventListener('breaking', onBreaking);
     if (!window.cryptoAgent && typeof Notification !== 'undefined' && Notification.permission === 'default') void Notification.requestPermission().catch(() => {});
@@ -168,6 +182,7 @@ export function App() {
       <div className="conversation-top"><div><Bot size={18} /><strong>交易对话</strong></div><div className="top-actions"><div className="model-picker"><button className="model-trigger" aria-haspopup="menu" aria-expanded={modelOpen} onClick={() => setModelOpen((open) => !open)}>5.6 {modelId.split('-').at(-1)![0].toUpperCase() + modelId.split('-').at(-1)!.slice(1)} · {({ low: 'Light', medium: 'Medium', high: 'High', xhigh: 'Extra High', max: 'Ultra' } as Record<ReasoningId, string>)[reasoningEffort]}<ChevronDown size={15} /></button>{modelOpen && <div className="model-menu" role="menu"><div className="model-menu-label">Reasoning</div>{(status?.model?.reasoning || ['low', 'medium', 'high', 'xhigh', 'max']).map((option) => <button key={option} className={reasoningEffort === option ? 'selected' : ''} onClick={() => { setReasoningEffort(option); setModelOpen(false); }}>{({ low: 'Light', medium: 'Medium', high: 'High', xhigh: 'Extra High', max: 'Ultra' } as Record<ReasoningId, string>)[option]}{reasoningEffort === option && <Check size={17} />}</button>)}<div className="model-menu-divider" /><div className="model-menu-label">Model</div>{(status?.model?.models || ['gpt-5.6-luna', 'gpt-5.6-sol', 'gpt-5.6-terra']).map((option) => <button key={option} className={modelId === option ? 'selected' : ''} onClick={() => { setModelId(option); setModelOpen(false); }}>{modelLabel(option)}<ChevronRight size={17} /></button>)}</div>}</div><div className="theme-control" role="group" aria-label="主题">{([['light', Sun, '浅色'], ['dark', Moon, '深色'], ['system', Monitor, '跟随系统']] as const).map(([value, Icon, label]) => <button key={value} className={theme === value ? 'selected' : ''} title={label} aria-label={label} onClick={() => setTheme(value)}><Icon size={14} /></button>)}</div><span>{status?.environment === 'live' ? 'LIVE' : 'TESTNET'}</span></div></div>
       <PriceChart symbol="BTCUSDT" environment={status?.environment || 'testnet'} />
       <NewsPanel items={news} />
+      <EmergencyPanel state={emergency} onChange={setEmergency} />
       <div className="messages">
         {!messages.length && <div className="empty"><Bot size={35} /><h1>说出你想执行的现货交易</h1><p>例如：用 50 USDT 市价买入 BTC。信息不完整时，我会先追问，不会猜测金额。</p><div className="examples"><button onClick={() => setInput('用 50 USDT 市价买入 BTC')}>买入 50 USDT 的 BTC</button><button onClick={() => setInput('卖出 0.001 BTC')}>卖出 0.001 BTC</button></div></div>}
         {messages.map((message) => <article className={`message ${message.role}`} key={message.id}><div className="bubble"><ReactMarkdown remarkPlugins={[remarkGfm]}>{message.content}</ReactMarkdown>{message.draft && <OrderDraft draft={message.draft} onConfirmed={(order) => { setMessages((current) => current.map((item) => item.id === message.id ? { ...item, order } : item)); void refresh(); }} />}{message.order && <div className="order-success"><Check size={16} />订单已提交 · ID {String(message.order.orderId || message.order.clientOrderId || 'accepted')}</div>}</div></article>)}
