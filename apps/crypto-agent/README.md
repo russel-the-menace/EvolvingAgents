@@ -27,4 +27,6 @@ Open `http://127.0.0.1:5450`. Without a model gateway, explicit market instructi
 
 The defaults are intentionally restrictive: testnet, BTC/ETH against USDT, spot only, no leverage, and at most 100 USDT per order. Live account reads require `BINANCE_ENV=live`; live submission additionally requires the separate `BINANCE_LIVE_TRADING=true` unlock. API keys should be IP-restricted.
 
+`GET /api/permissions` performs a safe account-capability audit. Binance's Spot account response cannot prove every API Management checkbox, so futures, transfers, and withdrawals are reported as `not_used` rather than probed. The client never calls those APIs.
+
 See [`TODO.md`](TODO.md) for the remaining production exit criteria. This client is not an autonomous strategy and does not provide investment advice.

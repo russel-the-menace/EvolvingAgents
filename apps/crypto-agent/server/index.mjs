@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { createModelGateway } from '@evolving-agents/model-gateway';
 import { parseModelJson } from '@evolving-agents/learning-engine';
 import { BinanceApiError, createBinanceSpotClient } from '../src/binance.mjs';
+import { auditBinancePermissions } from '../src/permissions.mjs';
 import { fallbackIntent, normalizeOrderIntent, tradePrompt, validateOrder } from '../src/trading.mjs';
 
 const port = Number(process.env.CRYPTO_AGENT_API_PORT || 5451);
@@ -58,6 +59,11 @@ export function createCryptoServer() {
       if (request.method === 'GET' && request.url === '/api/account') {
         if (!configured) return sendJson(response, 503, { error: 'Configure Binance credentials in apps/crypto-agent/.env.' });
         return sendJson(response, 200, await accountSnapshot());
+      }
+      if (request.method === 'GET' && request.url === '/api/permissions') {
+        if (!configured) return sendJson(response, 503, { error: 'Configure Binance credentials in apps/crypto-agent/.env.' });
+        const account = await binance.account();
+        return sendJson(response, 200, { permissions: auditBinancePermissions(account) });
       }
       if (request.method === 'GET' && request.url?.startsWith('/api/ticker?')) {
         const symbol = new URL(request.url, 'http://localhost').searchParams.get('symbol')?.toUpperCase();
