@@ -13,7 +13,8 @@ test('permission audit reports only safe account capabilities and never probes d
   assert.equal(result.destructivePermissionsProbed, false);
   assert.deepEqual(result.policy, CLIENT_PERMISSION_POLICY);
   assert.equal(result.policy.withdrawals, false);
-  assert.equal(result.policy.transfers, false);
+  assert.equal(result.policy.internalUniversalTransfers, true);
+  assert.equal(result.policy.externalTransfers, false);
   assert.equal(result.policy.marginBorrowRepay, false);
   assert.match(result.warnings[0], /withdrawal/);
 });

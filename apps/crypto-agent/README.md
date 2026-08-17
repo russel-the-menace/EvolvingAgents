@@ -29,6 +29,6 @@ The defaults are intentionally restrictive: testnet, BTC/ETH against USDT, spot 
 
 `GET /api/permissions` performs a safe account-capability audit. Binance's Spot account response cannot prove every API Management checkbox, so futures, transfers, and withdrawals are reported as `not_used` rather than probed. The client never calls those APIs.
 
-The client permission policy is explicit: withdrawals, universal transfers, and margin borrowing/repayment are disabled; spot trading is the only execution capability used by this application. Other permissions may remain enabled on the Binance key for separate tools, but they are outside this client's API surface.
+The client permission policy is explicit: withdrawals and external transfers are disabled; internal universal transfers within the user's own Binance account are allowed by policy but are not yet implemented; margin borrowing/repayment is disabled; spot trading is the only execution capability currently used by this application. Other permissions may remain enabled on the Binance key for separate tools, but they are outside this client's API surface.
 
 See [`TODO.md`](TODO.md) for the remaining production exit criteria. This client is not an autonomous strategy and does not provide investment advice.

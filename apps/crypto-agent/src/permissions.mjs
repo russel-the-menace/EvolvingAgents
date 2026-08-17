@@ -1,6 +1,7 @@
 export const CLIENT_PERMISSION_POLICY = Object.freeze({
   withdrawals: false,
-  transfers: false,
+  internalUniversalTransfers: true,
+  externalTransfers: false,
   marginBorrowRepay: false,
   spotTrading: true,
 });
