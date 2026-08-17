@@ -25,6 +25,8 @@ npm run dev -- crypto-agent
 
 Open `http://127.0.0.1:5450`. Without a model gateway, explicit market instructions such as `用 50 USDT 市价买入 BTC` still work. Configuring `GATEWAY_BASE_URL` and `GATEWAY_API_KEY` enables natural-language clarification and LIMIT order extraction; Binance credentials are never sent to the model.
 
+For a resident macOS window, use `npm run desktop -- crypto-agent`. Closing the window hides it while the app remains available from the Dock; use `Cmd+Q` to exit.
+
 The defaults are intentionally restrictive: testnet, BTC/ETH against USDT, spot only, no leverage, and at most 100 USDT per order. Live account reads require `BINANCE_ENV=live`; live submission additionally requires the separate `BINANCE_LIVE_TRADING=true` unlock. API keys should be IP-restricted.
 
 `GET /api/permissions` performs a safe account-capability audit. Binance's Spot account response cannot prove every API Management checkbox, so futures, transfers, and withdrawals are reported as `not_used` rather than probed. The client never calls those APIs.

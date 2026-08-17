@@ -3,8 +3,8 @@ import { spawnSync } from 'node:child_process';
 const applications = {
   'campus-atlas': { workspace: '@evolving-agents/campus-atlas', displayName: 'CampusAtlas', commands: ['dev'] },
   campusatlas: { workspace: '@evolving-agents/campus-atlas', displayName: 'CampusAtlas', commands: ['dev'] },
-  'crypto-agent': { workspace: '@evolving-agents/crypto-agent', displayName: 'CryptoAgent', commands: ['dev'] },
-  cryptoagent: { workspace: '@evolving-agents/crypto-agent', displayName: 'CryptoAgent', commands: ['dev'] },
+  'crypto-agent': { workspace: '@evolving-agents/crypto-agent', displayName: 'CryptoAgent', commands: ['dev', 'desktop'] },
+  cryptoagent: { workspace: '@evolving-agents/crypto-agent', displayName: 'CryptoAgent', commands: ['dev', 'desktop'] },
   'mind-clone': { workspace: '@evolving-agents/mind-clone', displayName: 'MindClone', commands: ['dev', 'desktop'] },
   mindclone: { workspace: '@evolving-agents/mind-clone', displayName: 'MindClone', commands: ['dev', 'desktop'] },
 };
