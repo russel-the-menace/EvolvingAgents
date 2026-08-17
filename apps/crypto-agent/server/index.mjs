@@ -25,7 +25,8 @@ const gateway = process.env.GATEWAY_BASE_URL && process.env.GATEWAY_API_KEY
   : null;
 const drafts = new Map();
 const symbolAllowed = (symbol) => !allowedSymbols || allowedSymbols.includes(symbol);
-const news = new NewsService({ feedUrls: (process.env.NEWS_RSS_URLS || '').split(',').map((item) => item.trim()).filter(Boolean), stateFile: process.env.NEWS_STATE_FILE || '', pollMs: Number(process.env.NEWS_POLL_MS || 300_000) });
+const defaultNewsState = process.platform === 'darwin' && process.env.HOME ? `${process.env.HOME}/Library/Application Support/CryptoAgent/news-state.json` : '';
+const news = new NewsService({ feedUrls: (process.env.NEWS_RSS_URLS || '').split(',').map((item) => item.trim()).filter(Boolean), stateFile: process.env.NEWS_STATE_FILE || defaultNewsState, pollMs: Number(process.env.NEWS_POLL_MS || 300_000) });
 const newsClients = new Set();
 void news.load().then(() => news.start());
 news.subscribe((event) => { for (const response of newsClients) { response.write(`event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`); } });
