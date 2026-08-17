@@ -1,4 +1,4 @@
-const { app, BrowserWindow } = require('electron');
+const { app, BrowserWindow, nativeTheme } = require('electron');
 const { fork } = require('node:child_process');
 const { createServer } = require('node:http');
 const { existsSync, readFileSync, createReadStream } = require('node:fs');
@@ -62,7 +62,7 @@ function createWindow() {
     minHeight: 640,
     title: 'CryptoAgent',
     titleBarStyle: 'hiddenInset',
-    backgroundColor: '#f4f5f6',
+    backgroundColor: nativeTheme.shouldUseDarkColors ? '#101214' : '#f4f5f6',
     webPreferences: { contextIsolation: true, nodeIntegration: false },
   });
   mainWindow.loadURL('http://127.0.0.1:5450');

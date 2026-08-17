@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { ArrowDownLeft, ArrowUpRight, Bot, Check, CircleDollarSign, RefreshCw, SendHorizontal, ShieldCheck, Wallet } from 'lucide-react';
+import { ArrowDownLeft, ArrowUpRight, Bot, Check, CircleDollarSign, Monitor, Moon, RefreshCw, SendHorizontal, ShieldCheck, Sun, Wallet } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 
@@ -8,6 +8,7 @@ type Balance = { asset: string; free: string; locked: string };
 type Draft = { id: string; intent: { symbol: string; side: 'BUY' | 'SELL'; type: string; quantity?: string; quoteOrderQty?: string; price?: string }; estimate: { estimatedPrice: number; estimatedNotional: number; baseQuantity: number; baseAsset: string; quoteAsset: string }; environment: string };
 type Message = { id: string; role: 'user' | 'assistant'; content: string; draft?: Draft; order?: Record<string, unknown> };
 type ChartPoint = { time: number; close: number };
+type Theme = 'light' | 'dark' | 'system';
 
 async function api<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`/api${path}`, { ...init, headers: { 'Content-Type': 'application/json', ...init?.headers } });
@@ -78,6 +79,10 @@ function PriceChart({ symbol, environment }: { symbol: string; environment: 'tes
 }
 
 export function App() {
+  const [theme, setTheme] = useState<Theme>(() => {
+    const saved = window.localStorage.getItem('crypto-agent-theme');
+    return saved === 'light' || saved === 'dark' || saved === 'system' ? saved : 'system';
+  });
   const [status, setStatus] = useState<Status | null>(null);
   const [balances, setBalances] = useState<Balance[]>([]);
   const [messages, setMessages] = useState<Message[]>([]);
@@ -92,6 +97,7 @@ export function App() {
     } catch (caught) { setError(caught instanceof Error ? caught.message : 'Unable to connect.'); }
   }
   useEffect(() => { void refresh(); }, []);
+  useEffect(() => { document.documentElement.dataset.theme = theme; window.localStorage.setItem('crypto-agent-theme', theme); }, [theme]);
 
   async function send() {
     const content = input.trim();
@@ -113,7 +119,7 @@ export function App() {
       <section className="limits"><ShieldCheck size={16} /><div><strong>硬性风控</strong><span>现货 · 无杠杆 · 单笔 ≤ {status?.maxOrderUsdt ?? 100} USDT</span><span>{status?.allowedSymbols?.join(' / ') || 'BTCUSDT / ETHUSDT'}</span></div></section>
     </aside>
     <section className="conversation">
-      <div className="conversation-top"><div><Bot size={18} /><strong>交易对话</strong></div><span>{status?.environment === 'live' ? 'LIVE' : 'TESTNET'}</span></div>
+      <div className="conversation-top"><div><Bot size={18} /><strong>交易对话</strong></div><div className="top-actions"><div className="theme-control" role="group" aria-label="主题">{([['light', Sun, '浅色'], ['dark', Moon, '深色'], ['system', Monitor, '跟随系统']] as const).map(([value, Icon, label]) => <button key={value} className={theme === value ? 'selected' : ''} title={label} aria-label={label} onClick={() => setTheme(value)}><Icon size={14} /></button>)}</div><span>{status?.environment === 'live' ? 'LIVE' : 'TESTNET'}</span></div></div>
       <PriceChart symbol="BTCUSDT" environment={status?.environment || 'testnet'} />
       <div className="messages">
         {!messages.length && <div className="empty"><Bot size={35} /><h1>说出你想执行的现货交易</h1><p>例如：用 50 USDT 市价买入 BTC。信息不完整时，我会先追问，不会猜测金额。</p><div className="examples"><button onClick={() => setInput('用 50 USDT 市价买入 BTC')}>买入 50 USDT 的 BTC</button><button onClick={() => setInput('卖出 0.001 BTC')}>卖出 0.001 BTC</button></div></div>}
