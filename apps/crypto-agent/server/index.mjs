@@ -91,7 +91,7 @@ function createFuturesDraft(raw) {
   if (!['BUY', 'SELL'].includes(side) || type !== 'MARKET') throw new Error('Futures currently supports MARKET BUY or SELL only.');
   if (!['ISOLATED', 'CROSSED'].includes(marginType)) throw new Error('marginType must be ISOLATED or CROSSED.');
   if (!/^\d+(?:\.\d+)?$/.test(quantity) || Number(quantity) <= 0) throw new Error('Futures quantity must be a positive decimal.');
-  if (!Number.isInteger(leverage) || leverage < 1 || leverage > 50) throw new Error('Futures leverage must be an integer from 1x to 50x.');
+  if (!Number.isInteger(leverage) || leverage < 1 || leverage > 125) throw new Error('Futures leverage must be an integer from 1x to 125x.');
   const draft = { id: randomUUID(), confirmationToken: randomUUID(), intent: { symbol, side, type, quantity, leverage, marginType, reduceOnly: Boolean(raw.reduceOnly) }, environment, createdAt: Date.now(), state: 'pending' };
   futuresDrafts.set(draft.id, draft);
   return draft;
@@ -101,7 +101,7 @@ export function createCryptoServer() {
   return createServer(async (request, response) => {
     try {
       if (request.method === 'GET' && request.url === '/api/status') {
-        return sendJson(response, 200, { configured, environment, liveTradingEnabled, allowedSymbols, maxOrderUsdt, futures: { configured, maxLeverage: 50, confirmationRequired: true }, news: { configured: news.feedUrls.length > 0, learningEnabled: Boolean(newsLearner), pollMs: news.pollMs }, model: { provider: gatewayProvider, models: modelOptions, reasoning: reasoningOptions, defaultModel, defaultReasoning } });
+        return sendJson(response, 200, { configured, environment, liveTradingEnabled, allowedSymbols, maxOrderUsdt, futures: { configured, maxLeverage: 125, confirmationRequired: true }, news: { configured: news.feedUrls.length > 0, learningEnabled: Boolean(newsLearner), pollMs: news.pollMs }, model: { provider: gatewayProvider, models: modelOptions, reasoning: reasoningOptions, defaultModel, defaultReasoning } });
       }
       if (request.method === 'GET' && request.url === '/api/news') {
         const mode = new URL(request.url, 'http://localhost').searchParams.get('mode');
