@@ -25,7 +25,7 @@ npm run dev -- crypto-agent
 
 Open `http://127.0.0.1:5450`. Without a model gateway, explicit market instructions such as `用 50 USDT 市价买入 BTC` still work. Configuring `GATEWAY_BASE_URL` and `GATEWAY_API_KEY` enables natural-language clarification and LIMIT order extraction; Binance credentials are never sent to the model.
 
-The model control uses the gateway's transparent `openai` provider payload. It exposes `GPT-5.6 Luna`, `GPT-5.6 Sol`, and `GPT-5.6 Terra`, with independent `Light`, `Medium`, `High`, `Extra High` (`xhigh`), and `Ultra` reasoning choices. The selected values are sent as `model` and `reasoning_effort`.
+The model control uses the gateway's transparent `openai` provider payload. It exposes `GPT-5.6 Luna`, `GPT-5.6 Sol`, and `GPT-5.6 Terra`, with independent `Light` (`low`), `Medium`, `High`, `Extra High` (`xhigh`), and `Ultra` (`max`) reasoning choices. The selected values are sent as `model` and `reasoning_effort`.
 
 For a resident macOS window, use `npm run desktop -- crypto-agent`. Closing the window hides it while the app remains available from the Dock; use `Cmd+Q` to exit.
 
