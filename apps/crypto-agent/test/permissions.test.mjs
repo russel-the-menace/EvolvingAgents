@@ -16,5 +16,9 @@ test('permission audit reports only safe account capabilities and never probes d
   assert.equal(result.policy.internalUniversalTransfers, true);
   assert.equal(result.policy.externalTransfers, false);
   assert.equal(result.policy.marginBorrowRepay, false);
+  assert.equal(result.policy.marginTrading, true);
+  assert.equal(result.policy.usdMFuturesTrading, true);
+  assert.equal(result.policy.coinMFuturesTrading, true);
+  assert.equal(result.policy.automatedStrategies, true);
   assert.match(result.warnings[0], /withdrawal/);
 });

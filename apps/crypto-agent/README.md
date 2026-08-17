@@ -33,10 +33,10 @@ To create a normal double-clickable Apple Silicon app/DMG, run `npm run dist:mac
 
 The chart loads 1-minute history over REST, then follows Binance's real-time `@trade` WebSocket stream. Each trade updates the current candle immediately; the socket reconnects after disconnects.
 
-The defaults are intentionally restrictive: testnet, BTC/ETH against USDT, spot only, no leverage, and at most 100 USDT per order. Live account reads require `BINANCE_ENV=live`; live submission additionally requires the separate `BINANCE_LIVE_TRADING=true` unlock. API keys should be IP-restricted.
+The client capability policy targets full Binance trading coverage: all configured Spot symbols, USDⓈ-M and COIN-M futures, margin trading without borrow/repay, internal account transfers, and automated strategy execution. Withdrawals, borrow/repay, and external transfers remain disabled. Live account reads require `BINANCE_ENV=live`; live submission additionally requires the separate `BINANCE_LIVE_TRADING=true` unlock. API keys should be IP-restricted.
 
 `GET /api/permissions` performs a safe account-capability audit. Binance's Spot account response cannot prove every API Management checkbox, so futures, transfers, and withdrawals are reported as `not_used` rather than probed. The client never calls those APIs.
 
-The client permission policy is explicit: withdrawals and external transfers are disabled; internal universal transfers within the user's own Binance account are allowed by policy but are not yet implemented; margin borrowing/repayment is disabled; spot trading is the only execution capability currently used by this application. Other permissions may remain enabled on the Binance key for separate tools, but they are outside this client's API surface.
+The client permission policy is explicit: withdrawals, borrow/repay, and external transfers are disabled; internal universal transfers, margin trading, futures, algo trading, and automated strategies are in scope. Product-specific clients are being added separately; the Spot client does not probe destructive APIs.
 
 See [`TODO.md`](TODO.md) for the remaining production exit criteria. This client is not an autonomous strategy and does not provide investment advice.

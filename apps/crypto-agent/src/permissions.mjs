@@ -4,6 +4,11 @@ export const CLIENT_PERMISSION_POLICY = Object.freeze({
   externalTransfers: false,
   marginBorrowRepay: false,
   spotTrading: true,
+  marginTrading: true,
+  usdMFuturesTrading: true,
+  coinMFuturesTrading: true,
+  algoTrading: true,
+  automatedStrategies: true,
 });
 
 // Binance does not expose every API-management checkbox through the Spot account response.
