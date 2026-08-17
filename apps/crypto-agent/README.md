@@ -27,6 +27,10 @@ Open `http://127.0.0.1:5450`. Without a model gateway, explicit market instructi
 
 For a resident macOS window, use `npm run desktop -- crypto-agent`. Closing the window hides it while the app remains available from the Dock; use `Cmd+Q` to exit.
 
+To create a normal double-clickable Apple Silicon app/DMG, run `npm run dist:mac -- crypto-agent`. The output is `dist/CryptoAgent-0.1.0-arm64.dmg`. For a packaged app, place the ignored `.env` at `~/Library/Application Support/CryptoAgent/.env`; the app starts its local API itself and never bundles that file.
+
+The chart loads 1-minute history over REST, then follows Binance's real-time `@trade` WebSocket stream. Each trade updates the current candle immediately; the socket reconnects after disconnects.
+
 The defaults are intentionally restrictive: testnet, BTC/ETH against USDT, spot only, no leverage, and at most 100 USDT per order. Live account reads require `BINANCE_ENV=live`; live submission additionally requires the separate `BINANCE_LIVE_TRADING=true` unlock. API keys should be IP-restricted.
 
 `GET /api/permissions` performs a safe account-capability audit. Binance's Spot account response cannot prove every API Management checkbox, so futures, transfers, and withdrawals are reported as `not_used` rather than probed. The client never calls those APIs.

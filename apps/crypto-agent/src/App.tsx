@@ -36,7 +36,7 @@ function OrderDraft({ draft, onConfirmed }: { draft: Draft; onConfirmed: (order:
   </section>;
 }
 
-function PriceChart({ symbol }: { symbol: string }) {
+function PriceChart({ symbol, environment }: { symbol: string; environment: 'testnet' | 'live' }) {
   const [points, setPoints] = useState<ChartPoint[]>([]);
   const [error, setError] = useState('');
   useEffect(() => {
@@ -47,9 +47,30 @@ function PriceChart({ symbol }: { symbol: string }) {
         if (active) { setPoints(result.klines.map((item) => ({ time: Number(item[0]), close: Number(item[4]) }))); setError(''); }
       } catch (caught) { if (active) setError(caught instanceof Error ? caught.message : '行情暂不可用'); }
     }
-    void load(); const timer = window.setInterval(load, 30_000);
-    return () => { active = false; window.clearInterval(timer); };
-  }, [symbol]);
+    void load();
+    const streamHost = environment === 'testnet' ? 'wss://stream.testnet.binance.vision/ws' : 'wss://stream.binance.com:9443/ws';
+    let socket: WebSocket | null = null; let reconnectTimer: number | undefined;
+    const connect = () => {
+      if (!active) return;
+      socket = new WebSocket(`${streamHost}/${symbol.toLowerCase()}@trade`);
+      socket.onmessage = (event) => {
+        const trade = JSON.parse(event.data) as { p?: string; T?: number };
+        const close = Number(trade.p); const time = Number(trade.T || Date.now());
+        if (!Number.isFinite(close)) return;
+        setPoints((current) => {
+          const next = current.length ? [...current] : [{ time, close }];
+          const candleTime = Math.floor(time / 60_000) * 60_000;
+          if (next.at(-1)?.time === candleTime) next[next.length - 1] = { time: candleTime, close };
+          else next.push({ time: candleTime, close });
+          return next.slice(-120);
+        });
+      };
+      socket.onclose = () => { if (active) reconnectTimer = window.setTimeout(connect, 1500); };
+      socket.onerror = () => socket?.close();
+    };
+    connect();
+    return () => { active = false; if (reconnectTimer) window.clearTimeout(reconnectTimer); socket?.close(); };
+  }, [symbol, environment]);
   const width = 720; const height = 150; const pad = 12;
   const values = points.map((point) => point.close); const min = Math.min(...values); const max = Math.max(...values); const range = max - min || 1;
   const path = points.map((point, index) => `${index ? 'L' : 'M'} ${(pad + index * ((width - pad * 2) / Math.max(points.length - 1, 1))).toFixed(2)} ${(height - pad - ((point.close - min) / range) * (height - pad * 2)).toFixed(2)}`).join(' ');
@@ -93,7 +114,7 @@ export function App() {
     </aside>
     <section className="conversation">
       <div className="conversation-top"><div><Bot size={18} /><strong>交易对话</strong></div><span>{status?.environment === 'live' ? 'LIVE' : 'TESTNET'}</span></div>
-      <PriceChart symbol="BTCUSDT" />
+      <PriceChart symbol="BTCUSDT" environment={status?.environment || 'testnet'} />
       <div className="messages">
         {!messages.length && <div className="empty"><Bot size={35} /><h1>说出你想执行的现货交易</h1><p>例如：用 50 USDT 市价买入 BTC。信息不完整时，我会先追问，不会猜测金额。</p><div className="examples"><button onClick={() => setInput('用 50 USDT 市价买入 BTC')}>买入 50 USDT 的 BTC</button><button onClick={() => setInput('卖出 0.001 BTC')}>卖出 0.001 BTC</button></div></div>}
         {messages.map((message) => <article className={`message ${message.role}`} key={message.id}><div className="bubble"><ReactMarkdown remarkPlugins={[remarkGfm]}>{message.content}</ReactMarkdown>{message.draft && <OrderDraft draft={message.draft} onConfirmed={(order) => { setMessages((current) => current.map((item) => item.id === message.id ? { ...item, order } : item)); void refresh(); }} />}{message.order && <div className="order-success"><Check size={16} />订单已提交 · ID {String(message.order.orderId || message.order.clientOrderId || 'accepted')}</div>}</div></article>)}
