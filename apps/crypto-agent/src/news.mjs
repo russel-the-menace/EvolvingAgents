@@ -20,26 +20,44 @@ export function parseFeed(xml, source) {
 }
 
 export class NewsService {
-  constructor({ feedUrls = [], stateFile = '', pollMs = 300_000, fetchImpl = fetch } = {}) {
-    this.feedUrls = feedUrls; this.stateFile = stateFile; this.pollMs = pollMs; this.fetchImpl = fetchImpl; this.items = new Map(); this.listeners = new Set(); this.timer = null; this.lastDigestAt = 0; this.startupDate = '';
+  constructor({ feedUrls = [], stateFile = '', pollMs = 300_000, fetchImpl = fetch, learnItem } = {}) {
+    this.feedUrls = feedUrls; this.stateFile = stateFile; this.pollMs = pollMs; this.fetchImpl = fetchImpl; this.learnItem = learnItem; this.items = new Map(); this.listeners = new Set(); this.timer = null; this.lastDigestAt = 0; this.startupDate = '';
   }
   async load() { if (!this.stateFile) return; try { const saved = JSON.parse(await readFile(this.stateFile, 'utf8')); for (const item of saved.items || []) this.items.set(item.id, item); this.startupDate = saved.startupDate || ''; this.lastDigestAt = saved.lastDigestAt || 0; } catch { /* first run */ } }
   async save() { if (!this.stateFile) return; await mkdir(dirname(this.stateFile), { recursive: true }); await writeFile(this.stateFile, JSON.stringify({ items: [...this.items.values()].slice(-500), startupDate: this.startupDate, lastDigestAt: this.lastDigestAt })); }
   subscribe(listener) { this.listeners.add(listener); return () => this.listeners.delete(listener); }
-  emit(event) { for (const listener of this.listeners) listener(event); }
+  emit(event) { for (const listener of this.listeners) { try { listener(event); } catch { /* one subscriber must not stop the feed */ } } }
   async poll() {
     const fresh = [];
     for (const url of this.feedUrls) {
       try { const response = await this.fetchImpl(url, { signal: AbortSignal.timeout(10_000), headers: { Accept: 'application/rss+xml, application/atom+xml, application/xml, text/xml' } }); if (!response.ok) continue; const source = new URL(url).hostname; for (const item of parseFeed(await response.text(), source)) if (!this.items.has(item.id)) { this.items.set(item.id, item); fresh.push(item); } } catch { /* one source failing must not stop other feeds */ }
     }
     if (this.items.size > 500) this.items = new Map([...this.items.entries()].slice(-500));
-    for (const item of fresh.filter((item) => item.urgency === 'breaking')) this.emit({ type: 'breaking', item });
+    for (const item of fresh) {
+      if (this.learnItem) void Promise.resolve(this.learnItem(item)).catch(() => {});
+      if (item.urgency === 'breaking') this.emit({ type: 'breaking', item });
+    }
     if (fresh.length) await this.save();
     return fresh;
   }
   start() { if (this.timer || !this.feedUrls.length) return; void this.poll(); this.timer = setInterval(() => void this.poll(), this.pollMs); this.timer.unref?.(); }
   stop() { if (this.timer) clearInterval(this.timer); this.timer = null; }
   recent(limit = 30) { return [...this.items.values()].sort((a, b) => Date.parse(b.publishedAt) - Date.parse(a.publishedAt)).slice(0, limit); }
-  async startupDigest() { const today = new Date().toISOString().slice(0, 10); if (this.startupDate === today) return []; this.startupDate = today; await this.save(); return this.recent(10); }
-  async twoHourDigest() { const cutoff = Date.now() - 2 * 60 * 60 * 1000; const items = this.recent(100).filter((item) => Date.parse(item.publishedAt) >= cutoff); this.lastDigestAt = Date.now(); await this.save(); return items; }
+  async startupDigest() {
+    const now = new Date();
+    const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+    if (this.startupDate === today) return [];
+    this.startupDate = today;
+    await this.save();
+    return this.recent(10);
+  }
+  async twoHourDigest() {
+    const now = Date.now();
+    // Keep a cursor instead of a rolling time filter so a digest never repeats after a restart.
+    const since = this.lastDigestAt || now - 2 * 60 * 60 * 1000;
+    const items = this.recent(100).filter((item) => { const published = Date.parse(item.publishedAt); return published > since && published <= now; });
+    this.lastDigestAt = now;
+    await this.save();
+    return items;
+  }
 }

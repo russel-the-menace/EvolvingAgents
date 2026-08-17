@@ -33,6 +33,17 @@ To create a normal double-clickable Apple Silicon app/DMG, run `npm run dist:mac
 
 The chart loads 1-minute history over REST, then follows Binance's real-time `@trade` WebSocket stream. Each trade updates the current candle immediately; the socket reconnects after disconnects.
 
+## News collection and push policy
+
+Set `NEWS_RSS_URLS` to an audited, comma-separated list of RSS/Atom URLs. The service polls every `NEWS_POLL_MS` (five minutes by default), deduplicates by URL and title, and stores up to 500 items with their source and publication time. The push policy is:
+
+- the first app open of each local day receives up to 10 recent items;
+- normal items are delivered once per two-hour cursor window;
+- headlines matching the breaking-news rules are delivered immediately;
+- new items are learned into a separate SQLite research database (`NEWS_LEARNING_DB_FILE`), never into the order or credential path.
+
+`GET /api/news/knowledge` exposes the learned source records for future retrieval and summarization. Browser notifications require the user's normal Notification permission; the in-app news list remains available when notifications are disabled.
+
 The client capability policy targets full Binance trading coverage: all configured Spot symbols, USDⓈ-M and COIN-M futures, margin trading without borrow/repay, internal account transfers, and automated strategy execution. Withdrawals, borrow/repay, and external transfers remain disabled. Live account reads require `BINANCE_ENV=live`; live submission additionally requires the separate `BINANCE_LIVE_TRADING=true` unlock. API keys should be IP-restricted.
 
 `GET /api/permissions` performs a safe account-capability audit. Binance's Spot account response cannot prove every API Management checkbox, so futures, transfers, and withdrawals are reported as `not_used` rather than probed. The client never calls those APIs.

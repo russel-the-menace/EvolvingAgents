@@ -121,12 +121,22 @@ export function App() {
   useEffect(() => { void refresh(); }, []);
   useEffect(() => {
     let active = true;
-    void api<{ items: NewsItem[] }>('/news?mode=startup').then((result) => { if (active) setNews(result.items); }).catch(() => {});
+    const notify = (title: string, body: string) => {
+      if (typeof Notification !== 'undefined' && Notification.permission === 'granted') new Notification(title, { body });
+    };
+    void api<{ items: NewsItem[] }>('/news?mode=startup').then((result) => {
+      if (!active) return;
+      setNews(result.items);
+      if (result.items.length) notify('CryptoAgent 今日新闻', `${result.items.length} 条重要新闻已准备好`);
+    }).catch(() => {});
     const stream = new EventSource('/api/news/stream');
     const add = (event: MessageEvent<string>) => { const payload = JSON.parse(event.data) as { item?: NewsItem; items?: NewsItem[] }; const incoming = payload.item ? [payload.item] : payload.items || []; if (!incoming.length) return; setNews((current) => [...incoming, ...current.filter((item) => !incoming.some((next) => next.id === item.id))].slice(0, 30)); };
-    stream.addEventListener('breaking', add); stream.addEventListener('digest', add); stream.addEventListener('ready', add);
-    const onBreaking = (event: MessageEvent<string>) => { const item = (JSON.parse(event.data) as { item: NewsItem }).item; if (typeof Notification !== 'undefined' && Notification.permission === 'granted') new Notification('CryptoAgent 爆炸性新闻', { body: item.title }); };
+    stream.addEventListener('breaking', add);
+    stream.addEventListener('digest', (event) => { add(event); const payload = JSON.parse(event.data) as { items?: NewsItem[] }; if (payload.items?.length) notify('CryptoAgent 两小时新闻', `${payload.items.length} 条新新闻`); });
+    stream.addEventListener('ready', add);
+    const onBreaking = (event: MessageEvent<string>) => { const item = (JSON.parse(event.data) as { item: NewsItem }).item; notify('CryptoAgent 爆炸性新闻', item.title); };
     stream.addEventListener('breaking', onBreaking);
+    if (typeof Notification !== 'undefined' && Notification.permission === 'default') void Notification.requestPermission().catch(() => {});
     return () => { active = false; stream.close(); };
   }, []);
   useEffect(() => { document.documentElement.dataset.theme = theme; window.localStorage.setItem('crypto-agent-theme', theme); }, [theme]);
