@@ -11,7 +11,7 @@ export function normalizeOrderIntent(raw, { allowedSymbols = ['BTCUSDT', 'ETHUSD
   const symbol = String(raw.symbol || '').toUpperCase();
   const side = String(raw.side || '').toUpperCase();
   const type = String(raw.type || 'MARKET').toUpperCase();
-  if (!allowedSymbols.includes(symbol)) throw new Error(`${symbol || 'This symbol'} is not in the trading allowlist.`);
+  if (Array.isArray(allowedSymbols) && !allowedSymbols.includes(symbol)) throw new Error(`${symbol || 'This symbol'} is not in the trading allowlist.`);
   if (!['BUY', 'SELL'].includes(side)) throw new Error('Order side must be BUY or SELL.');
   if (!['MARKET', 'LIMIT'].includes(type)) throw new Error('Only MARKET and LIMIT spot orders are supported.');
   const intent = { symbol, side, type };
@@ -45,7 +45,7 @@ export function validateOrder(intent, { symbolInfo, ticker, balances = [], maxOr
   const baseQuantity = intent.quantity ? Number(intent.quantity) : Number(intent.quoteOrderQty) / price;
   const notional = intent.quoteOrderQty ? Number(intent.quoteOrderQty) : baseQuantity * price;
   if (!Number.isFinite(price) || price <= 0) throw new Error('A current executable price is unavailable.');
-  if (notional > maxOrderUsdt) throw new Error(`Order value ${notional.toFixed(2)} USDT exceeds the ${maxOrderUsdt} USDT limit.`);
+  if (maxOrderUsdt > 0 && notional > maxOrderUsdt) throw new Error(`Order value ${notional.toFixed(2)} USDT exceeds the ${maxOrderUsdt} USDT limit.`);
   const lot = filter(symbolInfo, intent.type === 'MARKET' ? 'MARKET_LOT_SIZE' : 'LOT_SIZE') || filter(symbolInfo, 'LOT_SIZE');
   if (intent.quantity && lot) {
     if (Number(intent.quantity) < Number(lot.minQty) || Number(intent.quantity) > Number(lot.maxQty) || !isStepAligned(intent.quantity, lot.stepSize)) throw new Error(`Quantity must match Binance lot size (${lot.minQty} to ${lot.maxQty}, step ${lot.stepSize}).`);

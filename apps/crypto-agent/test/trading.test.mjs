@@ -21,6 +21,11 @@ test('rejects orders above the independent notional limit', () => {
   assert.throws(() => validateOrder({ symbol: 'BTCUSDT', side: 'BUY', type: 'MARKET', quoteOrderQty: '101' }, context), /exceeds the 100 USDT limit/);
 });
 
+test('supports wildcard symbols and an unlimited client-side notional', () => {
+  const intent = normalizeOrderIntent({ symbol: 'DOGEUSDT', side: 'BUY', quoteOrderQty: '100000' }, { allowedSymbols: null });
+  assert.equal(validateOrder(intent, { ...context, maxOrderUsdt: 0, balances: [{ asset: 'USDT', free: '100001' }] }).estimatedNotional, 100000);
+});
+
 test('rejects unsupported symbols and malformed decimal input', () => {
   assert.throws(() => normalizeOrderIntent({ symbol: 'DOGEUSDT', side: 'BUY', quoteOrderQty: '10' }), /allowlist/);
   assert.throws(() => normalizeOrderIntent({ symbol: 'BTCUSDT', side: 'SELL', quantity: '1e2' }), /positive decimal/);

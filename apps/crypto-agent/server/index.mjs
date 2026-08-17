@@ -9,7 +9,8 @@ import { fallbackIntent, normalizeOrderIntent, tradePrompt, validateOrder } from
 const port = Number(process.env.CRYPTO_AGENT_API_PORT || 5451);
 const environment = process.env.BINANCE_ENV === 'live' ? 'live' : 'testnet';
 const liveTradingEnabled = environment === 'live' && process.env.BINANCE_LIVE_TRADING === 'true';
-const allowedSymbols = (process.env.BINANCE_SYMBOLS || 'BTCUSDT,ETHUSDT').split(',').map((item) => item.trim().toUpperCase()).filter(Boolean);
+const symbolConfig = (process.env.BINANCE_SYMBOLS || 'BTCUSDT,ETHUSDT').trim();
+const allowedSymbols = symbolConfig === '*' ? null : symbolConfig.split(',').map((item) => item.trim().toUpperCase()).filter(Boolean);
 const maxOrderUsdt = Number(process.env.MAX_ORDER_USDT || 100);
 const configured = Boolean(process.env.BINANCE_API_KEY && process.env.BINANCE_SECRET_KEY);
 const gatewayProvider = process.env.GATEWAY_PROVIDER || 'openai';
@@ -22,6 +23,7 @@ const gateway = process.env.GATEWAY_BASE_URL && process.env.GATEWAY_API_KEY
   ? createModelGateway({ baseUrl: process.env.GATEWAY_BASE_URL, apiKey: process.env.GATEWAY_API_KEY, provider: gatewayProvider, model: defaultModel, reasoningEffort: defaultReasoning })
   : null;
 const drafts = new Map();
+const symbolAllowed = (symbol) => !allowedSymbols || allowedSymbols.includes(symbol);
 
 function sendJson(response, status, body) { response.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8' }); response.end(JSON.stringify(body)); }
 async function body(request) {
@@ -72,14 +74,14 @@ export function createCryptoServer() {
       }
       if (request.method === 'GET' && request.url?.startsWith('/api/ticker?')) {
         const symbol = new URL(request.url, 'http://localhost').searchParams.get('symbol')?.toUpperCase();
-        if (!symbol || !allowedSymbols.includes(symbol)) return sendJson(response, 400, { error: 'Symbol is not allowed.' });
+        if (!symbol || !symbolAllowed(symbol)) return sendJson(response, 400, { error: 'Symbol is not allowed.' });
         return sendJson(response, 200, await binance.ticker(symbol));
       }
       if (request.method === 'GET' && request.url?.startsWith('/api/klines?')) {
         const query = new URL(request.url, 'http://localhost').searchParams;
         const symbol = query.get('symbol')?.toUpperCase();
         const interval = query.get('interval') || '1m';
-        if (!symbol || !allowedSymbols.includes(symbol)) return sendJson(response, 400, { error: 'Symbol is not allowed.' });
+        if (!symbol || !symbolAllowed(symbol)) return sendJson(response, 400, { error: 'Symbol is not allowed.' });
         if (!['1m', '5m', '15m', '1h', '4h', '1d'].includes(interval)) return sendJson(response, 400, { error: 'Interval is not allowed.' });
         return sendJson(response, 200, { symbol, interval, klines: await binance.klines(symbol, interval, 120) });
       }
@@ -91,7 +93,7 @@ export function createCryptoServer() {
         let parsed;
         const model = modelOptions.includes(payload.model) ? payload.model : defaultModel;
         const reasoningEffort = reasoningOptions.includes(payload.reasoning_effort) ? payload.reasoning_effort : defaultReasoning;
-        if (gateway) parsed = parseModelJson(await gateway.complete([{ role: 'system', content: tradePrompt(message, allowedSymbols) }], { model, reasoningEffort }));
+        if (gateway) parsed = parseModelJson(await gateway.complete([{ role: 'system', content: tradePrompt(message, allowedSymbols || ['any USDT spot symbol']) }], { model, reasoningEffort }));
         else parsed = { reply: '', intent: fallbackIntent(message) };
         if (!parsed?.intent) return sendJson(response, 200, { reply: parsed?.reply || '请明确交易方向、交易对和数量，例如“用 50 USDT 市价买入 BTC”。' });
         const draft = await createDraft(parsed.intent);
