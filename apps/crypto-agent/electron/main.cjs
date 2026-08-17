@@ -4,6 +4,8 @@ const { createServer } = require('node:http');
 const { existsSync, readFileSync, createReadStream } = require('node:fs');
 const { extname, join, resolve } = require('node:path');
 
+app.setName('CryptoAgent');
+
 let mainWindow;
 let quitting = false;
 let apiProcess;
