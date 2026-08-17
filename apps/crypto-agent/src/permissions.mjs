@@ -1,3 +1,10 @@
+export const CLIENT_PERMISSION_POLICY = Object.freeze({
+  withdrawals: false,
+  transfers: false,
+  marginBorrowRepay: false,
+  spotTrading: true,
+});
+
 // Binance does not expose every API-management checkbox through the Spot account response.
 // Keep destructive capabilities as explicit policy rather than probing them.
 export function auditBinancePermissions(account) {
@@ -12,6 +19,7 @@ export function auditBinancePermissions(account) {
     futures: 'not_used',
     transfers: 'not_used',
     withdrawals: 'not_used',
+    policy: CLIENT_PERMISSION_POLICY,
     destructivePermissionsProbed: false,
     warnings,
   };

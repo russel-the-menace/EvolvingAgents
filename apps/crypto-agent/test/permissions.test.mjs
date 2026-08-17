@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { auditBinancePermissions } from '../src/permissions.mjs';
+import { auditBinancePermissions, CLIENT_PERMISSION_POLICY } from '../src/permissions.mjs';
 
 test('permission audit reports only safe account capabilities and never probes destructive APIs', () => {
   const result = auditBinancePermissions({ canTrade: true, canWithdraw: true, canDeposit: true });
@@ -11,5 +11,9 @@ test('permission audit reports only safe account capabilities and never probes d
   assert.equal(result.transfers, 'not_used');
   assert.equal(result.futures, 'not_used');
   assert.equal(result.destructivePermissionsProbed, false);
+  assert.deepEqual(result.policy, CLIENT_PERMISSION_POLICY);
+  assert.equal(result.policy.withdrawals, false);
+  assert.equal(result.policy.transfers, false);
+  assert.equal(result.policy.marginBorrowRepay, false);
   assert.match(result.warnings[0], /withdrawal/);
 });
