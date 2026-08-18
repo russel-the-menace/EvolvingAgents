@@ -61,6 +61,9 @@ export function createBinanceSpotClient({ apiKey, secretKey, environment = 'test
     klines: (symbol, interval = '1m', limit = 120) => request('GET', '/api/v3/klines', { symbol, interval, limit }),
     exchangeInfo: (symbol) => request('GET', '/api/v3/exchangeInfo', { symbol }),
     account: () => request('GET', '/api/v3/account', { omitZeroBalances: true }, true),
+    fundingAsset: () => request('POST', '/sapi/v1/asset/get-funding-asset', {}, true),
+    walletBalance: (quoteAsset = 'USDT') => request('GET', '/sapi/v1/asset/wallet/balance', { quoteAsset }, true),
+    earnFlexible: (size = 100) => request('GET', '/sapi/v1/simple-earn/flexible/position', { size }, true),
     testOrder: (order) => request('POST', '/api/v3/order/test', order, true),
     placeOrder: (order) => request('POST', '/api/v3/order', order, true),
   };
@@ -85,6 +88,7 @@ export function createBinanceUsdMClient({ apiKey, secretKey, environment = 'test
     exchangeInfo: (symbol) => request('GET', '/fapi/v1/exchangeInfo', symbol ? { symbol } : {}),
     ticker: (symbol) => request('GET', '/fapi/v1/ticker/bookTicker', { symbol }),
     account: () => request('GET', '/fapi/v2/account', {}, true),
+    assetAccount: () => request('GET', '/fapi/v3/account', {}, true),
     positionRisk: (symbol) => request('GET', '/fapi/v2/positionRisk', symbol ? { symbol } : {}, true),
     leverage: (symbol, leverage) => request('POST', '/fapi/v1/leverage', { symbol, leverage }, true),
     marginType: (symbol, marginType) => request('POST', '/fapi/v1/marginType', { symbol, marginType }, true),

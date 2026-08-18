@@ -93,6 +93,17 @@ async function accountSnapshot() {
   return { canTrade: account.canTrade, balances: account.balances || [] };
 }
 
+async function assetSnapshot() {
+  if (!configured) return { configured: false, spot: null, funding: null, earn: null, futures: null, wallets: null, errors: ['Configure Binance credentials before reading assets.'] };
+  const [spot, funding, earn, futuresAccount, wallets] = await Promise.allSettled([binance.account(), binance.fundingAsset(), binance.earnFlexible(), futures.assetAccount(), binance.walletBalance('USDT')]);
+  const result = { configured: true, spot: null, funding: null, earn: null, futures: null, wallets: null, errors: [] };
+  for (const [key, entry] of [['spot', spot], ['funding', funding], ['earn', earn], ['futures', futuresAccount], ['wallets', wallets]]) {
+    if (entry.status === 'fulfilled') result[key] = entry.value;
+    else result.errors.push(`${key}: ${entry.reason instanceof Error ? entry.reason.message : 'Binance endpoint unavailable'}`);
+  }
+  return result;
+}
+
 async function createDraft(rawIntent) {
   const intent = normalizeOrderIntent(rawIntent, { allowedSymbols });
   const [exchange, ticker, account] = await Promise.all([binance.exchangeInfo(intent.symbol), binance.ticker(intent.symbol), accountSnapshot()]);
@@ -173,6 +184,7 @@ export function createCryptoServer() {
         if (!configured) return sendJson(response, 503, { error: 'Configure Binance credentials in apps/crypto-agent/.env.' });
         return sendJson(response, 200, await accountSnapshot());
       }
+      if (request.method === 'GET' && request.url === '/api/assets') return sendJson(response, 200, await assetSnapshot());
       if (request.method === 'GET' && request.url === '/api/futures/account') {
         if (!configured) return sendJson(response, 503, { error: 'Configure Binance credentials before reading Futures.' });
         return sendJson(response, 200, await futures.account());
