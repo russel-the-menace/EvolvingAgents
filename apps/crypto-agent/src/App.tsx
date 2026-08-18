@@ -16,8 +16,9 @@ type NewsItem = { id: string; title: string; url: string; source: string; summar
 type EmergencyState = { pending?: { id: string; title: string; budget: number }; grant?: { id: string; remaining: number; expiresAt: number } | null };
 type FuturesPosition = { symbol: string; positionAmt: string; entryPrice: string; markPrice: string; liquidationPrice: string; leverage: string; marginType: string; unRealizedProfit: string };
 type MarginAccount = { marginLevel?: string; totalAssetOfBtc?: string; totalLiabilityOfBtc?: string; userAssets?: Array<{ asset: string; borrowed: string; interest: string; free: string }> };
-type AssetSnapshot = { configured: boolean; spot: { balances?: Balance[] } | null; funding: Array<{ asset: string; free: string; locked: string; freeze?: string; withdrawing?: string }> | null; earn: { rows?: Array<{ asset: string; totalAmount?: string; holdingAmount?: string; cumulativeTotalRewards?: string; latestAnnualPercentageRate?: string }> } | null; futures: { totalWalletBalance?: string; totalUnrealizedProfit?: string; availableBalance?: string; assets?: Array<{ asset: string; walletBalance: string; unrealizedProfit: string; availableBalance: string }>; positions?: Array<{ symbol: string; positionAmt: string; unrealizedProfit: string }> } | null; wallets: Array<{ walletName: string; balance: string; activate: boolean }> | null; errors: string[] };
+type AssetSnapshot = { configured: boolean; spot: { balances?: Balance[] } | null; funding: Array<{ asset: string; free: string; locked: string; freeze?: string; withdrawing?: string }> | null; earn: { rows?: Array<{ asset: string; totalAmount?: string; holdingAmount?: string; cumulativeTotalRewards?: string; latestAnnualPercentageRate?: string; productName?: string; productId?: string }> } | null; futures: { totalWalletBalance?: string; totalUnrealizedProfit?: string; availableBalance?: string; assets?: Array<{ asset: string; walletBalance: string; unrealizedProfit: string; availableBalance: string }>; positions?: Array<{ symbol: string; positionAmt: string; unrealizedProfit: string }> } | null; wallets: Array<{ walletName: string; balance: string; activate: boolean }> | null; errors: string[] };
 type AssetTab = 'overview' | 'earn' | 'spot' | 'funding' | 'futures';
+const LEFT_SIDEBAR_MIN = 160;
 
 declare global { interface Window { cryptoAgent?: { notify: (title: string, body: string) => void } } }
 
@@ -25,7 +26,9 @@ if (window.cryptoAgent && new URLSearchParams(window.location.search).get('widge
 
 function formatNumber(value: number | string) {
   const number = Number(value);
-  return Number.isFinite(number) ? number.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '-';
+  // Binance mobile balances display two decimal places by truncating the visible amount.
+  const display = Math.floor(number * 100) / 100;
+  return Number.isFinite(number) ? display.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '-';
 }
 
 function modelLabel(model: ModelId, prefix = 'GPT-') {
@@ -146,6 +149,8 @@ function PriceChart({ symbol, environment }: { symbol: string; environment: 'tes
 function AssetWorkspace() {
   const [bottomTab, setBottomTab] = useState('assets');
   const [assetTab, setAssetTab] = useState<AssetTab>('overview');
+  const [overviewTab, setOverviewTab] = useState<'all' | 'accounts'>('all');
+  const [earnView, setEarnView] = useState<'assets' | 'products'>('assets');
   const [data, setData] = useState<AssetSnapshot | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
@@ -156,13 +161,23 @@ function AssetWorkspace() {
   const funding = data?.funding || [];
   const earn = data?.earn?.rows || [];
   const futuresAssets = data?.futures?.assets?.filter((item) => Number(item.walletBalance) || Number(item.unrealizedProfit)) || [];
-  const walletTotal = data?.wallets?.reduce((sum, item) => sum + Number(item.balance || 0), 0) || 0;
+  const spotUsdt = spot.find((item) => item.asset === 'USDT');
+  const walletTotal = data?.wallets?.length ? data.wallets.reduce((sum, item) => sum + Number(item.balance || 0), 0) : Number(spotUsdt?.free || 0) + Number(spotUsdt?.locked || 0);
+  const cnyTotal = walletTotal * 6.74;
   const amount = (value: number | string | undefined) => hidden ? '••••••' : formatNumber(value || 0);
-  const rows = assetTab === 'spot' ? spot.map((item) => ({ asset: item.asset, primary: Number(item.free) + Number(item.locked), secondary: `可用 ${amount(item.free)} · 冻结 ${amount(item.locked)}` })) : assetTab === 'funding' ? funding.map((item) => ({ asset: item.asset, primary: Number(item.free) + Number(item.locked || 0), secondary: `可用 ${amount(item.free)} · 冻结 ${amount(item.locked)}` })) : assetTab === 'earn' ? earn.map((item) => ({ asset: item.asset, primary: item.totalAmount || item.holdingAmount || '0', secondary: `累计收益 ${amount(item.cumulativeTotalRewards)} · APR ${item.latestAnnualPercentageRate || '-'}` })) : futuresAssets.map((item) => ({ asset: item.asset, primary: item.walletBalance, secondary: `可用 ${amount(item.availableBalance)} · 未实现盈亏 ${amount(item.unrealizedProfit)}` }));
+  const summaryAmount = (value: number | string | undefined) => hidden ? '••••••' : formatNumber(Math.floor(Number(value || 0) * 100) / 100);
+  const earnRows = earnView === 'assets' ? Object.entries(earn.reduce<Record<string, number>>((result, item) => { result[item.asset] = (result[item.asset] || 0) + Number(item.totalAmount || item.holdingAmount || 0); return result; }, {})).map(([asset, primary]) => ({ asset, primary, secondary: '按资产汇总' })) : earn.map((item) => ({ asset: item.productName || item.productId || item.asset, primary: item.totalAmount || item.holdingAmount || '0', secondary: `${item.asset} · 累计收益 ${amount(item.cumulativeTotalRewards)} · APR ${item.latestAnnualPercentageRate || '-'}` }));
+  const rows = assetTab === 'spot' ? spot.map((item) => ({ asset: item.asset, primary: Number(item.free) + Number(item.locked), secondary: `可用 ${amount(item.free)} · 冻结 ${amount(item.locked)}` })) : assetTab === 'funding' ? funding.map((item) => ({ asset: item.asset, primary: Number(item.free) + Number(item.locked || 0), secondary: `可用 ${amount(item.free)} · 冻结 ${amount(item.locked)}` })) : assetTab === 'earn' ? earnRows : futuresAssets.map((item) => ({ asset: item.asset, primary: item.walletBalance, secondary: `可用 ${amount(item.availableBalance)} · 未实现盈亏 ${amount(item.unrealizedProfit)}` }));
   const tabs: Array<[AssetTab, string]> = [['overview', '总览'], ['earn', '理财'], ['spot', '现货'], ['funding', '资金'], ['futures', '合约']];
   const nav = [[Home, '首页', 'home'], [LineChart, '行情', 'markets'], [ArrowLeftRight, '交易', 'trade'], [FileText, '合约', 'contracts'], [WalletCards, '资产', 'assets']] as const;
+  const accountRows = [
+    ['理财', earn.reduce((sum, item) => sum + Number(item.totalAmount || item.holdingAmount || 0), 0)],
+    ['现货', spot.reduce((sum, item) => sum + Number(item.free || 0) + Number(item.locked || 0), 0)],
+    ['资金', funding.reduce((sum, item) => sum + Number(item.free || 0) + Number(item.locked || 0), 0)],
+    ['合约', Number(data?.futures?.totalWalletBalance || 0)],
+  ] as const;
   return <section className="asset-app">
-    <div className="asset-content">{bottomTab === 'assets' ? <><div className="asset-tabs" role="tablist">{tabs.map(([id, label]) => <button className={assetTab === id ? 'active' : ''} key={id} onClick={() => setAssetTab(id)}>{label}</button>)}</div><div className="asset-summary"><div><span>{assetTab === 'overview' ? '预估总资产' : `${tabs.find(([id]) => id === assetTab)?.[1]}资产`}</span><button title={hidden ? '显示余额' : '隐藏余额'} aria-label={hidden ? '显示余额' : '隐藏余额'} onClick={() => setHidden((value) => !value)}><Eye size={15} /></button></div><strong>{amount(assetTab === 'overview' ? walletTotal : assetTab === 'futures' ? data?.futures?.totalWalletBalance : rows.reduce((sum, item) => sum + Number(item.primary || 0), 0))} <small>USDT</small></strong><div className="asset-actions"><button disabled title="资金操作尚未启用">添加资金</button><button disabled title="资金操作尚未启用">转出</button><button disabled title="资金操作尚未启用">划转</button></div></div>{assetTab === 'overview' ? <div className="wallet-overview"><div className="asset-list-heading"><strong>钱包</strong><button title="刷新资产" aria-label="刷新资产" onClick={() => void load()}><RefreshCw className={loading ? 'spin' : ''} size={15} /></button></div>{data?.wallets?.filter((item) => item.activate).map((item) => <div className="asset-row" key={item.walletName}><div><span className="asset-symbol">{item.walletName.slice(0, 1)}</span><strong>{item.walletName}</strong></div><b>{amount(item.balance)} USDT</b></div>)}</div> : <div className="asset-list"><div className="asset-list-heading"><strong>{tabs.find(([id]) => id === assetTab)?.[1]}资产</strong><Search size={17} /></div>{rows.length ? rows.map((item) => <div className="asset-row" key={item.asset}><div><span className="asset-symbol">{item.asset.slice(0, 1)}</span><span><strong>{item.asset}</strong><small>{item.secondary}</small></span></div><b>{amount(item.primary)}</b></div>) : <p className="asset-empty">{loading ? '正在读取 Binance 账户…' : data?.errors.find((item) => item.startsWith(assetTab)) || '该账户暂无非零资产'}</p>}</div>}{data?.errors.length ? <details className="asset-errors"><summary>部分账户不可用</summary>{data.errors.map((item) => <p key={item}>{item}</p>)}</details> : null}</> : <div className="asset-placeholder"><strong>{nav.find(([, , id]) => id === bottomTab)?.[1]}</strong><span>此导航将在后续视图中实现</span></div>}{loadError && <p className="asset-load-error">{loadError}</p>}</div>
+    <div className="asset-content">{bottomTab === 'assets' ? <><div className="asset-tabs" role="tablist">{tabs.map(([id, label]) => <button className={assetTab === id ? 'active' : ''} key={id} onClick={() => setAssetTab(id)}>{label}</button>)}</div><div className="asset-summary"><div><span>{assetTab === 'overview' ? (data?.wallets?.length ? '预估总资产' : '现货 USDT 余额') : `${tabs.find(([id]) => id === assetTab)?.[1]}资产`}</span><button title={hidden ? '显示余额' : '隐藏余额'} aria-label={hidden ? '显示余额' : '隐藏余额'} onClick={() => setHidden((value) => !value)}><Eye size={15} /></button></div><strong>{amount(assetTab === 'overview' ? walletTotal : assetTab === 'futures' ? data?.futures?.totalWalletBalance : rows.reduce((sum, item) => sum + Number(item.primary || 0), 0))} <small>USDT</small></strong>{assetTab === 'overview' && <div className="asset-cny">≈ ¥{amount(cnyTotal)}</div>}<div className="asset-actions"><button disabled title="资金操作尚未启用">添加资金</button><button disabled title="资金操作尚未启用">转出</button><button disabled title="资金操作尚未启用">划转</button></div></div>{assetTab === 'overview' ? <div className="wallet-overview"><div className="overview-tabs" role="tablist"><button className={overviewTab === 'all' ? 'active' : ''} onClick={() => setOverviewTab('all')}>全部</button><button className={overviewTab === 'accounts' ? 'active' : ''} onClick={() => setOverviewTab('accounts')}>账户</button><button className="overview-refresh" title="刷新资产" aria-label="刷新资产" onClick={() => void load()}><RefreshCw className={loading ? 'spin' : ''} size={15} /></button></div>{overviewTab === 'all' ? <>{data?.wallets?.filter((item) => item.activate).map((item) => <div className="asset-row" key={item.walletName}><div><span className="asset-symbol">{item.walletName.slice(0, 1)}</span><strong>{item.walletName}</strong></div><b>{amount(item.balance)} USDT</b></div>)}</> : accountRows.map(([label, value]) => <div className="account-row" key={label}><strong>{label}</strong><b>{amount(value)} USDT</b></div>)}</div> : <div className="asset-list"><div className="asset-list-heading"><strong>{tabs.find(([id]) => id === assetTab)?.[1]}资产</strong><Search size={17} /></div>{rows.length ? rows.map((item) => <div className="asset-row" key={item.asset}><div><span className="asset-symbol">{item.asset.slice(0, 1)}</span><span><strong>{item.asset}</strong><small>{item.secondary}</small></span></div><b>{amount(item.primary)}</b></div>) : <p className="asset-empty">{loading ? '正在读取 Binance 账户…' : data?.errors.find((item) => item.startsWith(assetTab)) || '该账户暂无非零资产'}</p>}</div>}{data?.errors.length ? <details className="asset-errors"><summary>部分账户不可用</summary>{data.errors.map((item) => <p key={item}>{item}</p>)}</details> : null}</> : <div className="asset-placeholder"><strong>{nav.find(([, , id]) => id === bottomTab)?.[1]}</strong><span>此导航将在后续视图中实现</span></div>}{loadError && <p className="asset-load-error">{loadError}</p>}</div>
     <nav className="asset-bottom-nav" aria-label="Binance workspace navigation">{nav.map(([Icon, label, id]) => <button className={bottomTab === id ? 'active' : ''} key={id} onClick={() => setBottomTab(id)}><Icon size={19} /><span>{label}</span></button>)}</nav>
   </section>;
 }
@@ -189,7 +204,7 @@ export function App() {
   const [error, setError] = useState('');
   const [news, setNews] = useState<NewsItem[]>([]);
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [leftWidth, setLeftWidth] = useState(() => Math.min(window.innerWidth * .2, Math.max(window.innerWidth * .1, Number(window.localStorage.getItem('crypto-agent-left-width')) || window.innerWidth * .14)));
+  const [leftWidth, setLeftWidth] = useState(() => Math.min(window.innerWidth * .2, Math.max(LEFT_SIDEBAR_MIN, Number(window.localStorage.getItem('crypto-agent-left-width')) || window.innerWidth * .14)));
   const [rightWidth, setRightWidth] = useState(() => Math.min(window.innerWidth * .6, Math.max(window.innerWidth * .3, Number(window.localStorage.getItem('crypto-agent-right-width')) || window.innerWidth * .36)));
   const [leftCollapsed, setLeftCollapsed] = useState(false);
   const [rightCollapsed, setRightCollapsed] = useState(false);
@@ -239,7 +254,7 @@ export function App() {
   useEffect(() => {
     if (!resizing) return;
     const move = (event: PointerEvent) => {
-      dragValue.current = resizing === 'left' ? Math.min(window.innerWidth * .2, Math.max(window.innerWidth * .1, event.clientX)) : Math.min(window.innerWidth * .6, Math.max(window.innerWidth * .3, window.innerWidth - event.clientX));
+      dragValue.current = resizing === 'left' ? Math.min(window.innerWidth * .2, Math.max(LEFT_SIDEBAR_MIN, event.clientX)) : Math.min(window.innerWidth * .6, Math.max(window.innerWidth * .3, window.innerWidth - event.clientX));
       if (dragFrame.current !== null) return;
       dragFrame.current = window.requestAnimationFrame(() => {
         if (dragValue.current !== null) shellRef.current?.style.setProperty(resizing === 'left' ? '--left-width' : '--right-width', `${dragValue.current}px`);
@@ -294,7 +309,7 @@ export function App() {
   const shellStyle = { '--left-width': leftCollapsed ? '0px' : `${leftWidth}px`, '--right-width': rightCollapsed ? '0px' : `${rightWidth}px` } as CSSProperties;
   return <main ref={shellRef} className={`terminal-shell ${leftCollapsed ? 'left-collapsed' : ''} ${rightCollapsed ? 'right-collapsed' : ''} ${resizing ? 'is-resizing' : ''}`} style={shellStyle}>
     <aside className="portfolio">
-      <header><CircleDollarSign size={23} /><div><strong>CryptoAgent</strong><span>Binance workspace</span></div><button className="sidebar-toggle left-panel-toggle" title="隐藏左侧栏" aria-label="隐藏左侧栏" onClick={() => setLeftCollapsed(true)}><PanelLeftClose size={17} /></button></header>
+      <header><CircleDollarSign size={23} /><div><strong>CryptoAgent</strong></div><button className="sidebar-toggle left-panel-toggle" title="隐藏左侧栏" aria-label="隐藏左侧栏" onClick={() => setLeftCollapsed(true)}><PanelLeftClose size={17} /></button></header>
       <button className="new-chat" onClick={newChat}><Plus size={17} />New chat</button>
       <nav className="recents" aria-label="最近对话"><div className="section-title"><span>Recents</span></div>{sessions.length ? sessions.map((session) => <button className={activeSessionId === session.id ? 'active' : ''} key={session.id} onClick={() => openSession(session)}><MessageSquare size={14} /><span>{session.title}</span></button>) : <p>暂无最近对话</p>}</nav>
       <button className="settings-entry" onClick={() => setSettingsOpen(true)}><Settings2 size={16} />设置与外观</button>

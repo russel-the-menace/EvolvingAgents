@@ -6,7 +6,7 @@
 body { min-height: 100vh; margin: 0; color: var(--ink); background: var(--bg); }
 button, textarea { font: inherit; }
 button { cursor: pointer; }
-.terminal-shell { display: grid; height: 100vh; min-height: 100vh; grid-template-columns: var(--left-width, 14vw) minmax(0, 1fr) var(--right-width, 36vw); overflow: hidden; will-change: grid-template-columns; }
+.terminal-shell { display: grid; height: 100vh; min-height: 100vh; grid-template-columns: var(--left-width, 160px) minmax(0, 1fr) var(--right-width, 36vw); overflow: hidden; will-change: grid-template-columns; }
 .terminal-shell.is-resizing { cursor: col-resize; }
 .portfolio { position: relative; display: flex; min-width: 0; min-height: 100vh; overflow: hidden; flex-direction: column; border-right: 1px solid var(--border); padding: 20px 18px; background: var(--panel); }
 .left-collapsed .portfolio, .right-collapsed .market-rail { visibility: hidden; border: 0; padding: 0; }
@@ -130,11 +130,21 @@ button { cursor: pointer; }
 .asset-summary > div:first-child button, .asset-list-heading button { display: grid; width: 27px; height: 27px; place-items: center; border: 0; border-radius: 5px; padding: 0; color: var(--muted); background: transparent; }
 .asset-summary > strong { display: block; margin-top: 8px; font-size: clamp(24px, 2.6vw, 38px); font-variant-numeric: tabular-nums; letter-spacing: 0; }
 .asset-summary > strong small { font-size: 13px; font-weight: 600; }
-.asset-actions { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 22px; }
-.asset-actions button { min-height: 40px; border: 0; border-radius: 5px; padding: 8px; color: var(--ink); background: var(--panel-muted); font-size: 12px; font-weight: 700; }
+.asset-cny { margin-top: 4px; color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+.asset-actions { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 16px; }
+.asset-actions button { min-height: 32px; border: 0; border-radius: 5px; padding: 5px 6px; color: var(--ink); background: var(--panel-muted); font-size: 11px; font-weight: 700; }
 .asset-actions button:first-child { color: #161616; background: #f0b90b; }
 .asset-actions button:disabled { cursor: not-allowed; opacity: .55; }
 .wallet-overview, .asset-list { padding: 20px 22px; }
+.overview-tabs { display: flex; align-items: center; gap: 18px; min-height: 32px; margin-bottom: 5px; border-bottom: 1px solid var(--border); }
+.overview-tabs button { position: relative; border: 0; padding: 0 0 8px; color: var(--muted); background: transparent; font-size: 13px; font-weight: 650; }
+.overview-tabs button.active { color: var(--ink); }
+.overview-tabs button.active::after { position: absolute; right: 18%; bottom: -1px; left: 18%; height: 2px; background: #f0b90b; content: ''; }
+.overview-tabs .overview-refresh { margin-left: auto; padding: 0 2px 8px; color: var(--muted); }
+.overview-tabs .overview-refresh::after { display: none; }
+.account-row { display: flex; min-height: 58px; align-items: center; justify-content: space-between; border-bottom: 1px solid var(--border); }
+.account-row strong { font-size: 14px; }
+.account-row b { font-size: 12px; font-variant-numeric: tabular-nums; }
 .asset-list-heading { display: flex; min-height: 32px; align-items: center; justify-content: space-between; margin-bottom: 5px; }
 .asset-list-heading strong { font-size: 14px; }
 .asset-list-heading > svg { color: var(--muted); }
