@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type CSSProperties } from 'react';
-import { ArrowDownLeft, ArrowUpRight, Bot, Check, ChevronDown, ChevronRight, CircleDollarSign, MessageSquare, Monitor, Moon, PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen, Plus, RefreshCw, SendHorizontal, Settings2, ShieldCheck, Sun, Wallet, X } from 'lucide-react';
+import { ArrowDownLeft, ArrowUpRight, Bot, Check, ChevronDown, CircleDollarSign, MessageSquare, Monitor, Moon, PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen, Plus, RefreshCw, SendHorizontal, Settings2, ShieldCheck, Sun, Wallet, X } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 
@@ -150,6 +150,7 @@ export function App() {
   const [modelId, setModelId] = useState<ModelId>('gpt-5.6-luna');
   const [reasoningEffort, setReasoningEffort] = useState<ReasoningId>('medium');
   const [modelOpen, setModelOpen] = useState(false);
+  const modelPickerRef = useRef<HTMLDivElement | null>(null);
   const [status, setStatus] = useState<Status | null>(null);
   const [balances, setBalances] = useState<Balance[]>([]);
   const [messages, setMessages] = useState<Message[]>([]);
@@ -213,6 +214,12 @@ export function App() {
   useEffect(() => { document.documentElement.dataset.theme = theme; window.localStorage.setItem('crypto-agent-theme', theme); }, [theme]);
   useEffect(() => { window.localStorage.setItem('crypto-agent-left-width', String(leftWidth)); }, [leftWidth]);
   useEffect(() => { window.localStorage.setItem('crypto-agent-right-width', String(rightWidth)); }, [rightWidth]);
+  useEffect(() => {
+    if (!modelOpen) return;
+    const closeOnOutsidePointer = (event: PointerEvent) => { if (!modelPickerRef.current?.contains(event.target as Node)) setModelOpen(false); };
+    document.addEventListener('pointerdown', closeOnOutsidePointer);
+    return () => document.removeEventListener('pointerdown', closeOnOutsidePointer);
+  }, [modelOpen]);
   useEffect(() => {
     if (!resizing) return;
     const move = (event: PointerEvent) => {
@@ -288,7 +295,7 @@ export function App() {
         {busy && <article className="message assistant"><div className="bubble thinking"><i /><i /><i /></div></article>}
         {error && <div className="global-error">{error}</div>}
       </div>
-      <div className="composer-wrap"><div className="composer"><textarea rows={1} value={input} onChange={(event) => setInput(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); void send(); } }} placeholder="输入交易指令或询问账户状态" /><div className="model-picker"><button className="model-trigger" aria-haspopup="menu" aria-expanded={modelOpen} onClick={() => setModelOpen((open) => !open)}>5.6 {modelId.split('-').at(-1)![0].toUpperCase() + modelId.split('-').at(-1)!.slice(1)} · {({ low: 'Light', medium: 'Medium', high: 'High', xhigh: 'Extra High', max: 'Ultra' } as Record<ReasoningId, string>)[reasoningEffort]}<ChevronDown size={15} /></button>{modelOpen && <div className="model-menu" role="menu"><div className="model-menu-label">Reasoning</div>{(status?.model?.reasoning || ['low', 'medium', 'high', 'xhigh', 'max']).map((option) => <button key={option} className={reasoningEffort === option ? 'selected' : ''} onClick={() => { setReasoningEffort(option); setModelOpen(false); }}>{({ low: 'Light', medium: 'Medium', high: 'High', xhigh: 'Extra High', max: 'Ultra' } as Record<ReasoningId, string>)[option]}{reasoningEffort === option && <Check size={17} />}</button>)}<div className="model-menu-divider" /><div className="model-menu-label">Model</div>{(status?.model?.models || ['gpt-5.6-luna', 'gpt-5.6-sol', 'gpt-5.6-terra']).map((option) => <button key={option} className={modelId === option ? 'selected' : ''} onClick={() => { setModelId(option); setModelOpen(false); }}>{modelLabel(option)}<ChevronRight size={17} /></button>)}</div>}</div><button className="composer-send" title="发送" aria-label="发送" disabled={!input.trim() || busy} onClick={() => void send()}><SendHorizontal size={19} /></button></div><small>模型只生成订单草案。所有订单都需要你明确确认。</small></div>
+      <div className="composer-wrap"><div className="composer"><textarea rows={1} value={input} onChange={(event) => setInput(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); void send(); } }} placeholder="输入交易指令或询问账户状态" /><div className="model-picker" ref={modelPickerRef}><button className="model-trigger" aria-haspopup="menu" aria-expanded={modelOpen} onClick={() => setModelOpen((open) => !open)}>5.6 {modelId.split('-').at(-1)![0].toUpperCase() + modelId.split('-').at(-1)!.slice(1)} · {({ low: 'Light', medium: 'Medium', high: 'High', xhigh: 'Extra High', max: 'Ultra' } as Record<ReasoningId, string>)[reasoningEffort]}<ChevronDown size={15} /></button>{modelOpen && <div className="model-menu" role="menu"><div className="model-menu-label">Reasoning</div>{(status?.model?.reasoning || ['low', 'medium', 'high', 'xhigh', 'max']).map((option) => <button key={option} className={reasoningEffort === option ? 'selected' : ''} onClick={() => { setReasoningEffort(option); setModelOpen(false); }}>{({ low: 'Light', medium: 'Medium', high: 'High', xhigh: 'Extra High', max: 'Ultra' } as Record<ReasoningId, string>)[option]}{reasoningEffort === option && <Check size={15} />}</button>)}<div className="model-menu-divider" /><div className="model-menu-label">Model</div>{(['gpt-5.6-luna', 'gpt-5.6-terra', 'gpt-5.6-sol'] as ModelId[]).filter((option) => (status?.model?.models || ['gpt-5.6-luna', 'gpt-5.6-sol', 'gpt-5.6-terra']).includes(option)).map((option) => <button key={option} className={modelId === option ? 'selected' : ''} onClick={() => { setModelId(option); setModelOpen(false); }}>{modelLabel(option)}</button>)}</div>}</div><button className="composer-send" title="发送" aria-label="发送" disabled={!input.trim() || busy} onClick={() => void send()}><SendHorizontal size={19} /></button></div><small>模型只生成订单草案。所有订单都需要你明确确认。</small></div>
     </section>
     <aside className="market-rail"><div className="rail-header"><strong>市场上下文</strong><button className="sidebar-toggle" title="隐藏右侧栏" aria-label="隐藏右侧栏" onClick={() => setRightCollapsed(true)}><PanelRightClose size={17} /></button></div><PriceChart symbol="BTCUSDT" environment={status?.environment || 'testnet'} /><NewsPanel items={news} /><DerivativesPanel positions={futuresPositions} margin={marginAccount} /><ProductDraftPanel onDone={() => void refresh()} /><MarginActionPanel onDone={() => void refresh()} /><EmergencyPanel state={emergency} onChange={setEmergency} /><button className="resize-handle right-resize" title="调整右侧栏宽度" aria-label="调整右侧栏宽度" onPointerDown={(event) => { event.currentTarget.setPointerCapture(event.pointerId); setResizing('right'); }} /></aside>
     {rightCollapsed && <button className="sidebar-reopen right-reopen" title="显示右侧栏" aria-label="显示右侧栏" onClick={() => setRightCollapsed(false)}><PanelRightOpen size={18} /></button>}
