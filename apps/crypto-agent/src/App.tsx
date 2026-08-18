@@ -156,8 +156,25 @@ function CoinMWorkspace() {
     let active = true;
     const load = () => api<CoinMMarket>(`/coinm-market?symbol=BTCUSD_PERP&interval=${interval}`).then((result) => { if (active) { setMarket(result); setError(''); } }).catch((caught) => { if (active) setError(caught instanceof Error ? caught.message : '币本位行情不可用'); });
     void load();
-    const timer = window.setInterval(load, 15_000);
-    return () => { active = false; window.clearInterval(timer); };
+    const timer = window.setInterval(load, 60_000);
+    const stream = new WebSocket(`wss://dstream.binance.com/ws/btcusd_perp@kline_${interval}`);
+    stream.onmessage = (event) => {
+      let payload;
+      try { payload = JSON.parse(event.data); } catch { return; }
+      const item = payload.k;
+      if (!active || !item) return;
+      const next = [item.t, item.o, item.h, item.l, item.c, item.v, item.T, item.q];
+      setMarket((current) => {
+        if (!current) return current;
+        const klines = [...current.klines];
+        const last = klines.at(-1);
+        if (Number(last?.[0]) === Number(item.t)) klines[klines.length - 1] = next;
+        else klines.push(next);
+        return { ...current, klines: klines.slice(-240), premium: { ...current.premium, markPrice: item.c } };
+      });
+    };
+    stream.onerror = () => { if (active) setError('实时连接暂时中断，正在使用分钟级行情兜底'); };
+    return () => { active = false; window.clearInterval(timer); stream.close(); };
   }, [interval]);
   const allCandles = (market?.klines || []).map((item) => ({ time: Number(item[0]), open: Number(item[1]), high: Number(item[2]), low: Number(item[3]), close: Number(item[4]), volume: Number(item[5]), quoteVolume: Number(item[7]) }));
   const candles = allCandles.slice(-120);
