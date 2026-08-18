@@ -183,7 +183,6 @@ function AssetWorkspace() {
     ['合约', Number(data?.futures?.totalWalletBalance || 0)],
   ] as const;
   const assetName = (asset: string) => asset === 'USDT' ? 'TetherUS' : asset;
-  const assetIcon = (asset: string) => asset === 'USDT' ? '₮' : asset.slice(0, 1);
   const visibleErrors = data?.errors.filter((item) => !item.startsWith('futures:')) || [];
   const totalValue = assetTab === 'overview' ? walletTotal : assetTab === 'futures' ? data?.futures?.totalWalletBalance : rows.reduce((sum, item) => sum + Number(item.primary || 0), 0);
   return <section className="asset-app">

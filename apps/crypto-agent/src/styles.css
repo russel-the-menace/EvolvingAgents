@@ -160,6 +160,7 @@ button { cursor: pointer; }
 .asset-row small { overflow: hidden; margin-top: 3px; color: var(--muted); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
 .asset-row b { flex: 0 0 auto; font-size: 12px; font-variant-numeric: tabular-nums; }
 .asset-symbol { display: grid; width: 30px; height: 30px; flex: 0 0 auto; place-items: center; border-radius: 50%; color: #171717; background: #f0b90b; font-size: 12px; font-weight: 800; }
+.asset-icon-image { object-fit: cover; }
 .asset-empty { margin: 38px 0; color: var(--muted); font-size: 12px; line-height: 1.6; text-align: center; }
 .asset-load-error { margin: 0 22px; color: var(--red); font-size: 11px; }
 .asset-errors { margin: 0 22px; color: var(--muted); font-size: 10px; }
