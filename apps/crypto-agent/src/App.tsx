@@ -18,8 +18,9 @@ type MarginAccount = { marginLevel?: string; totalAssetOfBtc?: string; totalLiab
 
 declare global { interface Window { cryptoAgent?: { notify: (title: string, body: string) => void } } }
 
-function formatNumber(value: number | string, maximumFractionDigits = 8) {
-  return Number(value).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits });
+function formatNumber(value: number | string) {
+  const number = Number(value);
+  return Number.isFinite(number) ? number.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '-';
 }
 
 function modelLabel(model: ModelId, prefix = 'GPT-') {
@@ -40,13 +41,13 @@ function EmergencyPanel({ state, onChange }: { state: EmergencyState; onChange: 
     try { const result = await api<{ grant: EmergencyState['grant'] }>('/emergency/confirm', { method: 'POST', body: JSON.stringify({ confirmation: 'CONFIRM', allowLeverage: false, maxLeverage: 1 }) }); onChange({ grant: result.grant }); }
     finally { setBusy(false); }
   }
-  return <section className="emergency-panel" aria-label="紧急授权">{state.pending && <><strong>紧急新闻待确认</strong><span>{state.pending.title}</span><small>预授权预算 {formatNumber(state.pending.budget, 2)} USDT，仅限现货</small><button disabled={busy} onClick={() => void confirm()}>{busy ? '授权中' : '确认紧急授权'}</button></>}{state.grant && <><strong>紧急授权已启用</strong><span>剩余预算 {formatNumber(state.grant.remaining, 2)} USDT</span><button onClick={() => void api('/emergency/revoke', { method: 'POST', body: JSON.stringify({ reason: 'manual' }) }).then(() => onChange({}))}>撤销授权</button></>}</section>;
+  return <section className="emergency-panel" aria-label="紧急授权">{state.pending && <><strong>紧急新闻待确认</strong><span>{state.pending.title}</span><small>预授权预算 {formatNumber(state.pending.budget)} USDT，仅限现货</small><button disabled={busy} onClick={() => void confirm()}>{busy ? '授权中' : '确认紧急授权'}</button></>}{state.grant && <><strong>紧急授权已启用</strong><span>剩余预算 {formatNumber(state.grant.remaining)} USDT</span><button onClick={() => void api('/emergency/revoke', { method: 'POST', body: JSON.stringify({ reason: 'manual' }) }).then(() => onChange({}))}>撤销授权</button></>}</section>;
 }
 
 function DerivativesPanel({ positions, margin }: { positions: FuturesPosition[]; margin: MarginAccount | null }) {
   const active = positions.filter((item) => Number(item.positionAmt) !== 0);
   if (!active.length && !margin) return null;
-  return <section className="derivatives-panel" aria-label="杠杆与合约状态"><div className="news-heading"><strong>杠杆与合约</strong><span>只读风险摘要</span></div>{active.map((position) => <div className="derivative-row" key={position.symbol}><b>{position.symbol} {Number(position.positionAmt) > 0 ? '多' : '空'} {position.leverage}x</b><span>强平 {formatNumber(position.liquidationPrice)}</span><span>未实现 {formatNumber(position.unRealizedProfit, 2)} USDT</span></div>)}{margin && <div className="derivative-row"><b>Margin</b><span>保证金率 {margin.marginLevel || '-'}</span><span>负债 {margin.totalLiabilityOfBtc || '-'} BTC</span></div>}</section>;
+  return <section className="derivatives-panel" aria-label="杠杆与合约状态"><div className="news-heading"><strong>杠杆与合约</strong><span>只读风险摘要</span></div>{active.map((position) => <div className="derivative-row" key={position.symbol}><b>{position.symbol} {Number(position.positionAmt) > 0 ? '多' : '空'} {formatNumber(position.leverage)}x</b><span>强平 {formatNumber(position.liquidationPrice)}</span><span>未实现 {formatNumber(position.unRealizedProfit)} USDT</span></div>)}{margin && <div className="derivative-row"><b>Margin</b><span>保证金率 {formatNumber(margin.marginLevel || 0)}</span><span>负债 {formatNumber(margin.totalLiabilityOfBtc || 0)} BTC</span></div>}</section>;
 }
 
 function ProductDraftPanel({ onDone }: { onDone: () => void }) {
@@ -83,7 +84,7 @@ function OrderDraft({ draft, product = 'spot', onConfirmed }: { draft: Draft; pr
   }
   return <section className={`order-draft ${side.toLowerCase()}`} aria-label="Order preview">
     <div className="order-heading"><span>{side === 'BUY' ? <ArrowDownLeft size={17} /> : <ArrowUpRight size={17} />}{side === 'BUY' ? '买入 / 做多' : '卖出 / 做空'} {draft.intent.symbol}</span><small>{product.toUpperCase()} · {draft.environment === 'testnet' ? '测试网' : '实盘'}</small></div>
-    <dl><div><dt>订单类型</dt><dd>{draft.intent.type}</dd></div><div><dt>数量</dt><dd>{draft.intent.quantity || draft.intent.quoteOrderQty}</dd></div>{draft.intent.leverage && <div><dt>杠杆</dt><dd>{draft.intent.leverage}x</dd></div>}{draft.intent.marginType && <div><dt>保证金模式</dt><dd>{draft.intent.marginType}</dd></div>}{draft.estimate && <div><dt>预估金额</dt><dd>{formatNumber(draft.estimate.estimatedNotional, 2)} {draft.estimate.quoteAsset}</dd></div>}</dl>
+    <dl><div><dt>订单类型</dt><dd>{draft.intent.type}</dd></div><div><dt>数量</dt><dd>{formatNumber(draft.intent.quantity || draft.intent.quoteOrderQty || 0)}</dd></div>{draft.intent.leverage && <div><dt>杠杆</dt><dd>{formatNumber(draft.intent.leverage)}x</dd></div>}{draft.intent.marginType && <div><dt>保证金模式</dt><dd>{draft.intent.marginType}</dd></div>}{draft.estimate && <div><dt>预估金额</dt><dd>{formatNumber(draft.estimate.estimatedNotional)} {draft.estimate.quoteAsset}</dd></div>}</dl>
     <p><ShieldCheck size={15} /> 草案已通过本地格式校验。确认后仍需通过 Binance 产品规则；市价单最终成交价可能不同。</p>
     {error && <div className="inline-error">{error}</div>}
     <button className="confirm-order" disabled={state !== 'ready'} onClick={confirm}>{state === 'busy' ? <RefreshCw className="spin" size={17} /> : <Check size={17} />}{state === 'done' ? '已提交' : state === 'busy' ? '提交中' : `确认${draft.environment === 'testnet' ? '测试网' : '实盘'}订单`}</button>
@@ -205,7 +206,7 @@ export function App() {
       <header><CircleDollarSign size={23} /><div><strong>CryptoAgent</strong><span>Binance Spot</span></div></header>
       <section className="connection"><div><span className={status?.configured ? 'status-dot online' : 'status-dot'} />{status?.configured ? '已连接' : '未配置'}</div><small>{status?.environment === 'live' ? (status.liveTradingEnabled ? '实盘下单已开启' : '实盘只读') : 'Spot Testnet'}</small></section>
       <section className="balance-section"><div className="section-title"><span><Wallet size={15} />可用余额</span><button title="刷新账户" aria-label="刷新账户" onClick={() => void refresh()}><RefreshCw size={15} /></button></div>{balances.length ? balances.slice(0, 12).map((balance) => <div className="balance" key={balance.asset}><strong>{balance.asset}</strong><span>{formatNumber(balance.free)}</span></div>) : <p>{status?.configured ? '没有非零余额' : '在 .env 中配置 API key 后显示'}</p>}</section>
-      <section className="limits"><ShieldCheck size={16} /><div><strong>交易边界</strong><span>现货 · 无杠杆 · 单笔 {status?.maxOrderUsdt ? `≤ ${formatNumber(status.maxOrderUsdt, 2)} USDT` : '不设客户端上限'}</span><span>{status?.allowedSymbols?.join(' / ') || '全部已交易 USDT 现货对'}</span></div></section>
+      <section className="limits"><ShieldCheck size={16} /><div><strong>交易边界</strong><span>现货 · 无杠杆 · 单笔 {status?.maxOrderUsdt ? `≤ ${formatNumber(status.maxOrderUsdt)} USDT` : '不设客户端上限'}</span><span>{status?.allowedSymbols?.join(' / ') || '全部已交易 USDT 现货对'}</span></div></section>
     </aside>
     <section className="conversation">
       <div className="conversation-top"><div><Bot size={18} /><strong>交易对话</strong></div><div className="top-actions"><div className="model-picker"><button className="model-trigger" aria-haspopup="menu" aria-expanded={modelOpen} onClick={() => setModelOpen((open) => !open)}>5.6 {modelId.split('-').at(-1)![0].toUpperCase() + modelId.split('-').at(-1)!.slice(1)} · {({ low: 'Light', medium: 'Medium', high: 'High', xhigh: 'Extra High', max: 'Ultra' } as Record<ReasoningId, string>)[reasoningEffort]}<ChevronDown size={15} /></button>{modelOpen && <div className="model-menu" role="menu"><div className="model-menu-label">Reasoning</div>{(status?.model?.reasoning || ['low', 'medium', 'high', 'xhigh', 'max']).map((option) => <button key={option} className={reasoningEffort === option ? 'selected' : ''} onClick={() => { setReasoningEffort(option); setModelOpen(false); }}>{({ low: 'Light', medium: 'Medium', high: 'High', xhigh: 'Extra High', max: 'Ultra' } as Record<ReasoningId, string>)[option]}{reasoningEffort === option && <Check size={17} />}</button>)}<div className="model-menu-divider" /><div className="model-menu-label">Model</div>{(status?.model?.models || ['gpt-5.6-luna', 'gpt-5.6-sol', 'gpt-5.6-terra']).map((option) => <button key={option} className={modelId === option ? 'selected' : ''} onClick={() => { setModelId(option); setModelOpen(false); }}>{modelLabel(option)}<ChevronRight size={17} /></button>)}</div>}</div><div className="theme-control" role="group" aria-label="主题">{([['light', Sun, '浅色'], ['dark', Moon, '深色'], ['system', Monitor, '跟随系统']] as const).map(([value, Icon, label]) => <button key={value} className={theme === value ? 'selected' : ''} title={label} aria-label={label} onClick={() => setTheme(value)}><Icon size={14} /></button>)}</div><span>{status?.environment === 'live' ? 'LIVE' : 'TESTNET'}</span></div></div>
