@@ -125,6 +125,11 @@ button { cursor: pointer; }
 .asset-tabs button { position: relative; border: 0; padding: 0 4px; color: var(--muted); background: transparent; font-size: 12px; font-weight: 650; }
 .asset-tabs button.active { color: var(--ink); }
 .asset-tabs button.active::after { position: absolute; right: 22%; bottom: -1px; left: 22%; height: 2px; background: #f0b90b; content: ''; }
+.asset-subtabs { display: flex; gap: 6px; overflow-x: auto; border-bottom: 1px solid var(--border); padding: 10px 22px; }
+.asset-subtabs button, .inline-tabs button { border: 0; border-radius: 6px; padding: 7px 10px; color: var(--muted); background: transparent; font-size: 12px; font-weight: 650; white-space: nowrap; }
+.asset-subtabs button.active, .inline-tabs button.active { color: var(--ink); background: var(--panel-muted); }
+.inline-tabs { display: flex; gap: 3px; }
+.inline-tabs button { padding: 4px 6px; font-size: 10px; }
 .asset-summary { border-bottom: 1px solid var(--border); padding: 25px 22px 20px; }
 .asset-summary > div:first-child { display: flex; align-items: center; gap: 6px; color: var(--muted); font-size: 12px; }
 .asset-summary > div:first-child button, .asset-list-heading button { display: grid; width: 27px; height: 27px; place-items: center; border: 0; border-radius: 5px; padding: 0; color: var(--muted); background: transparent; }
