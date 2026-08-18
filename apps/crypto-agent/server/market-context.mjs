@@ -22,11 +22,17 @@ export function buildMarketContext(raw) {
   const depth = raw.depth && typeof raw.depth === 'object' ? { bidDepth: finite(raw.depth.bidDepth), askDepth: finite(raw.depth.askDepth), imbalance: finite(raw.depth.imbalance), spreadBps: finite(raw.depth.spreadBps) } : null;
   const featureKeys = ['samples', 'avgSpreadBps', 'avgImbalance5', 'minImbalance5', 'maxImbalance5', 'avgImbalance20', 'avgBidDepth20', 'avgAskDepth20', 'startTime', 'endTime'];
   const orderBook24h = raw.orderBook24h && typeof raw.orderBook24h === 'object' ? Object.fromEntries(featureKeys.flatMap((key) => { const value = finite(raw.orderBook24h[key]); return value === null ? [] : [[key, value]]; })) : null;
+  const pointKeys = ['time', 'samples', 'mid', 'minMid', 'maxMid', 'spreadBps', 'bidDepth5', 'askDepth5', 'imbalance5', 'minImbalance5', 'maxImbalance5', 'bidDepth20', 'askDepth20', 'imbalance20', 'markPrice', 'fundingRate'];
+  const orderBookWindow = raw.orderBookWindow && typeof raw.orderBookWindow === 'object' ? {
+    startTime: finite(raw.orderBookWindow.startTime), endTime: finite(raw.orderBookWindow.endTime), resolutionMs: finite(raw.orderBookWindow.resolutionMs), sourceSamples: finite(raw.orderBookWindow.sourceSamples),
+    points: Array.isArray(raw.orderBookWindow.points) ? raw.orderBookWindow.points.slice(-400).map((point) => Object.fromEntries(pointKeys.flatMap((key) => { const value = finite(point?.[key]); return value === null ? [] : [[key, value]]; }))).filter((point) => Object.keys(point).length > 1) : [],
+  } : null;
   return {
     symbol: String(raw.symbol || '').slice(0, 30), interval: String(raw.interval || '').slice(0, 10), visibleStart: candles[0].time, visibleEnd: candles.at(-1).time, candles,
     indicators: { changePercent: closes[0] ? (closes.at(-1) - closes[0]) / closes[0] * 100 : 0, high: Math.max(...candles.map((item) => item.high)), low: Math.min(...candles.map((item) => item.low)), ma7: average(7), ma25: average(25), ma60: average(60), totalVolume: candles.reduce((sum, item) => sum + item.volume, 0) },
     markPrice: finite(raw.markPrice), fundingRate: finite(raw.fundingRate), depth,
     orderBook24h,
+    orderBookWindow,
   };
 }
 

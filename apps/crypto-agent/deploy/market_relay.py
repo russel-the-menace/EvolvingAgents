@@ -16,6 +16,7 @@ import threading
 import time
 import urllib.parse
 import urllib.request
+from contextlib import closing
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 
@@ -80,7 +81,7 @@ class Relay:
     def _init_feature_db(self) -> None:
         directory = os.path.dirname(self.feature_db)
         if self.feature_db != ":memory:" and directory: os.makedirs(directory, exist_ok=True)
-        with sqlite3.connect(self.feature_db) as db:
+        with closing(sqlite3.connect(self.feature_db)) as db, db:
             if self.feature_db != ":memory:": db.execute("PRAGMA journal_mode=WAL")
             db.execute("""CREATE TABLE IF NOT EXISTS order_book_features (
                 timestamp_ms INTEGER PRIMARY KEY, symbol TEXT NOT NULL, mid REAL NOT NULL, spread_bps REAL NOT NULL,
@@ -106,7 +107,7 @@ class Relay:
             row = (timestamp_ms or int(time.time() * 1000), SYMBOL, mid, (ask - bid) / mid * 10_000,
                    bid5, ask5, imbalance(bid5, ask5), bid20, ask20, imbalance(bid20, ask20),
                    self.price or mid, float(self.premium.get("lastFundingRate", 0) or 0))
-        with sqlite3.connect(self.feature_db) as db:
+        with closing(sqlite3.connect(self.feature_db)) as db, db:
             db.execute("INSERT OR REPLACE INTO order_book_features VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", row)
             self.feature_samples += 1
             if self.feature_samples % 60 == 0: db.execute("DELETE FROM order_book_features WHERE timestamp_ms < ?", (row[0] - 24 * 60 * 60 * 1000,))
@@ -115,12 +116,37 @@ class Relay:
     def feature_summary(self, now_ms: int | None = None) -> dict[str, Any] | None:
         cutoff = (now_ms or int(time.time() * 1000)) - 24 * 60 * 60 * 1000
         try:
-            with sqlite3.connect(self.feature_db) as db:
+            with closing(sqlite3.connect(self.feature_db)) as db:
                 row = db.execute("""SELECT COUNT(*), AVG(spread_bps), AVG(imbalance_5), MIN(imbalance_5), MAX(imbalance_5),
                                     AVG(imbalance_20), AVG(bid_depth_20), AVG(ask_depth_20), MIN(timestamp_ms), MAX(timestamp_ms)
                                     FROM order_book_features WHERE timestamp_ms >= ?""", (cutoff,)).fetchone()
             if not row or not row[0]: return None
             return dict(zip(("samples", "avgSpreadBps", "avgImbalance5", "minImbalance5", "maxImbalance5", "avgImbalance20", "avgBidDepth20", "avgAskDepth20", "startTime", "endTime"), row))
+        except sqlite3.OperationalError:
+            return None
+
+    def feature_window(self, start_ms: int, end_ms: int, now_ms: int | None = None) -> dict[str, Any] | None:
+        now = now_ms or int(time.time() * 1000)
+        end = min(end_ms, now); start = max(start_ms, now - 24 * 60 * 60 * 1000)
+        if start >= end: return None
+        duration = end - start
+        base_resolution = 1_000 if end >= now - 15 * 60_000 and duration <= 10 * 60_000 else 60_000 if duration <= 3 * 60 * 60_000 else 300_000
+        resolution = max(base_resolution, ((duration + 359_999) // 360_000) * 1_000)
+        try:
+            with closing(sqlite3.connect(self.feature_db)) as db:
+                rows = db.execute("""SELECT CAST(timestamp_ms / ? AS INTEGER) * ? AS bucket, COUNT(*),
+                    AVG(mid), MIN(mid), MAX(mid), AVG(spread_bps), AVG(bid_depth_5), AVG(ask_depth_5),
+                    AVG(imbalance_5), MIN(imbalance_5), MAX(imbalance_5), AVG(bid_depth_20),
+                    AVG(ask_depth_20), AVG(imbalance_20), AVG(mark_price), AVG(funding_rate)
+                    FROM order_book_features WHERE timestamp_ms BETWEEN ? AND ?
+                    GROUP BY bucket ORDER BY bucket LIMIT 400""", (resolution, resolution, start, end)).fetchall()
+            if not rows: return None
+            keys = ("time", "samples", "mid", "minMid", "maxMid", "spreadBps", "bidDepth5", "askDepth5",
+                    "imbalance5", "minImbalance5", "maxImbalance5", "bidDepth20", "askDepth20",
+                    "imbalance20", "markPrice", "fundingRate")
+            points = [dict(zip(keys, row)) for row in rows]
+            return {"startTime": start, "endTime": end, "resolutionMs": resolution,
+                    "sourceSamples": sum(point["samples"] for point in points), "points": points}
         except sqlite3.OperationalError:
             return None
 
@@ -266,7 +292,7 @@ class Relay:
             logging.warning("failed to load depth snapshot: %s", type(error).__name__)
             return False
 
-    def snapshot(self, interval: str, history: bool = True) -> dict[str, Any]:
+    def snapshot(self, interval: str, history: bool = True, feature_range: tuple[int, int] | None = None) -> dict[str, Any]:
         with self.lock:
             bids = sorted(self.bids.items(), key=lambda pair: float(pair[0]), reverse=True)[:1000]
             asks = sorted(self.asks.items(), key=lambda pair: float(pair[0]))[:1000]
@@ -275,6 +301,7 @@ class Relay:
             snapshot = {"symbol": SYMBOL, "interval": interval, "klines": list(rows if history else rows[-1:]),
                         "depth": {"bids": bids, "asks": asks}, "premium": premium, "partial": not history}
         if history: snapshot["orderBook24h"] = self.feature_summary()
+        if history and feature_range: snapshot["orderBookWindow"] = self.feature_window(*feature_range)
         return snapshot
 
     def ready(self, interval: str) -> bool:
@@ -324,7 +351,13 @@ class Handler(BaseHTTPRequestHandler):
             if not relay.ready(interval):
                 self.send_error(503, "market upstream is not ready")
                 return
-            data = json.dumps(relay.snapshot(interval), separators=(",", ":")).encode()
+            feature_range = None
+            try:
+                if "featureStartTime" in query and "featureEndTime" in query:
+                    feature_range = (int(query["featureStartTime"][0]), int(query["featureEndTime"][0]))
+            except ValueError:
+                self.send_error(400, "invalid feature range"); return
+            data = json.dumps(relay.snapshot(interval, feature_range=feature_range), separators=(",", ":")).encode()
             self.send_response(200); self.send_header("Content-Type", "application/json"); self.send_header("Content-Length", str(len(data))); self.end_headers(); self.wfile.write(data)
             return
         if parsed.path != "/stream":

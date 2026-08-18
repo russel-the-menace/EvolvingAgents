@@ -59,7 +59,12 @@ test('market analysis sends chart context, history, and pasted images to the mod
   process.env.GATEWAY_API_KEY = 'gateway-key';
   process.env.NEWS_REMOTE_ONLY = 'true';
   let gatewayRequest;
+  let marketRequest;
   globalThis.fetch = async (url, options = {}) => {
+    if (String(url).includes('/v1/market/coinm/snapshot')) {
+      marketRequest = String(url);
+      return new Response(JSON.stringify({ orderBookWindow: { startTime: 1, endTime: 2, resolutionMs: 1_000, sourceSamples: 1, points: [{ time: 1, samples: 1, mid: 100 }] } }), { status: 200 });
+    }
     if (String(url).endsWith('/v1/chat/completions')) {
       gatewayRequest = JSON.parse(options.body);
       return new Response(JSON.stringify({ choices: [{ message: { content: '只读分析结果' } }] }), { status: 200 });
@@ -71,10 +76,12 @@ test('market analysis sends chart context, history, and pasted images to the mod
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
   const port = server.address().port;
   try {
-    const result = await post(port, '/api/chat', { message: '分析这张图', history: [{ role: 'assistant', content: '前文' }], image: 'data:image/png;base64,aGVsbG8=', marketContext: { symbol: 'BTCUSD_PERP', interval: '5m', candles: [{ time: 1, open: 10, high: 12, low: 9, close: 11, volume: 2 }] } });
+    const result = await post(port, '/api/chat', { message: '分析最近5分钟的盘口和这张图', history: [{ role: 'assistant', content: '前文' }], image: 'data:image/png;base64,aGVsbG8=', marketContext: { symbol: 'BTCUSD_PERP', interval: '5m', candles: [{ time: 1, open: 10, high: 12, low: 9, close: 11, volume: 2 }] } });
     assert.equal(result.status, 200);
     assert.equal(result.body.reply, '只读分析结果');
     assert.match(gatewayRequest.messages[0].content, /BTCUSD_PERP/);
+    assert.match(gatewayRequest.messages[0].content, /orderBookWindow/);
+    assert.match(marketRequest, /featureStartTime=\d+&featureEndTime=\d+/);
     assert.equal(gatewayRequest.messages[1].content, '前文');
     assert.equal(gatewayRequest.messages.at(-1).content[1].image_url.url, 'data:image/png;base64,aGVsbG8=');
   } finally {

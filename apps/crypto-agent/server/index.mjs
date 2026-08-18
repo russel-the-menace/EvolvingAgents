@@ -9,6 +9,7 @@ import { NewsService, parseBinanceAnnouncements, parseOkxAnnouncements } from '.
 import { createNewsLearner } from '../src/news-learning.mjs';
 import { EmergencyPolicy } from '../src/emergency-policy.mjs';
 import { analysisMessages, isTradeCommand, validImageDataUrl } from './market-context.mjs';
+import { requestedOrderBookRange } from './order-book-context.mjs';
 
 const port = Number(process.env.CRYPTO_AGENT_API_PORT || 5451);
 const environment = process.env.BINANCE_ENV === 'live' ? 'live' : 'testnet';
@@ -177,6 +178,16 @@ async function serverCoinMMarket(symbol, interval, endTime) {
     console.warn('market relay snapshot unavailable; using direct Binance fallback', error instanceof Error ? error.message : error);
     return coinMMarket(symbol, interval);
   }
+}
+
+async function orderBookContext(range) {
+  if (!range || !marketDataBase || !marketDataKey) return null;
+  try {
+    const query = new URLSearchParams({ symbol: 'BTCUSD_PERP', interval: '1m', featureStartTime: String(range.startTime), featureEndTime: String(range.endTime) });
+    const response = await fetch(`${marketDataBase}/v1/market/coinm/snapshot?${query}`, { headers: { Authorization: `Bearer ${marketDataKey}` }, signal: AbortSignal.timeout(10_000) });
+    if (!response.ok) return null;
+    return (await response.json()).orderBookWindow || null;
+  } catch { return null; }
 }
 
 async function pipeServerCoinMStream(request, response, interval) {
@@ -405,7 +416,10 @@ export function createCryptoServer() {
         const reasoningEffort = reasoningOptions.includes(payload.reasoning_effort) ? payload.reasoning_effort : defaultReasoning;
         if (!isTradeCommand(message)) {
           if (!gateway) return sendJson(response, 503, { error: 'Configure a model gateway before asking for market analysis.' });
-          const reply = await gateway.complete(analysisMessages({ message: message || '请分析这张图片。', history: payload.history, marketContext: payload.marketContext, image }), { model, reasoningEffort });
+          const range = requestedOrderBookRange(message);
+          const bookWindow = await orderBookContext(range);
+          const marketContext = bookWindow ? { ...(payload.marketContext || {}), orderBookWindow: { ...bookWindow, requestedRange: range } } : payload.marketContext;
+          const reply = await gateway.complete(analysisMessages({ message: message || '请分析这张图片。', history: payload.history, marketContext, image }), { model, reasoningEffort });
           return sendJson(response, 200, { reply });
         }
         if (!configured) return sendJson(response, 503, { error: 'Configure Binance credentials before preparing an order.' });
