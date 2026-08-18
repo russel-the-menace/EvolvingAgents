@@ -237,6 +237,7 @@ button { cursor: pointer; }
 .time-price-guide { stroke: var(--muted); stroke-width: 1; stroke-dasharray: 4 4; }
 .time-price-label rect { fill: var(--panel); stroke: var(--ink); stroke-width: 1; }
 .time-price-label text { fill: var(--ink); font-size: 15px; text-anchor: middle; dominant-baseline: middle; font-variant-numeric: tabular-nums; }
+.time-price-label { transform: translateX(112px); pointer-events: none; }
 @keyframes spin { to { transform: rotate(360deg); } }
 @keyframes pulse { 0%,100% { opacity: .3; } 50% { opacity: 1; } }
 @media (max-width: 1100px) { .terminal-shell { grid-template-columns: var(--left-width, 14vw) minmax(360px, 1fr) var(--right-width, 36vw); } }
