@@ -8,6 +8,7 @@ import { fallbackIntent, inferProduct, multiProductTradePrompt, normalizeOrderIn
 import { NewsService } from '../src/news.mjs';
 import { createNewsLearner } from '../src/news-learning.mjs';
 import { EmergencyPolicy } from '../src/emergency-policy.mjs';
+import { analysisMessages, isTradeCommand, validImageDataUrl } from './market-context.mjs';
 
 const port = Number(process.env.CRYPTO_AGENT_API_PORT || 5451);
 const environment = process.env.BINANCE_ENV === 'live' ? 'live' : 'testnet';
@@ -77,9 +78,9 @@ const digestTimer = setInterval(async () => { const items = await news.twoHourDi
 digestTimer.unref?.();
 
 function sendJson(response, status, body) { response.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8' }); response.end(JSON.stringify(body)); }
-async function body(request) {
+async function body(request, maxLength = 50_000) {
   let raw = '';
-  for await (const chunk of request) { raw += chunk; if (raw.length > 50_000) throw new Error('Request body is too large.'); }
+  for await (const chunk of request) { raw += chunk; if (raw.length > maxLength) throw new Error('Request body is too large.'); }
   return raw ? JSON.parse(raw) : {};
 }
 function publicError(error) {
@@ -342,13 +343,20 @@ export function createCryptoServer() {
         return sendJson(response, 503, { error: 'Server market relay unavailable.' });
       }
       if (request.method === 'POST' && request.url === '/api/chat') {
-        if (!configured) return sendJson(response, 503, { error: 'Configure Binance credentials before preparing an order.' });
-        const payload = await body(request);
+        const payload = await body(request, 6_000_000);
         const message = String(payload.message || '').trim();
-        if (!message) return sendJson(response, 400, { error: 'A message is required.' });
+        const image = payload.image;
+        if (!message && !image) return sendJson(response, 400, { error: 'A message or image is required.' });
+        if (image && !validImageDataUrl(image)) return sendJson(response, 400, { error: 'Only PNG, JPEG, and WebP image data is accepted.' });
         let parsed;
         const model = modelOptions.includes(payload.model) ? payload.model : defaultModel;
         const reasoningEffort = reasoningOptions.includes(payload.reasoning_effort) ? payload.reasoning_effort : defaultReasoning;
+        if (!isTradeCommand(message)) {
+          if (!gateway) return sendJson(response, 503, { error: 'Configure a model gateway before asking for market analysis.' });
+          const reply = await gateway.complete(analysisMessages({ message: message || '请分析这张图片。', history: payload.history, marketContext: payload.marketContext, image }), { model, reasoningEffort });
+          return sendJson(response, 200, { reply });
+        }
+        if (!configured) return sendJson(response, 503, { error: 'Configure Binance credentials before preparing an order.' });
         const product = inferProduct(message);
         if (gateway) parsed = parseModelJson(await gateway.complete([{ role: 'system', content: product === 'spot' ? tradePrompt(message, allowedSymbols || ['any USDT spot symbol']) : multiProductTradePrompt(message, allowedSymbols || ['any USDT symbol']) }], { model, reasoningEffort }));
         else parsed = { reply: '', intent: fallbackIntent(message) };
