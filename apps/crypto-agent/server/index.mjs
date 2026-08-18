@@ -131,7 +131,7 @@ async function coinMMarket(symbol, interval, endTime) {
   return { symbol, interval, klines, depth, premium: Array.isArray(premium) ? premium[0] : premium };
 }
 
-async function usdMMarket(symbol, interval) {
+async function usdMMarket(symbol, interval, endTime) {
   const base = environment === 'testnet' ? 'https://testnet.binancefuture.com' : 'https://fapi.binance.com';
   const get = async (path, params) => {
     const response = await fetch(`${base}${path}?${new URLSearchParams(params)}`, { signal: AbortSignal.timeout(10_000) });
@@ -139,8 +139,10 @@ async function usdMMarket(symbol, interval) {
     if (!response.ok) throw new BinanceApiError(result.msg || `Binance USD-M request failed (${response.status}).`, { status: response.status, code: result.code });
     return result;
   };
+  const klineParams = { symbol, interval, limit: '240', ...(endTime ? { endTime: String(endTime) } : {}) };
+  if (endTime) return { symbol, interval, klines: await get('/fapi/v1/klines', klineParams), depth: { bids: [], asks: [] }, premium: { markPrice: '0', indexPrice: '0' }, partial: true };
   const [klines, depth, premium] = await Promise.all([
-    get('/fapi/v1/klines', { symbol, interval, limit: '240' }),
+    get('/fapi/v1/klines', klineParams),
     get('/fapi/v1/depth', { symbol, limit: '1000' }),
     get('/fapi/v1/premiumIndex', { symbol }),
   ]);
@@ -356,9 +358,11 @@ export function createCryptoServer() {
         const query = new URL(request.url, 'http://localhost').searchParams;
         const symbol = query.get('symbol')?.toUpperCase() || 'BTCUSDT';
         const interval = query.get('interval') || '5m';
+        const endTime = query.get('endTime');
         if (symbol !== 'BTCUSDT') return sendJson(response, 400, { error: 'Only BTCUSDT is available in this first USD-M view.' });
         if (!['1m', '3m', '5m', '15m', '30m', '1h', '2h', '4h', '6h', '8h', '12h', '1d', '1w', '1M'].includes(interval)) return sendJson(response, 400, { error: 'Interval is not allowed.' });
-        return sendJson(response, 200, await usdMMarket(symbol, interval));
+        if (endTime && (!/^\d+$/.test(endTime) || Number(endTime) <= 0)) return sendJson(response, 400, { error: 'endTime is not valid.' });
+        return sendJson(response, 200, await usdMMarket(symbol, interval, endTime ? Number(endTime) : undefined));
       }
       if (request.method === 'GET' && request.url?.startsWith('/api/usdm-history?')) {
         if (!configured) return sendJson(response, 200, { rows: [] });
