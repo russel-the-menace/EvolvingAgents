@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type CSSProperties } from 'react';
-import { ArrowDownLeft, ArrowUpRight, Bot, Check, ChevronDown, CircleDollarSign, MessageSquare, Monitor, Moon, PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen, Plus, RefreshCw, SendHorizontal, Settings2, ShieldCheck, Sun, Wallet, X } from 'lucide-react';
+import { ArrowDownLeft, ArrowLeftRight, ArrowUpRight, Bot, Check, ChevronDown, CircleDollarSign, Eye, FileText, Home, LineChart, MessageSquare, Monitor, Moon, PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen, Plus, RefreshCw, Search, SendHorizontal, Settings2, ShieldCheck, Sun, Wallet, WalletCards, X } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 
@@ -16,6 +16,8 @@ type NewsItem = { id: string; title: string; url: string; source: string; summar
 type EmergencyState = { pending?: { id: string; title: string; budget: number }; grant?: { id: string; remaining: number; expiresAt: number } | null };
 type FuturesPosition = { symbol: string; positionAmt: string; entryPrice: string; markPrice: string; liquidationPrice: string; leverage: string; marginType: string; unRealizedProfit: string };
 type MarginAccount = { marginLevel?: string; totalAssetOfBtc?: string; totalLiabilityOfBtc?: string; userAssets?: Array<{ asset: string; borrowed: string; interest: string; free: string }> };
+type AssetSnapshot = { configured: boolean; spot: { balances?: Balance[] } | null; funding: Array<{ asset: string; free: string; locked: string; freeze?: string; withdrawing?: string }> | null; earn: { rows?: Array<{ asset: string; totalAmount?: string; holdingAmount?: string; cumulativeTotalRewards?: string; latestAnnualPercentageRate?: string }> } | null; futures: { totalWalletBalance?: string; totalUnrealizedProfit?: string; availableBalance?: string; assets?: Array<{ asset: string; walletBalance: string; unrealizedProfit: string; availableBalance: string }>; positions?: Array<{ symbol: string; positionAmt: string; unrealizedProfit: string }> } | null; wallets: Array<{ walletName: string; balance: string; activate: boolean }> | null; errors: string[] };
+type AssetTab = 'overview' | 'earn' | 'spot' | 'funding' | 'futures';
 
 declare global { interface Window { cryptoAgent?: { notify: (title: string, body: string) => void } } }
 
@@ -141,6 +143,29 @@ function PriceChart({ symbol, environment }: { symbol: string; environment: 'tes
   return <section className="price-chart" aria-label={`${symbol} 1 minute price chart`}><div className="chart-heading"><div><strong>{symbol}</strong><span>1m · Binance Spot</span></div>{values.length ? <b>{formatNumber(values.at(-1)!)} USDT</b> : <span>{error || '加载中'}</span>}</div>{values.length ? <svg viewBox={`0 0 ${width} ${height}`} role="img" aria-label={`${symbol} recent price`}><path className="chart-fill" d={`${path} L ${width - pad} ${height - pad} L ${pad} ${height - pad} Z`} /><path className="chart-line" d={path} /></svg> : <div className="chart-empty">{error || '读取行情中…'}</div>}</section>;
 }
 
+function AssetWorkspace() {
+  const [bottomTab, setBottomTab] = useState('assets');
+  const [assetTab, setAssetTab] = useState<AssetTab>('overview');
+  const [data, setData] = useState<AssetSnapshot | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [hidden, setHidden] = useState(false);
+  async function load() { setLoading(true); try { setData(await api<AssetSnapshot>('/assets')); } finally { setLoading(false); } }
+  useEffect(() => { void load(); }, []);
+  const spot = data?.spot?.balances || [];
+  const funding = data?.funding || [];
+  const earn = data?.earn?.rows || [];
+  const futuresAssets = data?.futures?.assets?.filter((item) => Number(item.walletBalance) || Number(item.unrealizedProfit)) || [];
+  const walletTotal = data?.wallets?.reduce((sum, item) => sum + Number(item.balance || 0), 0) || 0;
+  const amount = (value: number | string | undefined) => hidden ? '••••••' : formatNumber(value || 0);
+  const rows = assetTab === 'spot' ? spot.map((item) => ({ asset: item.asset, primary: Number(item.free) + Number(item.locked), secondary: `可用 ${amount(item.free)} · 冻结 ${amount(item.locked)}` })) : assetTab === 'funding' ? funding.map((item) => ({ asset: item.asset, primary: Number(item.free) + Number(item.locked || 0), secondary: `可用 ${amount(item.free)} · 冻结 ${amount(item.locked)}` })) : assetTab === 'earn' ? earn.map((item) => ({ asset: item.asset, primary: item.totalAmount || item.holdingAmount || '0', secondary: `累计收益 ${amount(item.cumulativeTotalRewards)} · APR ${item.latestAnnualPercentageRate || '-'}` })) : futuresAssets.map((item) => ({ asset: item.asset, primary: item.walletBalance, secondary: `可用 ${amount(item.availableBalance)} · 未实现盈亏 ${amount(item.unrealizedProfit)}` }));
+  const tabs: Array<[AssetTab, string]> = [['overview', '总览'], ['earn', '理财'], ['spot', '现货'], ['funding', '资金'], ['futures', '合约']];
+  const nav = [[Home, '首页', 'home'], [LineChart, '行情', 'markets'], [ArrowLeftRight, '交易', 'trade'], [FileText, '合约', 'contracts'], [WalletCards, '资产', 'assets']] as const;
+  return <section className="asset-app">
+    <div className="asset-content">{bottomTab === 'assets' ? <><div className="asset-tabs" role="tablist">{tabs.map(([id, label]) => <button className={assetTab === id ? 'active' : ''} key={id} onClick={() => setAssetTab(id)}>{label}</button>)}</div><div className="asset-summary"><div><span>{assetTab === 'overview' ? '预估总资产' : `${tabs.find(([id]) => id === assetTab)?.[1]}资产`}</span><button title={hidden ? '显示余额' : '隐藏余额'} aria-label={hidden ? '显示余额' : '隐藏余额'} onClick={() => setHidden((value) => !value)}><Eye size={15} /></button></div><strong>{amount(assetTab === 'overview' ? walletTotal : assetTab === 'futures' ? data?.futures?.totalWalletBalance : rows.reduce((sum, item) => sum + Number(item.primary || 0), 0))} <small>USDT</small></strong><div className="asset-actions"><button>添加资金</button><button>转出</button><button>划转</button></div></div>{assetTab === 'overview' ? <div className="wallet-overview"><div className="asset-list-heading"><strong>钱包</strong><button title="刷新资产" aria-label="刷新资产" onClick={() => void load()}><RefreshCw className={loading ? 'spin' : ''} size={15} /></button></div>{data?.wallets?.filter((item) => item.activate).map((item) => <div className="asset-row" key={item.walletName}><div><span className="asset-symbol">{item.walletName.slice(0, 1)}</span><strong>{item.walletName}</strong></div><b>{amount(item.balance)} USDT</b></div>)}</div> : <div className="asset-list"><div className="asset-list-heading"><strong>{tabs.find(([id]) => id === assetTab)?.[1]}资产</strong><Search size={17} /></div>{rows.length ? rows.map((item) => <div className="asset-row" key={item.asset}><div><span className="asset-symbol">{item.asset.slice(0, 1)}</span><span><strong>{item.asset}</strong><small>{item.secondary}</small></span></div><b>{amount(item.primary)}</b></div>) : <p className="asset-empty">{loading ? '正在读取 Binance 账户…' : data?.errors.find((item) => item.startsWith(assetTab)) || '该账户暂无非零资产'}</p>}</div>}{data?.errors.length ? <details className="asset-errors"><summary>部分账户不可用</summary>{data.errors.map((item) => <p key={item}>{item}</p>)}</details> : null}</> : <div className="asset-placeholder"><strong>{nav.find(([, , id]) => id === bottomTab)?.[1]}</strong><span>此导航将在后续视图中实现</span></div>}</div>
+    <nav className="asset-bottom-nav" aria-label="Binance workspace navigation">{nav.map(([Icon, label, id]) => <button className={bottomTab === id ? 'active' : ''} key={id} onClick={() => setBottomTab(id)}><Icon size={19} /><span>{label}</span></button>)}</nav>
+  </section>;
+}
+
 export function App() {
   if (new URLSearchParams(window.location.search).get('widget') === '1') return <main className="widget-shell"><PriceChart symbol="BTCUSDT" environment="live" /></main>;
   const [theme, setTheme] = useState<Theme>(() => {
@@ -152,7 +177,6 @@ export function App() {
   const [modelOpen, setModelOpen] = useState(false);
   const modelPickerRef = useRef<HTMLDivElement | null>(null);
   const [status, setStatus] = useState<Status | null>(null);
-  const [balances, setBalances] = useState<Balance[]>([]);
   const [messages, setMessages] = useState<Message[]>([]);
   const [sessions, setSessions] = useState<ChatSession[]>(() => {
     try { return JSON.parse(window.localStorage.getItem('crypto-agent-recents') || '[]') as ChatSession[]; }
@@ -167,8 +191,8 @@ export function App() {
   const [futuresPositions, setFuturesPositions] = useState<FuturesPosition[]>([]);
   const [marginAccount, setMarginAccount] = useState<MarginAccount | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [leftWidth, setLeftWidth] = useState(() => Math.min(360, Math.max(220, Number(window.localStorage.getItem('crypto-agent-left-width')) || 256)));
-  const [rightWidth, setRightWidth] = useState(() => Math.min(460, Math.max(280, Number(window.localStorage.getItem('crypto-agent-right-width')) || 360)));
+  const [leftWidth, setLeftWidth] = useState(() => Math.min(window.innerWidth * .2, Math.max(window.innerWidth * .1, Number(window.localStorage.getItem('crypto-agent-left-width')) || window.innerWidth * .14)));
+  const [rightWidth, setRightWidth] = useState(() => Math.min(window.innerWidth * .6, Math.max(window.innerWidth * .3, Number(window.localStorage.getItem('crypto-agent-right-width')) || window.innerWidth * .36)));
   const [leftCollapsed, setLeftCollapsed] = useState(false);
   const [rightCollapsed, setRightCollapsed] = useState(false);
   const [resizing, setResizing] = useState<'left' | 'right' | null>(null);
@@ -180,7 +204,6 @@ export function App() {
     try {
       const next = await api<Status>('/status'); setStatus(next);
       if (next.model) { setModelId((current) => next.model?.models.includes(current) ? current : next.model!.defaultModel); setReasoningEffort((current) => next.model?.reasoning.includes(current) ? current : next.model!.defaultReasoning); }
-      if (next.configured) setBalances((await api<{ balances: Balance[] }>('/account')).balances);
       if (next.configured) {
         const [positions, margin] = await Promise.allSettled([api<FuturesPosition[]>('/futures/positions'), api<MarginAccount>('/margin/account')]);
         if (positions.status === 'fulfilled') setFuturesPositions(positions.value.filter((item) => Number(item.positionAmt) !== 0));
@@ -223,7 +246,7 @@ export function App() {
   useEffect(() => {
     if (!resizing) return;
     const move = (event: PointerEvent) => {
-      dragValue.current = resizing === 'left' ? Math.min(360, Math.max(220, event.clientX)) : Math.min(460, Math.max(280, window.innerWidth - event.clientX));
+      dragValue.current = resizing === 'left' ? Math.min(window.innerWidth * .2, Math.max(window.innerWidth * .1, event.clientX)) : Math.min(window.innerWidth * .6, Math.max(window.innerWidth * .3, window.innerWidth - event.clientX));
       if (dragFrame.current !== null) return;
       dragFrame.current = window.requestAnimationFrame(() => {
         if (dragValue.current !== null) shellRef.current?.style.setProperty(resizing === 'left' ? '--left-width' : '--right-width', `${dragValue.current}px`);
@@ -279,11 +302,7 @@ export function App() {
   return <main ref={shellRef} className={`terminal-shell ${leftCollapsed ? 'left-collapsed' : ''} ${rightCollapsed ? 'right-collapsed' : ''} ${resizing ? 'is-resizing' : ''}`} style={shellStyle}>
     <aside className="portfolio">
       <header><CircleDollarSign size={23} /><div><strong>CryptoAgent</strong><span>Binance workspace</span></div><button className="sidebar-toggle" title="隐藏左侧栏" aria-label="隐藏左侧栏" onClick={() => setLeftCollapsed(true)}><PanelLeftClose size={17} /></button></header>
-      <button className="new-chat" onClick={newChat}><Plus size={17} />新对话</button>
-      <nav className="recents" aria-label="最近对话"><div className="section-title">Recents</div>{sessions.length ? sessions.map((session) => <button className={activeSessionId === session.id ? 'active' : ''} key={session.id} onClick={() => openSession(session)}><MessageSquare size={14} /><span>{session.title}</span></button>) : <p>暂无最近对话</p>}</nav>
-      <section className="connection"><div><span className={status?.configured ? 'status-dot online' : 'status-dot'} />{status?.configured ? '已连接' : '未配置'}</div><small>{status?.environment === 'live' ? (status.liveTradingEnabled ? '实盘下单已开启' : '实盘只读') : 'Spot Testnet'}</small></section>
-      <section className="balance-section"><div className="section-title"><span><Wallet size={15} />可用余额</span><button title="刷新账户" aria-label="刷新账户" onClick={() => void refresh()}><RefreshCw size={15} /></button></div>{balances.length ? balances.slice(0, 12).map((balance) => <div className="balance" key={balance.asset}><strong>{balance.asset}</strong><span>{formatNumber(balance.free)}</span></div>) : <p>{status?.configured ? '没有非零余额' : '在 .env 中配置 API key 后显示'}</p>}</section>
-      <button className="settings-entry" onClick={() => setSettingsOpen(true)}><Settings2 size={16} />设置</button>
+      <nav className="recents" aria-label="最近对话"><div className="section-title"><span>Recents</span><button title="新对话" aria-label="新对话" onClick={newChat}><Plus size={15} /></button></div>{sessions.length ? sessions.map((session) => <button className={activeSessionId === session.id ? 'active' : ''} key={session.id} onClick={() => openSession(session)}><MessageSquare size={14} /><span>{session.title}</span></button>) : <p>暂无最近对话</p>}</nav>
       <button className="resize-handle left-resize" title="调整左侧栏宽度" aria-label="调整左侧栏宽度" onPointerDown={(event) => { event.currentTarget.setPointerCapture(event.pointerId); setResizing('left'); }} />
     </aside>
     {leftCollapsed && <button className="sidebar-reopen left-reopen" title="显示左侧栏" aria-label="显示左侧栏" onClick={() => setLeftCollapsed(false)}><PanelLeftOpen size={18} /></button>}
@@ -297,7 +316,7 @@ export function App() {
       </div>
       <div className="composer-wrap"><div className="composer"><textarea rows={1} value={input} onChange={(event) => setInput(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); void send(); } }} placeholder="输入交易指令或询问账户状态" /><div className="model-picker" ref={modelPickerRef}><button className="model-trigger" aria-haspopup="menu" aria-expanded={modelOpen} onClick={() => setModelOpen((open) => !open)}>5.6 {modelId.split('-').at(-1)![0].toUpperCase() + modelId.split('-').at(-1)!.slice(1)} · {({ low: 'Light', medium: 'Medium', high: 'High', xhigh: 'Extra High', max: 'Ultra' } as Record<ReasoningId, string>)[reasoningEffort]}<ChevronDown size={15} /></button>{modelOpen && <div className="model-menu" role="menu"><div className="model-menu-label">Reasoning</div>{(status?.model?.reasoning || ['low', 'medium', 'high', 'xhigh', 'max']).map((option) => <button key={option} className={reasoningEffort === option ? 'selected' : ''} onClick={() => { setReasoningEffort(option); setModelOpen(false); }}>{({ low: 'Light', medium: 'Medium', high: 'High', xhigh: 'Extra High', max: 'Ultra' } as Record<ReasoningId, string>)[option]}{reasoningEffort === option && <Check size={15} />}</button>)}<div className="model-menu-divider" /><div className="model-menu-label">Model</div>{(['gpt-5.6-luna', 'gpt-5.6-terra', 'gpt-5.6-sol'] as ModelId[]).filter((option) => (status?.model?.models || ['gpt-5.6-luna', 'gpt-5.6-sol', 'gpt-5.6-terra']).includes(option)).map((option) => <button key={option} className={modelId === option ? 'selected' : ''} onClick={() => { setModelId(option); setModelOpen(false); }}>{modelLabel(option)}</button>)}</div>}</div><button className="composer-send" title="发送" aria-label="发送" disabled={!input.trim() || busy} onClick={() => void send()}><SendHorizontal size={19} /></button></div><small>模型只生成订单草案。所有订单都需要你明确确认。</small></div>
     </section>
-    <aside className="market-rail"><div className="rail-header"><strong>市场上下文</strong><button className="sidebar-toggle" title="隐藏右侧栏" aria-label="隐藏右侧栏" onClick={() => setRightCollapsed(true)}><PanelRightClose size={17} /></button></div><PriceChart symbol="BTCUSDT" environment={status?.environment || 'testnet'} /><NewsPanel items={news} /><DerivativesPanel positions={futuresPositions} margin={marginAccount} /><ProductDraftPanel onDone={() => void refresh()} /><MarginActionPanel onDone={() => void refresh()} /><EmergencyPanel state={emergency} onChange={setEmergency} /><button className="resize-handle right-resize" title="调整右侧栏宽度" aria-label="调整右侧栏宽度" onPointerDown={(event) => { event.currentTarget.setPointerCapture(event.pointerId); setResizing('right'); }} /></aside>
+    <aside className="market-rail"><button className="sidebar-toggle right-panel-toggle" title="隐藏右侧栏" aria-label="隐藏右侧栏" onClick={() => setRightCollapsed(true)}><PanelRightClose size={17} /></button><AssetWorkspace /><button className="resize-handle right-resize" title="调整右侧栏宽度" aria-label="调整右侧栏宽度" onPointerDown={(event) => { event.currentTarget.setPointerCapture(event.pointerId); setResizing('right'); }} /></aside>
     {rightCollapsed && <button className="sidebar-reopen right-reopen" title="显示右侧栏" aria-label="显示右侧栏" onClick={() => setRightCollapsed(false)}><PanelRightOpen size={18} /></button>}
     {settingsOpen && <div className="dialog-backdrop" role="presentation" onMouseDown={(event) => { if (event.currentTarget === event.target) setSettingsOpen(false); }}><section className="settings-dialog" role="dialog" aria-modal="true" aria-labelledby="settings-title"><button className="dialog-close" title="关闭" aria-label="关闭" onClick={() => setSettingsOpen(false)}><X size={18} /></button><h2 id="settings-title">设置</h2><label>外观</label><div className="theme-options">{([['light', Sun, '浅色'], ['dark', Moon, '深色'], ['system', Monitor, '跟随系统']] as const).map(([value, Icon, label]) => <button key={value} className={theme === value ? 'selected' : ''} onClick={() => setTheme(value)}><Icon size={16} />{label}</button>)}</div></section></div>}
   </main>;
