@@ -18,3 +18,13 @@ export function mergeKlineRows(current: KlineRow[], incoming: KlineRow[]) {
   }
   return next;
 }
+
+export function mergeTradeIntoSecondRows(current: KlineRow[], timestamp: number, price: number, quantity: number, limit = 240) {
+  const time = Math.floor(timestamp / 1_000) * 1_000;
+  const last = current.at(-1);
+  if (last && Number(last[0]) > time) return current;
+  if (!last || Number(last[0]) !== time) return [...current, [time, price, price, price, price, quantity, time + 999, price * quantity]].slice(-limit);
+  const next = [...current];
+  next[next.length - 1] = [time, last[1], Math.max(Number(last[2]), price), Math.min(Number(last[3]), price), price, Number(last[5]) + quantity, time + 999, Number(last[7]) + price * quantity];
+  return next;
+}

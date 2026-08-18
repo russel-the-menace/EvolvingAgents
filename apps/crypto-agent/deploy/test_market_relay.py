@@ -7,6 +7,14 @@ from market_relay import Relay
 
 
 class DepthSequenceTest(unittest.TestCase):
+    def test_aggregates_trades_into_one_second_klines(self) -> None:
+        relay = Relay()
+        relay._on_message(None, '{"data":{"e":"aggTrade","p":"100","q":"2","T":1100}}')
+        relay._on_message(None, '{"data":{"e":"aggTrade","p":"105","q":"3","T":1900}}')
+        relay._on_message(None, '{"data":{"e":"aggTrade","p":"103","q":"1","T":2100}}')
+        self.assertEqual(relay.klines["1s"][0], [1000, "100.0", "105.0", "100.0", "105.0", "5.0", 1999, "515.0"])
+        self.assertEqual(len(relay.klines["1s"]), 2)
+
     def test_snapshot_accepts_first_event_then_requires_previous_update(self) -> None:
         relay = Relay()
         relay.depth_ready = True

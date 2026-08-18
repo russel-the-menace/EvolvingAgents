@@ -138,6 +138,21 @@ async function usdMMarket(symbol, interval, endTime) {
   return { symbol, interval, klines, depth, premium: Array.isArray(premium) ? premium[0] : premium };
 }
 
+async function usdMOneSecond(symbol) {
+  const base = environment === 'testnet' ? 'https://testnet.binancefuture.com' : 'https://fapi.binance.com';
+  const response = await fetch(`${base}/fapi/v1/aggTrades?symbol=${encodeURIComponent(symbol)}&limit=1000`, { signal: AbortSignal.timeout(10_000) });
+  if (!response.ok) throw new Error(`Binance USD-M trades request failed (${response.status}).`);
+  const grouped = new Map();
+  for (const trade of await response.json()) {
+    const price = Number(trade.p ?? trade[1]); const quantity = Number(trade.q ?? trade[2]); const time = Math.floor(Number(trade.T ?? trade[6]) / 1_000) * 1_000;
+    if (!Number.isFinite(price) || !Number.isFinite(quantity) || !Number.isFinite(time)) continue;
+    const current = grouped.get(time);
+    if (!current) grouped.set(time, [time, price, price, price, price, quantity, time + 999, price * quantity]);
+    else { current[2] = Math.max(current[2], price); current[3] = Math.min(current[3], price); current[4] = price; current[5] += quantity; current[7] += price * quantity; }
+  }
+  return { symbol, interval: '1s', klines: [...grouped.values()].slice(-240), depth: { bids: [], asks: [] }, premium: { markPrice: '0', indexPrice: '0' }, partial: true };
+}
+
 async function serverCoinMMarket(symbol, interval, endTime) {
   if (endTime || !marketDataBase || !marketDataKey) return coinMMarket(symbol, interval, endTime);
   try {
@@ -344,7 +359,7 @@ export function createCryptoServer() {
         const interval = query.get('interval') || '5m';
         const endTime = query.get('endTime');
         if (symbol !== 'BTCUSD_PERP') return sendJson(response, 400, { error: 'Only BTCUSD_PERP is available in this first Coin-M view.' });
-        if (!['1m', '3m', '5m', '15m', '30m', '1h', '2h', '4h', '6h', '8h', '12h', '1d', '1w', '1M'].includes(interval)) return sendJson(response, 400, { error: 'Interval is not allowed.' });
+        if (!['1s', '1m', '3m', '5m', '15m', '30m', '1h', '2h', '4h', '6h', '8h', '12h', '1d', '1w', '1M'].includes(interval)) return sendJson(response, 400, { error: 'Interval is not allowed.' });
         if (endTime && (!/^\d+$/.test(endTime) || Number(endTime) <= 0)) return sendJson(response, 400, { error: 'endTime is not valid.' });
         return sendJson(response, 200, await serverCoinMMarket(symbol, interval, endTime ? Number(endTime) : undefined));
       }
@@ -364,9 +379,14 @@ export function createCryptoServer() {
         if (symbol !== 'BTCUSDT') return sendJson(response, 400, { error: 'Only BTCUSDT is available in this first USD-M view.' });
         try { return sendJson(response, 200, { rows: await futures.userTrades(symbol, 50) }); } catch { return sendJson(response, 200, { rows: [] }); }
       }
+      if (request.method === 'GET' && request.url?.startsWith('/api/usdm-1s?')) {
+        const symbol = new URL(request.url, 'http://localhost').searchParams.get('symbol')?.toUpperCase() || 'BTCUSDT';
+        if (symbol !== 'BTCUSDT') return sendJson(response, 400, { error: 'Only BTCUSDT is available in this first USD-M view.' });
+        try { return sendJson(response, 200, await usdMOneSecond(symbol)); } catch (error) { console.warn('USD-M one-second trades unavailable', error instanceof Error ? error.message : error); return sendJson(response, 200, { symbol, interval: '1s', klines: [], depth: { bids: [], asks: [] }, premium: { markPrice: '0', indexPrice: '0' }, partial: true }); }
+      }
       if (request.method === 'GET' && request.url?.startsWith('/api/coinm-stream?')) {
         const interval = new URL(request.url, 'http://localhost').searchParams.get('interval') || '5m';
-        if (!['1m', '3m', '5m', '15m', '30m', '1h', '2h', '4h', '6h', '8h', '12h', '1d', '1w', '1M'].includes(interval)) return sendJson(response, 400, { error: 'Interval is not allowed.' });
+        if (!['1s', '1m', '3m', '5m', '15m', '30m', '1h', '2h', '4h', '6h', '8h', '12h', '1d', '1w', '1M'].includes(interval)) return sendJson(response, 400, { error: 'Interval is not allowed.' });
         if (await pipeServerCoinMStream(request, response, interval)) return;
         return sendJson(response, 503, { error: 'Server market relay unavailable.' });
       }

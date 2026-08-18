@@ -32,10 +32,11 @@ MIHOMO_PROXY = os.getenv("MIHOMO_PROXY", "http://127.0.0.1:7890")
 MIHOMO_CONTROLLER = os.getenv("MIHOMO_CONTROLLER", "http://127.0.0.1:9090").rstrip("/")
 MIHOMO_CONFIG = os.getenv("MIHOMO_CONFIG", "/home/admin/.config/mihomo/config.yaml")
 SYMBOL = "BTCUSD_PERP"
-INTERVALS = ("1m", "3m", "5m", "15m", "30m", "1h", "2h", "4h", "6h", "8h", "12h", "1d", "1w", "1M")
+NATIVE_INTERVALS = ("1m", "3m", "5m", "15m", "30m", "1h", "2h", "4h", "6h", "8h", "12h", "1d", "1w", "1M")
+INTERVALS = ("1s", *NATIVE_INTERVALS)
 BASE_URL = "https://dapi.binance.com"
 WS_URL = "wss://dstream.binance.com/stream?streams=" + "/".join(
-    [*(f"{SYMBOL.lower()}@kline_{interval}" for interval in INTERVALS),
+    [*(f"{SYMBOL.lower()}@kline_{interval}" for interval in NATIVE_INTERVALS),
      f"{SYMBOL.lower()}@aggTrade", f"{SYMBOL.lower()}@depth@100ms", f"{SYMBOL.lower()}@markPrice@1s"]
 )
 FEATURE_DB = os.getenv("MARKET_FEATURE_DB_PATH", "/var/lib/custom-api-gateway/market-features.sqlite")
@@ -151,9 +152,9 @@ class Relay:
             return None
 
     def _history_loop(self) -> None:
-        while not all(self.ready(interval) for interval in INTERVALS):
+        while not all(self.ready(interval) for interval in NATIVE_INTERVALS):
             self._select_route()
-            for interval in INTERVALS:
+            for interval in NATIVE_INTERVALS:
                 if self.klines[interval]: continue
                 try:
                     rows = fetch_json("/dapi/v1/klines", {"symbol": SYMBOL, "interval": interval, "limit": "240"})
@@ -168,7 +169,7 @@ class Relay:
                     with self.lock: self.premium = premium[0] if isinstance(premium, list) else premium; self.price = float(self.premium.get("markPrice", 0)); self.revision += 1
                 except Exception as error:
                     logging.warning("failed to load premium snapshot: %s", type(error).__name__)
-            if not all(self.ready(interval) for interval in INTERVALS): time.sleep(30)
+            if not all(self.ready(interval) for interval in NATIVE_INTERVALS): time.sleep(30)
 
     def _socket_loop(self) -> None:
         if websocket is None:
@@ -235,7 +236,17 @@ class Relay:
                     self.price = float(item["c"])
                     self.revision += 1
                 elif event == "aggTrade":
-                    self.price = float(payload["p"])
+                    price, quantity = float(payload["p"]), float(payload.get("q", 0))
+                    timestamp = int(payload.get("T") or payload.get("E") or time.time() * 1000)
+                    bucket = timestamp // 1_000 * 1_000
+                    rows = self.klines["1s"]
+                    if rows and int(rows[-1][0]) == bucket:
+                        previous = rows[-1]
+                        rows[-1] = [bucket, previous[1], str(max(float(previous[2]), price)), str(min(float(previous[3]), price)), str(price), str(float(previous[5]) + quantity), bucket + 999, str(float(previous[7]) + price * quantity)]
+                    else:
+                        rows.append([bucket, str(price), str(price), str(price), str(price), str(quantity), bucket + 999, str(price * quantity)])
+                    self.klines["1s"] = rows[-240:]
+                    self.price = price
                     self.premium["markPrice"] = str(payload["p"])
                     self.revision += 1
                 elif event == "markPriceUpdate":
