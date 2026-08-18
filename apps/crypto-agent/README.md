@@ -35,19 +35,13 @@ The Coin-M workspace uses the server-side market relay for history, candles, mar
 
 ## News collection and push policy
 
-News collection combines audited RSS/Atom URLs with CEX announcement feeds and the optional public `cryptocurrency.cv` aggregator (200+ crypto and financial publishers). `NEWS_CEX_RSS_URLS` includes Kraken's official RSS plus RSSHub bridges for Binance, OKX, and Bybit; those bridges are best-effort because the exchanges do not publish stable documented announcement APIs. Set `NEWS_RSS_URLS` or `NEWS_CEX_RSS_URLS` to replace them. Set `NEWS_EXTERNAL_SOURCES=off` to disable the public aggregator. The service polls every `NEWS_POLL_MS` (five minutes by default), deduplicates by URL and title, and stores up to 500 items with their source and publication time.
+The desktop and local API never contact publishers, RSS feeds, aggregators, or exchange announcement APIs. They read the authenticated custom-api-gateway archive every 15 seconds and expose its cursor pagination to the UI.
 
 ### Server news collector
 
-Production news collection runs independently of the desktop app. [`deploy/news-collector.py`](deploy/news-collector.py) polls public sources, including the Binance and OKX announcement APIs, every 60 seconds through Mihomo and writes an unlimited, deduplicated history to `/var/lib/custom-api-gateway/news.sqlite`. [`deploy/custom-api-news.service`](deploy/custom-api-news.service) keeps it running across logouts and server restarts. The desktop app uses `NEWS_REMOTE_ONLY=true`, receives live local events when available, and checks the remote archive every 15 seconds.
+Production news collection belongs to the `custom-api-gateway` repository. Its `news_collector.py` polls the configured RSS publishers, `cryptocurrency.cv`, and the official Binance and OKX announcement endpoints every 60 seconds through Mihomo. It writes an unlimited, deduplicated history to `/var/lib/custom-api-gateway/news.sqlite`; `custom-api-news.service` keeps it running across logouts and server restarts.
 
-```bash
-scp deploy/news-collector.py deploy/custom-api-news.service root@SERVER:/opt/custom-api-gateway/
-ssh root@SERVER 'cp /opt/custom-api-gateway/custom-api-news.service /etc/systemd/system/ && systemctl daemon-reload && systemctl enable --now custom-api-news.service'
-ssh root@SERVER 'systemctl status custom-api-news.service --no-pager'
-```
-
-The collector explicitly configures the proxy from `MIHOMO_PROXY` (default `http://127.0.0.1:7890`). A source returning HTTP 403 through that proxy is an upstream/WAF rejection, not a direct-connection fallback. Public RSSHub bridges are therefore best-effort and should eventually be replaced by a self-hosted RSSHub or documented exchange connector.
+The collector explicitly configures the proxy from `MIHOMO_PROXY` (default `http://127.0.0.1:7890`). CEX announcements use their exchange endpoints directly; no public RSSHub bridge is part of the production source list.
 
 ### Server market relay
 
@@ -62,16 +56,13 @@ cp deploy/market_relay.py deploy/custom-api-market.service /opt/custom-api-gatew
 systemctl enable --now custom-api-market.service
 ```
 
-For X and additional OpenNews coverage, set `OPENNEWS_TOKEN` and a comma-separated `NEWS_SOCIAL_KEYWORDS` list. This uses the 6551 OpenTwitter/OpenNews APIs from the local research reference; it is opt-in because it requires a separate token and has quota/rate limits. The token is read only by the server and is never sent to Binance or the browser.
-
 The push policy is:
 
 - the first app open of each local day receives up to 10 recent items;
 - normal items are delivered once per two-hour cursor window;
 - headlines matching the breaking-news rules are delivered immediately;
-- new items are learned into a separate SQLite research database (`NEWS_LEARNING_DB_FILE`), never into the order or credential path.
 
-`GET /api/news/knowledge` exposes the learned source records for future retrieval and summarization. Browser notifications require the user's normal Notification permission; the in-app news list remains available when notifications are disabled.
+Browser notifications require the user's normal Notification permission; the in-app news list remains available when notifications are disabled.
 
 The client capability policy targets full Binance trading coverage: all configured Spot symbols, USDⓈ-M and COIN-M futures, margin trading without borrow/repay, internal account transfers, and automated strategy execution. Withdrawals, borrow/repay, and external transfers remain disabled. Live account reads require `BINANCE_ENV=live`; live submission additionally requires the separate `BINANCE_LIVE_TRADING=true` unlock. API keys should be IP-restricted.
 

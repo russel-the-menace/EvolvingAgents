@@ -54,10 +54,9 @@ test('an expiring server-side draft can only submit once', async () => {
 
 test('market analysis sends chart context, history, and pasted images to the model gateway', async () => {
   const originalFetch = globalThis.fetch;
-  const originalEnv = { base: process.env.GATEWAY_BASE_URL, key: process.env.GATEWAY_API_KEY, remoteNews: process.env.NEWS_REMOTE_ONLY };
+  const originalEnv = { base: process.env.GATEWAY_BASE_URL, key: process.env.GATEWAY_API_KEY };
   process.env.GATEWAY_BASE_URL = 'https://gateway.example';
   process.env.GATEWAY_API_KEY = 'gateway-key';
-  process.env.NEWS_REMOTE_ONLY = 'true';
   let gatewayRequest;
   let marketRequest;
   globalThis.fetch = async (url, options = {}) => {
@@ -89,6 +88,5 @@ test('market analysis sends chart context, history, and pasted images to the mod
     globalThis.fetch = originalFetch;
     if (originalEnv.base === undefined) delete process.env.GATEWAY_BASE_URL; else process.env.GATEWAY_BASE_URL = originalEnv.base;
     if (originalEnv.key === undefined) delete process.env.GATEWAY_API_KEY; else process.env.GATEWAY_API_KEY = originalEnv.key;
-    if (originalEnv.remoteNews === undefined) delete process.env.NEWS_REMOTE_ONLY; else process.env.NEWS_REMOTE_ONLY = originalEnv.remoteNews;
   }
 });
