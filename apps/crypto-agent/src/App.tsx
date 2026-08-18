@@ -3,6 +3,7 @@ import { ArrowDownLeft, ArrowLeft, ArrowLeftRight, ArrowUpRight, Bot, Check, Che
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { mergeKlineRows } from './chart-data';
+import { aggregateAssetBalances } from './asset-summary';
 
 type ModelId = 'gpt-5.6-luna' | 'gpt-5.6-sol' | 'gpt-5.6-terra';
 type ReasoningId = 'low' | 'medium' | 'high' | 'xhigh' | 'max';
@@ -17,7 +18,7 @@ type NewsItem = { id: string; title: string; url: string; source: string; summar
 type EmergencyState = { pending?: { id: string; title: string; budget: number }; grant?: { id: string; remaining: number; expiresAt: number } | null };
 type FuturesPosition = { symbol: string; positionAmt: string; entryPrice: string; markPrice: string; liquidationPrice: string; leverage: string; marginType: string; unRealizedProfit: string };
 type MarginAccount = { marginLevel?: string; totalAssetOfBtc?: string; totalLiabilityOfBtc?: string; userAssets?: Array<{ asset: string; borrowed: string; interest: string; free: string }> };
-type AssetSnapshot = { configured: boolean; spot: { balances?: Balance[] } | null; funding: Array<{ asset: string; free: string; locked: string; freeze?: string; withdrawing?: string }> | null; earn: { rows?: Array<{ asset: string; totalAmount?: string; holdingAmount?: string; cumulativeTotalRewards?: string; latestAnnualPercentageRate?: string; productName?: string; productId?: string }> } | null; futures: { totalWalletBalance?: string; totalUnrealizedProfit?: string; availableBalance?: string; assets?: Array<{ asset: string; walletBalance: string; unrealizedProfit: string; availableBalance: string }>; positions?: Array<{ symbol: string; positionAmt: string; unrealizedProfit: string }> } | null; wallets: Array<{ walletName: string; balance: string; activate: boolean }> | null; errors: string[] };
+type AssetSnapshot = { configured: boolean; spot: { balances?: Balance[] } | null; funding: Array<{ asset: string; free: string; locked: string; freeze?: string; withdrawing?: string }> | null; earn: { rows?: Array<{ asset: string; totalAmount?: string; holdingAmount?: string; cumulativeTotalRewards?: string; latestAnnualPercentageRate?: string; productName?: string; productId?: string }> } | null; futures: { totalWalletBalance?: string; totalUnrealizedProfit?: string; availableBalance?: string; assets?: Array<{ asset: string; walletBalance: string; unrealizedProfit: string; availableBalance: string }>; positions?: Array<{ symbol: string; positionAmt: string; unrealizedProfit: string }> } | null; wallets: Array<{ walletName: string; balance: string; activate: boolean }> | null; prices: Record<string, number>; errors: string[] };
 type AssetTab = 'overview' | 'earn' | 'spot' | 'funding' | 'futures';
 type CoinMMarket = { symbol: string; interval: string; klines: Array<Array<string | number>>; depth: { bids: string[][]; asks: string[][] }; premium: { markPrice: string; indexPrice: string; lastFundingRate?: string; nextFundingTime?: number }; orderBook24h?: Record<string, unknown> | null; partial?: boolean };
 type MarketContext = { symbol: string; interval: string; candles: CoinMCandle[]; markPrice: number; fundingRate: number; depth: { bidDepth: number; askDepth: number; imbalance: number; spreadBps: number } | null; orderBook24h?: Record<string, unknown> | null };
@@ -390,10 +391,15 @@ function AssetWorkspace({ onMarketContext }: { onMarketContext: (context: Market
   const funding = data?.funding || [];
   const earn = data?.earn?.rows || [];
   const futuresAssets = data?.futures?.assets?.filter((item) => Number(item.walletBalance) || Number(item.unrealizedProfit)) || [];
-  const earnUsdt = earn.find((item) => item.asset === 'USDT');
-  const spotUsdt = spot.find((item) => item.asset === 'USDT' || item.asset === 'LDUSDT');
-  const walletTotal = Number(earnUsdt?.totalAmount || earnUsdt?.holdingAmount || Number(spotUsdt?.free || 0) + Number(spotUsdt?.locked || 0));
-  const cnyTotal = walletTotal * 6.74;
+  const assetTotals = aggregateAssetBalances({ spot, funding, earn, futures: futuresAssets, prices: data?.prices });
+  const accountValues = {
+    earn: assetTotals.reduce((sum, item) => sum + item.earn * item.price, 0),
+    spot: assetTotals.reduce((sum, item) => sum + item.spot * item.price, 0),
+    funding: assetTotals.reduce((sum, item) => sum + item.funding * item.price, 0),
+    futures: assetTotals.reduce((sum, item) => sum + item.futures * item.price, 0),
+  };
+  const estimatedTotal = assetTotals.reduce((sum, item) => sum + item.estimatedUsdt, 0);
+  const cnyTotal = estimatedTotal * 6.74;
   const amount = (value: number | string | undefined) => hidden ? '••••••' : formatNumber(value || 0);
   const summaryAmount = (value: number | string | undefined) => hidden ? '••••••' : formatNumber(Math.floor(Number(value || 0) * 100) / 100);
   const earnRows = earnView === 'assets' ? Object.entries(earn.reduce<Record<string, number>>((result, item) => { result[item.asset] = (result[item.asset] || 0) + Number(item.totalAmount || item.holdingAmount || 0); return result; }, {})).map(([asset, primary]) => ({ asset, primary, secondary: '按资产汇总' })) : earn.map((item) => ({ asset: item.productName || item.productId || item.asset, primary: item.totalAmount || item.holdingAmount || '0', secondary: `${item.asset} · 累计收益 ${amount(item.cumulativeTotalRewards)} · APR ${item.latestAnnualPercentageRate || '-'}` }));
@@ -401,21 +407,21 @@ function AssetWorkspace({ onMarketContext }: { onMarketContext: (context: Market
   const tabs: Array<[AssetTab, string]> = [['overview', '总览'], ['earn', '理财'], ['spot', '现货'], ['funding', '资金'], ['futures', '合约']];
   const nav = [[Home, '首页', 'home'], [LineChart, '行情', 'markets'], [ArrowLeftRight, '交易', 'trade'], [FileText, '合约', 'contracts'], [WalletCards, '资产', 'assets']] as const;
   const accountRows = [
-    ['理财', earn.reduce((sum, item) => sum + Number(item.totalAmount || item.holdingAmount || 0), 0)],
-    ['现货', spot.filter((item) => !item.asset.startsWith('LD')).reduce((sum, item) => sum + Number(item.free || 0) + Number(item.locked || 0), 0)],
-    ['资金', funding.reduce((sum, item) => sum + Number(item.free || 0) + Number(item.locked || 0), 0)],
-    ['合约', Number(data?.futures?.totalWalletBalance || 0)],
+    ['理财', accountValues.earn],
+    ['现货', accountValues.spot],
+    ['资金', accountValues.funding],
+    ['合约', accountValues.futures],
   ] as const;
   const assetName = (asset: string) => asset === 'USDT' ? 'TetherUS' : asset;
   const visibleErrors = data?.errors.filter((item) => !item.startsWith('futures:')) || [];
-  const totalValue = assetTab === 'overview' ? walletTotal : assetTab === 'futures' ? data?.futures?.totalWalletBalance : rows.reduce((sum, item) => sum + Number(item.primary || 0), 0);
+  const totalValue = assetTab === 'overview' ? estimatedTotal : assetTab === 'futures' ? accountValues.futures : assetTab === 'earn' ? accountValues.earn : assetTab === 'spot' ? accountValues.spot : accountValues.funding;
   return <section className="asset-app">
     <div className="asset-content">
       {bottomTab === 'assets' ? <>
         <div className="asset-tabs" role="tablist">{tabs.map(([id, label]) => <button className={assetTab === id ? 'active' : ''} key={id} onClick={() => setAssetTab(id)}>{label}</button>)}</div>
         {assetTab === 'spot' && <div className="asset-subtabs" role="tablist">{([['spot', '现货账户'], ['cross', '杠杆账户（全仓）'], ['isolated', '杠杆账户（逐仓）']] as const).map(([id, label]) => <button className={spotView === id ? 'active' : ''} key={id} onClick={() => setSpotView(id)}>{label}</button>)}</div>}
-        <div className="asset-summary"><div><span>{assetTab === 'overview' ? '现货 USDT 余额' : `${tabs.find(([id]) => id === assetTab)?.[1]}资产`}</span><button title={hidden ? '显示余额' : '隐藏余额'} aria-label={hidden ? '显示余额' : '隐藏余额'} onClick={() => setHidden((value) => !value)}><Eye size={15} /></button></div><strong>{amount(totalValue)} <small>USDT</small></strong>{assetTab === 'overview' && <div className="asset-cny">≈ ¥{amount(cnyTotal)}</div>}<div className="asset-actions"><button disabled title="资金操作尚未启用">添加资金</button><button disabled title="资金操作尚未启用">转出</button><button disabled title="资金操作尚未启用">划转</button></div></div>
-        {assetTab === 'overview' ? <div className="wallet-overview"><div className="overview-tabs" role="tablist"><button className={overviewTab === 'all' ? 'active' : ''} onClick={() => setOverviewTab('all')}>全部</button><button className={overviewTab === 'accounts' ? 'active' : ''} onClick={() => setOverviewTab('accounts')}>账户</button><button className="overview-refresh" title="刷新资产" aria-label="刷新资产" onClick={() => void load()}><RefreshCw className={loading ? 'spin' : ''} size={15} /></button></div>{overviewTab === 'all' ? <>{walletTotal > 0 && <div className="asset-row"><div><CoinIcon asset="USDT" /><span><strong>USDT</strong><small>TetherUS</small></span></div><b>{amount(walletTotal)}</b></div>}</> : accountRows.map(([label, value]) => <div className="account-row" key={label}><strong>{label}</strong><b>{amount(value)} USDT</b></div>)}</div> : <div className="asset-list"><div className="asset-list-heading"><strong>{tabs.find(([id]) => id === assetTab)?.[1]}资产</strong>{assetTab === 'earn' ? <div className="inline-tabs"><button className={earnView === 'assets' ? 'active' : ''} onClick={() => setEarnView('assets')}>按资产</button><button className={earnView === 'products' ? 'active' : ''} onClick={() => setEarnView('products')}>按产品</button></div> : <Search size={17} />}</div>{rows.length ? rows.map((item) => <div className="asset-row" key={item.asset}><div><CoinIcon asset={item.asset} /><span><strong>{item.asset}</strong><small>{item.secondary || assetName(item.asset)}</small></span></div><b>{amount(item.primary)}</b></div>) : <p className="asset-empty">{loading ? '正在读取 Binance 账户…' : data?.errors.find((item) => item.startsWith(assetTab)) || '该账户暂无非零资产'}</p>}</div>}
+        <div className="asset-summary"><div><span>{assetTab === 'overview' ? '预估总资产' : `${tabs.find(([id]) => id === assetTab)?.[1]}资产`}</span><button title={hidden ? '显示余额' : '隐藏余额'} aria-label={hidden ? '显示余额' : '隐藏余额'} onClick={() => setHidden((value) => !value)}><Eye size={15} /></button></div><strong>{amount(totalValue)} <small>USDT</small></strong>{assetTab === 'overview' && <div className="asset-cny">≈ ¥{amount(cnyTotal)}</div>}<div className="asset-actions"><button disabled title="资金操作尚未启用">添加资金</button><button disabled title="资金操作尚未启用">转出</button><button disabled title="资金操作尚未启用">划转</button></div></div>
+        {assetTab === 'overview' ? <div className="wallet-overview"><div className="overview-tabs" role="tablist"><button className={overviewTab === 'all' ? 'active' : ''} onClick={() => setOverviewTab('all')}>全部</button><button className={overviewTab === 'accounts' ? 'active' : ''} onClick={() => setOverviewTab('accounts')}>账户</button><button className="overview-refresh" title="刷新资产" aria-label="刷新资产" onClick={() => void load()}><RefreshCw className={loading ? 'spin' : ''} size={15} /></button></div>{overviewTab === 'all' ? assetTotals.map((item) => <div className="asset-row" key={item.asset}><div><CoinIcon asset={item.asset} /><span><strong>{item.asset}</strong><small>{item.asset === 'USDT' ? 'TetherUS' : `≈ ${amount(item.estimatedUsdt)} USDT`}</small></span></div><b>{amount(item.total)}</b></div>) : accountRows.map(([label, value]) => <div className="account-row" key={label}><strong>{label}</strong><b>{amount(value)} USDT</b></div>)}</div> : <div className="asset-list"><div className="asset-list-heading"><strong>{tabs.find(([id]) => id === assetTab)?.[1]}资产</strong>{assetTab === 'earn' ? <div className="inline-tabs"><button className={earnView === 'assets' ? 'active' : ''} onClick={() => setEarnView('assets')}>按资产</button><button className={earnView === 'products' ? 'active' : ''} onClick={() => setEarnView('products')}>按产品</button></div> : <Search size={17} />}</div>{rows.length ? rows.map((item) => <div className="asset-row" key={item.asset}><div><CoinIcon asset={item.asset} /><span><strong>{item.asset}</strong><small>{item.secondary || assetName(item.asset)}</small></span></div><b>{amount(item.primary)}</b></div>) : <p className="asset-empty">{loading ? '正在读取 Binance 账户…' : data?.errors.find((item) => item.startsWith(assetTab)) || '该账户暂无非零资产'}</p>}</div>}
         {visibleErrors.length ? <details className="asset-errors"><summary>部分账户不可用</summary>{visibleErrors.map((item) => <p key={item}>{item}</p>)}</details> : null}
       </> : bottomTab === 'contracts' ? <CoinMWorkspace onMarketContext={onMarketContext} /> : <div className="asset-placeholder"><strong>{nav.find(([, , id]) => id === bottomTab)?.[1]}</strong><span>此导航将在后续视图中实现</span></div>}
       {loadError && <p className="asset-load-error">{loadError}</p>}

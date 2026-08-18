@@ -100,14 +100,27 @@ async function accountSnapshot() {
 let assetCache = null;
 let assetCacheAt = 0;
 async function assetSnapshot() {
-  if (!configured) return { configured: false, spot: null, funding: null, earn: null, futures: null, wallets: null, errors: ['Configure Binance credentials before reading assets.'] };
+  if (!configured) return { configured: false, spot: null, funding: null, earn: null, futures: null, wallets: null, prices: { USDT: 1 }, errors: ['Configure Binance credentials before reading assets.'] };
   if (assetCache && Date.now() - assetCacheAt < 10_000) return assetCache;
-  const [spot, funding, earn, futuresAccount, wallets] = await Promise.allSettled([binance.account(), binance.fundingAsset(), binance.earnFlexible(), futures.assetAccount(), binance.walletBalance('USDT')]);
-  const result = { configured: true, spot: null, funding: null, earn: null, futures: null, wallets: null, errors: [] };
+  const [spot, funding, earn, futuresAccount, wallets, prices] = await Promise.allSettled([binance.account(), binance.fundingAsset(), binance.earnFlexible(), futures.assetAccount(), binance.walletBalance('USDT'), binance.prices()]);
+  const result = { configured: true, spot: null, funding: null, earn: null, futures: null, wallets: null, prices: { USDT: 1 }, errors: [] };
   for (const [key, entry] of [['spot', spot], ['funding', funding], ['earn', earn], ['futures', futuresAccount], ['wallets', wallets]]) {
     if (entry.status === 'fulfilled') result[key] = entry.value;
     else result.errors.push(`${key}: ${entry.reason instanceof Error ? entry.reason.message : 'Binance endpoint unavailable'}`);
   }
+  if (prices.status === 'fulfilled') {
+    const assets = new Set([
+      ...(result.spot?.balances || []).map((item) => item.asset),
+      ...(result.funding || []).map((item) => item.asset),
+      ...(result.earn?.rows || []).map((item) => item.asset),
+      ...(result.futures?.assets || []).map((item) => item.asset),
+    ]);
+    for (const item of prices.value || []) {
+      const asset = item.symbol?.endsWith('USDT') ? item.symbol.slice(0, -4) : '';
+      const price = Number(item.price);
+      if (asset && assets.has(asset) && Number.isFinite(price)) result.prices[asset] = price;
+    }
+  } else result.errors.push(`prices: ${prices.reason instanceof Error ? prices.reason.message : 'Binance endpoint unavailable'}`);
   assetCache = result;
   assetCacheAt = Date.now();
   return result;

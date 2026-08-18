@@ -40,9 +40,11 @@ test('asset clients use the official signed wallet, earn, funding, and Futures e
   await spot.fundingAsset();
   await spot.walletBalance('USDT');
   await spot.earnFlexible();
+  await spot.prices();
   assert.match(spotCalls[1], /\/sapi\/v1\/asset\/get-funding-asset/);
   assert.match(spotCalls[2], /\/sapi\/v1\/asset\/wallet\/balance\?quoteAsset=USDT/);
   assert.match(spotCalls[3], /\/sapi\/v1\/simple-earn\/flexible\/position\?size=100/);
+  assert.match(spotCalls[4], /\/api\/v3\/ticker\/price/);
   const futuresCalls = [];
   const futuresClient = createBinanceUsdMClient({ apiKey: 'public', secretKey: 'private', now: () => 1_000, fetchImpl: async (url) => { futuresCalls.push(url); return new Response(JSON.stringify(url.endsWith('/fapi/v1/time') ? { serverTime: 2_000 } : {})); } });
   await futuresClient.assetAccount();
