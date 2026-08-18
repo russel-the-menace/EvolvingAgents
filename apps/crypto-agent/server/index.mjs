@@ -15,6 +15,7 @@ const liveTradingEnabled = environment === 'live' && process.env.BINANCE_LIVE_TR
 const symbolConfig = (process.env.BINANCE_SYMBOLS || 'BTCUSDT,ETHUSDT').trim();
 const allowedSymbols = symbolConfig === '*' ? null : symbolConfig.split(',').map((item) => item.trim().toUpperCase()).filter(Boolean);
 const externalNewsEnabled = process.env.NEWS_EXTERNAL_SOURCES !== 'off';
+const remoteNewsOnly = process.env.NEWS_REMOTE_ONLY === 'true';
 const socialKeywords = (process.env.NEWS_SOCIAL_KEYWORDS || '').split(',').map((item) => item.trim()).filter(Boolean);
 const maxOrderUsdt = Number(process.env.MAX_ORDER_USDT || 100);
 const configured = Boolean(process.env.BINANCE_API_KEY && process.env.BINANCE_SECRET_KEY);
@@ -49,15 +50,15 @@ const defaultCexFeeds = [
   'https://rsshub.app/okx/announcement',
   'https://rsshub.app/bybit/announcement'
 ];
-const feedUrls = [...(process.env.NEWS_RSS_URLS || defaultNewsFeeds.join(',')).split(','), ...(process.env.NEWS_CEX_RSS_URLS || defaultCexFeeds.join(',')).split(',')].map((item) => item.trim()).filter(Boolean);
-const apiSources = externalNewsEnabled ? [{ name: 'cryptocurrency.cv', url: process.env.CRYPTO_NEWS_URL || 'https://cryptocurrency.cv/api/news?limit=30' }] : [];
+const feedUrls = remoteNewsOnly ? [] : [...(process.env.NEWS_RSS_URLS || defaultNewsFeeds.join(',')).split(','), ...(process.env.NEWS_CEX_RSS_URLS || defaultCexFeeds.join(',')).split(',')].map((item) => item.trim()).filter(Boolean);
+const apiSources = externalNewsEnabled && !remoteNewsOnly ? [{ name: 'cryptocurrency.cv', url: process.env.CRYPTO_NEWS_URL || 'https://cryptocurrency.cv/api/news?limit=30' }] : [];
 if (process.env.OPENNEWS_TOKEN) {
   for (const keyword of socialKeywords) {
     apiSources.push({ name: `X · ${keyword}`, url: 'https://ai.6551.io/open/twitter_search', method: 'POST', headers: { Authorization: `Bearer ${process.env.OPENNEWS_TOKEN}`, 'Content-Type': 'application/json' }, body: { keywords: keyword, maxResults: 20, product: 'Latest', excludeReplies: true } });
     apiSources.push({ name: `OpenNews · ${keyword}`, url: 'https://ai.6551.io/open/news_search', method: 'POST', headers: { Authorization: `Bearer ${process.env.OPENNEWS_TOKEN}`, 'Content-Type': 'application/json' }, body: { q: keyword, limit: 20, page: 1 } });
   }
 }
-const news = new NewsService({ feedUrls, apiSources, stateFile: process.env.NEWS_STATE_FILE || defaultNewsState, pollMs: Number(process.env.NEWS_POLL_MS || 300_000), learnItem: newsLearner?.learn });
+const news = new NewsService({ feedUrls, apiSources, stateFile: process.env.NEWS_STATE_FILE || defaultNewsState, pollMs: Number(process.env.NEWS_POLL_MS || 300_000), learnItem: newsLearner?.learn, archiveUrl: process.env.NEWS_ARCHIVE_BASE_URL || process.env.GATEWAY_BASE_URL, archiveKey: process.env.NEWS_ARCHIVE_API_KEY || process.env.GATEWAY_API_KEY });
 const newsClients = new Set();
 const emergency = new EmergencyPolicy({ budgetFraction: Number(process.env.EMERGENCY_BUDGET_FRACTION || 0.2), grantMs: Number(process.env.EMERGENCY_GRANT_MS || 30 * 60_000), cooldownMs: Number(process.env.EMERGENCY_COOLDOWN_MS || 15 * 60_000) });
 void news.load().then(() => news.start());
@@ -119,7 +120,7 @@ async function coinMMarket(symbol, interval) {
   };
   const [klines, depth, premium] = await Promise.all([
     get('/dapi/v1/klines', { symbol, interval, limit: '240' }),
-    get('/dapi/v1/depth', { symbol, limit: '10' }),
+    get('/dapi/v1/depth', { symbol, limit: '1000' }),
     get('/dapi/v1/premiumIndex', { symbol }),
   ]);
   return { symbol, interval, klines, depth, premium: Array.isArray(premium) ? premium[0] : premium };
@@ -171,10 +172,11 @@ export function createCryptoServer() {
       if (request.method === 'GET' && request.url === '/api/status') {
         return sendJson(response, 200, { configured, environment, liveTradingEnabled, allowedSymbols, maxOrderUsdt, futures: { configured, maxLeverage: 125, confirmationRequired: true }, margin: { configured, confirmationRequired: true, borrowRepayEnabled: false }, news: { configured: news.feedUrls.length > 0 || news.apiSources.length > 0, sources: [...news.feedUrls.map((url) => new URL(url).hostname), ...news.apiSources.map((source) => source.name)], learningEnabled: Boolean(newsLearner), pollMs: news.pollMs }, model: { provider: gatewayProvider, models: modelOptions, reasoning: reasoningOptions, defaultModel, defaultReasoning } });
       }
-      if (request.method === 'GET' && request.url === '/api/news') {
-        const mode = new URL(request.url, 'http://localhost').searchParams.get('mode');
+      if (request.method === 'GET' && (request.url?.startsWith('/api/news?') || request.url === '/api/news')) {
+        const query = new URL(request.url, 'http://localhost').searchParams;
+        const mode = query.get('mode');
         if (mode === 'startup' && (news.feedUrls.length || news.apiSources.length)) await news.poll();
-        return sendJson(response, 200, { items: mode === 'startup' ? await news.startupDigest() : news.recent() });
+        return sendJson(response, 200, await news.history({ limit: Math.min(100, Math.max(1, Number(query.get('limit') || 30))), before: query.get('before') || '' }));
       }
       if (request.method === 'GET' && request.url === '/api/news/stream') {
         response.writeHead(200, { 'Content-Type': 'text/event-stream; charset=utf-8', 'Cache-Control': 'no-cache', Connection: 'keep-alive' });

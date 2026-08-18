@@ -40,11 +40,13 @@ export function parseFeed(xml, source) {
 }
 
 export class NewsService {
-  constructor({ feedUrls = [], apiSources = [], stateFile = '', pollMs = 300_000, fetchImpl = fetch, learnItem } = {}) {
-    this.feedUrls = feedUrls; this.apiSources = apiSources; this.stateFile = stateFile; this.pollMs = pollMs; this.fetchImpl = fetchImpl; this.learnItem = learnItem; this.items = new Map(); this.listeners = new Set(); this.timer = null; this.lastDigestAt = 0; this.startupDate = '';
+  constructor({ feedUrls = [], apiSources = [], stateFile = '', pollMs = 300_000, fetchImpl = fetch, learnItem, archiveUrl = '', archiveKey = '' } = {}) {
+    this.feedUrls = feedUrls; this.apiSources = apiSources; this.stateFile = stateFile; this.pollMs = pollMs; this.fetchImpl = fetchImpl; this.learnItem = learnItem; this.archiveUrl = archiveUrl.replace(/\/$/, ''); this.archiveKey = archiveKey; this.items = new Map(); this.listeners = new Set(); this.timer = null; this.lastDigestAt = 0; this.startupDate = '';
   }
-  async load() { if (!this.stateFile) return; try { const saved = JSON.parse(await readFile(this.stateFile, 'utf8')); for (const item of saved.items || []) this.items.set(item.id, item); this.startupDate = saved.startupDate || ''; this.lastDigestAt = saved.lastDigestAt || 0; } catch { /* first run */ } }
+  async load() { if (this.stateFile) try { const saved = JSON.parse(await readFile(this.stateFile, 'utf8')); for (const item of saved.items || []) this.items.set(item.id, item); this.startupDate = saved.startupDate || ''; this.lastDigestAt = saved.lastDigestAt || 0; } catch { /* first run */ } if (this.items.size) await this.archive([...this.items.values()]); }
   async save() { if (!this.stateFile) return; await mkdir(dirname(this.stateFile), { recursive: true }); await writeFile(this.stateFile, JSON.stringify({ items: [...this.items.values()].slice(-500), startupDate: this.startupDate, lastDigestAt: this.lastDigestAt })); }
+  async archive(items) { if (!this.archiveUrl || !this.archiveKey || !items.length) return; try { await this.fetchImpl(`${this.archiveUrl}/v1/news/archive`, { method: 'POST', headers: { Authorization: `Bearer ${this.archiveKey}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ items }), signal: AbortSignal.timeout(12_000) }); } catch { /* remote archive must not stop collection */ } }
+  async history({ limit = 30, before = '' } = {}) { if (!this.archiveUrl || !this.archiveKey) return { items: this.recent(limit), nextCursor: null }; try { const query = new URLSearchParams({ limit: String(limit), ...(before ? { before } : {}) }); const response = await this.fetchImpl(`${this.archiveUrl}/v1/news/archive?${query}`, { headers: { Authorization: `Bearer ${this.archiveKey}` }, signal: AbortSignal.timeout(12_000) }); if (response.ok) return response.json(); } catch { /* fall back to hot cache */ } return { items: this.recent(limit), nextCursor: null }; }
   subscribe(listener) { this.listeners.add(listener); return () => this.listeners.delete(listener); }
   emit(event) { for (const listener of this.listeners) { try { listener(event); } catch { /* one subscriber must not stop the feed */ } } }
   async poll() {
@@ -62,8 +64,10 @@ export class NewsService {
     if (this.items.size > 500) this.items = new Map([...this.items.entries()].slice(-500));
     for (const item of fresh) {
       if (this.learnItem) void Promise.resolve(this.learnItem(item)).catch(() => {});
+      this.emit({ type: 'item', item });
       if (item.urgency === 'breaking') this.emit({ type: 'breaking', item });
     }
+    if (fresh.length) void this.archive(fresh);
     if (fresh.length) await this.save();
     return fresh;
   }

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type CSSProperties } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from 'react';
 import { ArrowDownLeft, ArrowLeftRight, ArrowUpRight, Bot, Check, ChevronDown, CircleDollarSign, Eye, FileText, Home, LineChart, MessageSquare, Monitor, Moon, PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen, Plus, RefreshCw, Search, SendHorizontal, Settings2, ShieldCheck, Sun, WalletCards, X } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -43,9 +43,10 @@ function recentNewsWelcome(items: NewsItem[]) {
   return sentence.length > 120 ? `${sentence.slice(0, 117)}...` : sentence;
 }
 
-function NewsPanel({ items }: { items: NewsItem[] }) {
-  if (!items.length) return null;
-  return <section className="news-panel" aria-label="市场新闻"><div className="news-heading"><strong>市场新闻</strong><span>实时源 · 两小时摘要</span></div>{items.slice(0, 6).map((item) => <article className={item.urgency === 'breaking' ? 'news-item breaking' : 'news-item'} key={item.id}><div><span>{item.source}</span><time>{new Date(item.publishedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</time></div><a href={item.url} target="_blank" rel="noreferrer">{item.title}</a></article>)}</section>;
+function NewsPanel({ items, onLoadMore, loading, hasMore }: { items: NewsItem[]; onLoadMore: () => void; loading: boolean; hasMore: boolean }) {
+  const list = useRef<HTMLDivElement>(null); const pullStart = useRef<number | null>(null); const known = useRef<Set<string> | null>(null);
+  useEffect(() => { if (!known.current) known.current = new Set(items.map((item) => item.id)); else for (const item of items) known.current.add(item.id); }, [items]);
+  return <section className="news-panel" aria-label="市场新闻"><div className="section-title"><span>News</span></div><div className="news-list" ref={list} onPointerDown={(event) => { pullStart.current = list.current?.scrollTop === 0 ? event.clientY : null; }} onPointerUp={(event) => { if (pullStart.current !== null && event.clientY - pullStart.current > 44 && hasMore && !loading) onLoadMore(); pullStart.current = null; }}>{items.length ? items.map((item) => <article className={`news-item${item.urgency === 'breaking' ? ' breaking' : ''}${known.current && !known.current.has(item.id) ? ' entering' : ''}`} key={item.id}><div><span>{item.source}</span><time>{new Date(item.publishedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</time></div><a href={item.url} target="_blank" rel="noreferrer">{item.title}</a></article>) : <p className="news-empty">新闻正在同步</p>}</div></section>;
 }
 
 function EmergencyPanel({ state, onChange }: { state: EmergencyState; onChange: (next: EmergencyState) => void }) {
@@ -153,7 +154,11 @@ function CoinMWorkspace() {
   const [error, setError] = useState('');
   const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
   const [tickDirection, setTickDirection] = useState<'up' | 'down' | ''>('');
+  const [priceGrouping, setPriceGrouping] = useState('0.1');
   const previousPrice = useRef(0);
+  const pendingPrice = useRef<number | null>(null);
+  const pendingDepth = useRef<{ bids: string[][]; asks: string[][] } | null>(null);
+  const orderBook = useRef({ bids: new Map<string, string>(), asks: new Map<string, string>() });
   useEffect(() => {
     const dismiss = (event: PointerEvent) => { if (!(event.target as Element).closest?.('.coinm-chart-canvas svg')) setSelectedIndex(null); };
     document.addEventListener('pointerdown', dismiss);
@@ -161,7 +166,7 @@ function CoinMWorkspace() {
   }, []);
   useEffect(() => {
     let active = true;
-    const load = () => api<CoinMMarket>(`/coinm-market?symbol=BTCUSD_PERP&interval=${interval}`).then((result) => { if (active) { setMarket(result); setError(''); } }).catch((caught) => { if (active) setError(caught instanceof Error ? caught.message : '币本位行情不可用'); });
+    const load = () => api<CoinMMarket>(`/coinm-market?symbol=BTCUSD_PERP&interval=${interval}`).then((result) => { if (active) { orderBook.current = { bids: new Map(result.depth.bids.map(([price, quantity]) => [price, quantity] as const)), asks: new Map(result.depth.asks.map(([price, quantity]) => [price, quantity] as const)) }; setMarket(result); setError(''); } }).catch((caught) => { if (active) setError(caught instanceof Error ? caught.message : '币本位行情不可用'); });
     void load();
     const timer = window.setInterval(load, 60_000);
     const stream = new WebSocket(`wss://dstream.binance.com/ws/btcusd_perp@kline_${interval}`);
@@ -170,9 +175,6 @@ function CoinMWorkspace() {
       try { payload = JSON.parse(event.data); } catch { return; }
       const item = payload.k;
       if (!active || !item) return;
-      const price = Number(item.c);
-      if (previousPrice.current) setTickDirection(price >= previousPrice.current ? 'up' : 'down');
-      previousPrice.current = price;
       const next = [item.t, item.o, item.h, item.l, item.c, item.v, item.T, item.q];
       setMarket((current) => {
         if (!current) return current;
@@ -180,18 +182,41 @@ function CoinMWorkspace() {
         const last = klines.at(-1);
         if (Number(last?.[0]) === Number(item.t)) klines[klines.length - 1] = next;
         else klines.push(next);
-        return { ...current, klines: klines.slice(-240), premium: { ...current.premium, markPrice: item.c } };
+        return { ...current, klines: klines.slice(-240) };
       });
     };
     stream.onerror = () => { if (active) setError('实时连接暂时中断，正在使用分钟级行情兜底'); };
-    const depthStream = new WebSocket('wss://dstream.binance.com/ws/btcusd_perp@depth10@100ms');
+    const tradeStream = new WebSocket('wss://dstream.binance.com/ws/btcusd_perp@aggTrade');
+    tradeStream.onmessage = (event) => {
+      let payload;
+      try { payload = JSON.parse(event.data); } catch { return; }
+      const price = Number(payload?.p);
+      if (!active || !Number.isFinite(price)) return;
+      pendingPrice.current = price;
+    };
+    const depthStream = new WebSocket('wss://dstream.binance.com/ws/btcusd_perp@depth@100ms');
     depthStream.onmessage = (event) => {
       let payload;
       try { payload = JSON.parse(event.data); } catch { return; }
       if (!active || !payload?.b || !payload?.a) return;
-      setMarket((current) => current ? { ...current, depth: { bids: payload.b, asks: payload.a } } : current);
+      for (const [price, quantity] of payload.b as string[][]) Number(quantity) ? orderBook.current.bids.set(price, quantity) : orderBook.current.bids.delete(price);
+      for (const [price, quantity] of payload.a as string[][]) Number(quantity) ? orderBook.current.asks.set(price, quantity) : orderBook.current.asks.delete(price);
+      pendingDepth.current = {
+        bids: [...orderBook.current.bids].sort(([left], [right]) => Number(right) - Number(left)).slice(0, 1000),
+        asks: [...orderBook.current.asks].sort(([left], [right]) => Number(left) - Number(right)).slice(0, 1000),
+      };
     };
-    return () => { active = false; window.clearInterval(timer); stream.close(); depthStream.close(); };
+    const bookTimer = window.setInterval(() => {
+      const price = pendingPrice.current; const depth = pendingDepth.current;
+      if (price === null && !depth) return;
+      if (price !== null) {
+        if (previousPrice.current) setTickDirection(price >= previousPrice.current ? 'up' : 'down');
+        previousPrice.current = price;
+      }
+      setMarket((current) => current ? { ...current, ...(depth ? { depth } : {}), ...(price !== null ? { premium: { ...current.premium, markPrice: String(price) } } : {}) } : current);
+      pendingPrice.current = null; pendingDepth.current = null;
+    }, 400);
+    return () => { active = false; window.clearInterval(timer); window.clearInterval(bookTimer); stream.close(); tradeStream.close(); depthStream.close(); };
   }, [interval]);
   const allCandles = (market?.klines || []).map((item) => ({ time: Number(item[0]), open: Number(item[1]), high: Number(item[2]), low: Number(item[3]), close: Number(item[4]), volume: Number(item[5]), quoteVolume: Number(item[7]) }));
   const candles = allCandles.slice(-120);
@@ -203,8 +228,29 @@ function CoinMWorkspace() {
   const maValues = (period: number) => allCandles.map((_, index) => index < period - 1 ? null : allCandles.slice(index - period + 1, index + 1).reduce((sum, item) => sum + item.close, 0) / period).slice(-120);
   const ma7 = maValues(7); const ma25 = maValues(25); const ma99 = maValues(99);
   const maPath = (values: Array<number | null>) => values.map((value, index) => value === null ? '' : `${values.slice(0, index).every((item) => item === null) ? 'M' : 'L'} ${pad + index * step + step / 2} ${y(value)}`).join(' ');
-  const last = candles.at(-1)?.close || Number(market?.premium.markPrice || 0);
-  const depthMax = Math.max(...(market?.depth.asks || []).map(([, quantity]) => Number(quantity)), ...(market?.depth.bids || []).map(([, quantity]) => Number(quantity)), 1);
+  const last = Number(market?.premium.markPrice || candles.at(-1)?.close || 0);
+  const groupDepth = (levels: string[][], side: 'ask' | 'bid') => {
+    const size = Number(priceGrouping);
+    const grouped = new Map<number, number>();
+    for (const [rawPrice, rawQuantity] of levels) {
+      const price = Number(rawPrice); const bucket = Number(((side === 'ask' ? Math.ceil(price / size) : Math.floor(price / size)) * size).toFixed(size < 1 ? 1 : 0));
+      grouped.set(bucket, (grouped.get(bucket) || 0) + Number(rawQuantity));
+    }
+    const sorted = [...grouped].sort(([left], [right]) => side === 'ask' ? left - right : right - left);
+    if (!sorted.length) return [];
+    const first = sorted[0][0];
+    return Array.from({ length: 6 }, (_, index) => {
+      const price = Number((first + (side === 'ask' ? index : -index) * size).toFixed(size < 1 ? 1 : 0));
+      return [String(price), String(grouped.get(price) || 0)];
+    });
+  };
+  const displayAsks = groupDepth(market?.depth.asks || [], 'ask');
+  const displayBids = groupDepth(market?.depth.bids || [], 'bid');
+  const depthMax = Math.max(...displayAsks.map(([, quantity]) => Number(quantity)), ...displayBids.map(([, quantity]) => Number(quantity)), 1);
+  const askTotal = displayAsks.reduce((sum, [, quantity]) => sum + Number(quantity), 0);
+  const bidTotal = displayBids.reduce((sum, [, quantity]) => sum + Number(quantity), 0);
+  const bidPercent = bidTotal + askTotal ? bidTotal / (bidTotal + askTotal) * 100 : 50;
+  const bookPrice = (value: string | number) => Number(value).toLocaleString(undefined, { minimumFractionDigits: 1, maximumFractionDigits: 1 });
   const first = candles[0]?.open || last; const change = first ? (last - first) / first * 100 : 0;
   const selected = selectedIndex === null ? null : candles[selectedIndex];
   const axisValues = [0, 1, 2, 3, 4].map((line) => high - line * range / 4);
@@ -216,7 +262,7 @@ function CoinMWorkspace() {
   return <div className="coinm-page">
     <div className="coinm-products"><button>U本位</button><button className="active">币本位</button><button>期权</button><button>涨跌</button><button>聪明钱</button></div>
     <div className="coinm-heading"><div><strong>BTCUSD CM</strong><span>永续</span><b className={change >= 0 ? 'positive' : 'negative'}>{change >= 0 ? '+' : ''}{change.toFixed(2)}%</b></div><small>资金费率 {(Number(market?.premium.lastFundingRate || 0) * 100).toFixed(6)}%</small></div>
-    <div className="coinm-trade-grid"><section className="coinm-order"><div className="coinm-order-tabs"><button className="active">开仓</button><button>平仓</button></div><div className="coinm-order-options"><button>全仓</button><button>20x</button></div><button className="coinm-select">市价单</button><label>数量 <span>张</span><input inputMode="decimal" placeholder="0" /></label><div className="coinm-order-buttons"><button disabled>开多 · 看涨</button><button disabled>开空 · 看跌</button></div></section><section className="coinm-book"><header><span>价格 (USD)</span><span>数量 (张)</span></header>{market?.depth.asks.slice().reverse().slice(0, 5).map(([price, quantity]) => <div className="ask" key={price}><i style={{ width: `${Math.min(100, Number(quantity) / depthMax * 100)}%` }} /><span>{Number(price).toLocaleString()}</span><span>{Number(quantity).toLocaleString()}</span></div>)}<strong className={tickDirection === 'up' ? 'tick-up' : tickDirection === 'down' ? 'tick-down' : ''}>{last.toLocaleString()}</strong>{market?.depth.bids.slice(0, 5).map(([price, quantity]) => <div className="bid" key={price}><i style={{ width: `${Math.min(100, Number(quantity) / depthMax * 100)}%` }} /><span>{Number(price).toLocaleString()}</span><span>{Number(quantity).toLocaleString()}</span></div>)}</section></div>
+    <div className="coinm-trade-grid"><section className="coinm-order"><div className="coinm-order-tabs"><button className="active">开仓</button><button>平仓</button></div><div className="coinm-order-options"><button>全仓</button><button>20x</button></div><button className="coinm-select">市价单</button><label>数量 <span>张</span><input inputMode="decimal" placeholder="0" /></label><div className="coinm-order-buttons"><button disabled>开多 · 看涨</button><button disabled>开空 · 看跌</button></div></section><section className="coinm-book"><header><span>价格 (USD)</span><span>数量 (张)</span></header>{displayAsks.slice(0, 6).reverse().map(([price, quantity]) => <div className="ask" key={price}><i style={{ width: `${Math.min(100, Number(quantity) / depthMax * 100)}%` }} /><span>{bookPrice(price)}</span><span>{Number(quantity).toLocaleString()}</span></div>)}<strong className={tickDirection === 'up' ? 'tick-up' : tickDirection === 'down' ? 'tick-down' : ''}>{bookPrice(last)}</strong>{displayBids.slice(0, 6).map(([price, quantity]) => <div className="bid" key={price}><i style={{ width: `${Math.min(100, Number(quantity) / depthMax * 100)}%` }} /><span>{bookPrice(price)}</span><span>{Number(quantity).toLocaleString()}</span></div>)}<div className="depth-ratio"><span>{bidPercent.toFixed(2)}%</span><i><b style={{ width: `${bidPercent}%` }} /></i><span>{(100 - bidPercent).toFixed(2)}%</span></div><label className="depth-grouping"><select value={priceGrouping} onChange={(event) => setPriceGrouping(event.target.value)}>{['0.1', '1', '10', '50', '100', '1000'].map((value) => <option key={value} value={value}>{value}</option>)}</select></label></section></div>
     <div className="coinm-position-tabs"><b>持有仓位 (0)</b><span>当前委托 (0)</span><span>交易机器人</span></div>
     <section className="coinm-chart"><div className="coinm-intervals">{[['1m', '分时'], ['3m', '3分'], ['5m', '5分'], ['15m', '15分'], ['30m', '30分'], ['1h', '1小时']].map(([id, label]) => <button className={interval === id ? 'active' : ''} key={id} onClick={() => { setInterval(id); setSelectedIndex(null); }}>{label}</button>)}</div><div className="coinm-ma-legend"><span>MA(7): {ma7.at(-1)?.toLocaleString(undefined, { maximumFractionDigits: 1 }) || '-'}</span><span>MA(25): {ma25.at(-1)?.toLocaleString(undefined, { maximumFractionDigits: 1 }) || '-'}</span><span>MA(99): {ma99.at(-1)?.toLocaleString(undefined, { maximumFractionDigits: 1 }) || '-'}</span></div>{candles.length ? <div className="coinm-chart-canvas"><svg viewBox={`0 0 ${width} ${height}`} role="img" aria-label="BTCUSD coin-m candlestick chart" onClick={selectCandle}><g className="chart-grid">{[0, 1, 2, 3, 4].map((line) => <line key={line} x1={pad} x2={width - pad} y1={pad + line * (height - pad * 2) / 4} y2={pad + line * (height - pad * 2) / 4} />)}</g>{candles.map((item, index) => { const x = pad + index * step + step / 2; const rising = item.close >= item.open; return <g className={rising ? 'candle-up' : 'candle-down'} key={item.time}><line x1={x} x2={x} y1={y(item.high)} y2={y(item.low)} /><rect x={x - Math.max(1, step * .28)} y={Math.min(y(item.open), y(item.close))} width={Math.max(2, step * .56)} height={Math.max(1, Math.abs(y(item.open) - y(item.close)))} /></g>; })}<path className="ma ma7" d={maPath(ma7)} /><path className="ma ma25" d={maPath(ma25)} /><path className="ma ma99" d={maPath(ma99)} />{selected && <g className="chart-crosshair"><line x1={pad + selectedIndex! * step + step / 2} x2={pad + selectedIndex! * step + step / 2} y1={pad} y2={height - pad} /><line x1={pad} x2={width - pad} y1={y(selected.close)} y2={y(selected.close)} /><circle cx={pad + selectedIndex! * step + step / 2} cy={y(selected.close)} r="4" /></g>}</svg><div className="coinm-axis">{axisValues.map((value, index) => <span key={index} style={{ top: `${index * 25}%` }}>{value.toLocaleString(undefined, { maximumFractionDigits: 1 })}</span>)}</div>{selected && <div className="coinm-tooltip"><b>{new Date(selected.time).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })}</b><span>开 <em>{selected.open.toLocaleString()}</em></span><span>高 <em>{selected.high.toLocaleString()}</em></span><span>低 <em>{selected.low.toLocaleString()}</em></span><span>收 <em>{selected.close.toLocaleString()}</em></span><span>涨跌 <em className={selected.close >= selected.open ? 'positive' : 'negative'}>{(selected.close - selected.open).toFixed(1)}</em></span><span>涨跌幅 <em>{((selected.close - selected.open) / selected.open * 100).toFixed(2)}%</em></span><span>振幅 <em>{((selected.high - selected.low) / selected.open * 100).toFixed(2)}%</em></span><span>量 <em>{selected.volume.toLocaleString()}</em></span><span>额 <em>{selected.quoteVolume.toLocaleString()}</em></span></div>}</div> : <div className="chart-empty">{error || '正在读取币本位 K 线…'}</div>}<div className="coinm-chart-price">最新 {last ? last.toLocaleString() : '-'}</div></section>
   </div>;
@@ -295,9 +341,19 @@ export function App() {
   });
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [input, setInput] = useState('');
+  useLayoutEffect(() => {
+    const textarea = document.querySelector<HTMLTextAreaElement>('.composer textarea');
+    if (!textarea) return;
+    textarea.style.height = 'auto';
+    const height = Math.min(textarea.scrollHeight, 144);
+    textarea.style.height = `${height}px`;
+    textarea.style.overflowY = textarea.scrollHeight > 144 ? 'auto' : 'hidden';
+  }, [input]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [news, setNews] = useState<NewsItem[]>([]);
+  const [newsCursor, setNewsCursor] = useState<string | null>(null);
+  const [newsLoading, setNewsLoading] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [leftWidth, setLeftWidth] = useState(() => Math.min(window.innerWidth * .2, Math.max(LEFT_SIDEBAR_MIN, Number(window.localStorage.getItem('crypto-agent-left-width')) || window.innerWidth * .14)));
   const [rightWidth, setRightWidth] = useState(() => Math.min(window.innerWidth * .6, Math.max(window.innerWidth * .3, Number(window.localStorage.getItem('crypto-agent-right-width')) || window.innerWidth * .36)));
@@ -314,6 +370,15 @@ export function App() {
       if (next.model) { setModelId((current) => next.model?.models.includes(current) ? current : next.model!.defaultModel); setReasoningEffort((current) => next.model?.reasoning.includes(current) ? current : next.model!.defaultReasoning); }
     } catch (caught) { setError(caught instanceof Error ? caught.message : 'Unable to connect.'); }
   }
+  async function loadMoreNews() {
+    if (!newsCursor || newsLoading) return;
+    setNewsLoading(true);
+    try {
+      const result = await api<{ items: NewsItem[]; nextCursor: string | null }>(`/news?limit=30&before=${encodeURIComponent(newsCursor)}`);
+      setNews((current) => [...current, ...result.items.filter((item) => !current.some((existing) => existing.id === item.id))]);
+      setNewsCursor(result.nextCursor);
+    } finally { setNewsLoading(false); }
+  }
   useEffect(() => { void refresh(); }, []);
   useEffect(() => {
     let active = true;
@@ -321,21 +386,29 @@ export function App() {
       if (window.cryptoAgent) window.cryptoAgent.notify(title, body);
       else if (typeof Notification !== 'undefined' && Notification.permission === 'granted') new Notification(title, { body });
     };
-    void api<{ items: NewsItem[] }>('/news?mode=startup').then((result) => {
+    void api<{ items: NewsItem[]; nextCursor: string | null }>('/news?mode=startup&limit=30').then((result) => {
       if (!active) return;
       setNews(result.items);
+      setNewsCursor(result.nextCursor);
       if (result.items.length) notify('CryptoAgent 今日新闻', `${result.items.length} 条重要新闻已准备好`);
     }).catch(() => {});
     const stream = new EventSource('/api/news/stream');
-    const add = (event: MessageEvent<string>) => { const payload = JSON.parse(event.data) as { item?: NewsItem; items?: NewsItem[] }; const incoming = payload.item ? [payload.item] : payload.items || []; if (!incoming.length) return; setNews((current) => [...incoming, ...current.filter((item) => !incoming.some((next) => next.id === item.id))].slice(0, 30)); };
+    const add = (event: MessageEvent<string>) => { const payload = JSON.parse(event.data) as { item?: NewsItem; items?: NewsItem[] }; const incoming = payload.item ? [payload.item] : payload.items || []; if (!incoming.length) return; setNews((current) => [...incoming, ...current.filter((item) => !incoming.some((next) => next.id === item.id))]); };
+    stream.addEventListener('item', add);
     stream.addEventListener('breaking', add);
     stream.addEventListener('digest', (event) => { add(event); const payload = JSON.parse(event.data) as { items?: NewsItem[] }; if (payload.items?.length) notify('CryptoAgent 两小时新闻', `${payload.items.length} 条新新闻`); });
     stream.addEventListener('ready', add);
     stream.addEventListener('emergency', (event) => { const next = JSON.parse(event.data) as EmergencyState; notify('CryptoAgent 紧急授权待确认', next.pending?.title || '检测到爆炸性新闻'); });
     const onBreaking = (event: MessageEvent<string>) => { const item = (JSON.parse(event.data) as { item: NewsItem }).item; notify('CryptoAgent 爆炸性新闻', item.title); };
     stream.addEventListener('breaking', onBreaking);
+    const latestTimer = window.setInterval(() => {
+      void api<{ items: NewsItem[] }>('/news?limit=30').then((result) => {
+        if (!active || !result.items.length) return;
+        setNews((current) => [...result.items, ...current.filter((item) => !result.items.some((next) => next.id === item.id))]);
+      }).catch(() => {});
+    }, 15_000);
     if (!window.cryptoAgent && typeof Notification !== 'undefined' && Notification.permission === 'default') void Notification.requestPermission().catch(() => {});
-    return () => { active = false; stream.close(); };
+    return () => { active = false; window.clearInterval(latestTimer); stream.close(); };
   }, []);
   useEffect(() => { document.documentElement.dataset.theme = theme; window.localStorage.setItem('crypto-agent-theme', theme); }, [theme]);
   useEffect(() => { window.localStorage.setItem('crypto-agent-left-width', String(leftWidth)); }, [leftWidth]);
@@ -406,7 +479,10 @@ export function App() {
     <aside className="portfolio">
       <header><CircleDollarSign size={23} /><div><strong>CryptoAgent</strong></div><button className="sidebar-toggle left-panel-toggle" title="隐藏左侧栏" aria-label="隐藏左侧栏" onClick={() => setLeftCollapsed(true)}><PanelLeftClose size={17} /></button></header>
       <button className="new-chat" onClick={newChat}><Plus size={17} />New chat</button>
-      <nav className="recents" aria-label="最近对话"><div className="section-title"><span>Recents</span></div>{sessions.length ? sessions.map((session) => <button className={activeSessionId === session.id ? 'active' : ''} key={session.id} onClick={() => openSession(session)}><MessageSquare size={14} /><span>{session.title}</span></button>) : <p>暂无最近对话</p>}</nav>
+      <div className="sidebar-lists">
+      <nav className="recents" aria-label="最近对话"><div className="section-title"><span>Recents</span></div><div className="recents-list">{sessions.length ? sessions.map((session) => <button className={activeSessionId === session.id ? 'active' : ''} key={session.id} onClick={() => openSession(session)}><MessageSquare size={14} /><span>{session.title}</span></button>) : <p>暂无最近对话</p>}</div></nav>
+      <NewsPanel items={news} onLoadMore={() => void loadMoreNews()} loading={newsLoading} hasMore={Boolean(newsCursor)} />
+      </div>
       <button className="settings-entry" onClick={() => setSettingsOpen(true)}><Settings2 size={16} />设置与外观</button>
       <button className="resize-handle left-resize" title="调整左侧栏宽度" aria-label="调整左侧栏宽度" onPointerDown={(event) => { event.currentTarget.setPointerCapture(event.pointerId); setResizing('left'); }} />
     </aside>

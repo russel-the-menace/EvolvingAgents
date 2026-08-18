@@ -52,3 +52,23 @@ test('new feed items are handed to the learning hook once', async () => {
   await service.poll();
   assert.equal(learned, 1);
 });
+
+test('archives every fresh item and emits it to live subscribers', async () => {
+  const requests = [];
+  const service = new (await import('../src/news.mjs')).NewsService({
+    feedUrls: ['https://publisher.test/feed.xml'],
+    archiveUrl: 'https://archive.test',
+    archiveKey: 'secret',
+    fetchImpl: async (url, options = {}) => {
+      requests.push({ url: String(url), options });
+      if (String(url).includes('/v1/news/archive')) return new Response('{"stored":1}', { headers: { 'Content-Type': 'application/json' } });
+      return new Response('<rss><channel><item><title>Persistent report</title><link>https://publisher.test/a</link><pubDate>Tue, 18 Aug 2026 10:00:00 GMT</pubDate></item></channel></rss>');
+    },
+  });
+  const events = [];
+  service.subscribe((event) => events.push(event));
+  await service.poll();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.equal(events[0].type, 'item');
+  assert.equal(JSON.parse(requests.find((request) => request.url.includes('/v1/news/archive')).options.body).items[0].title, 'Persistent report');
+});
