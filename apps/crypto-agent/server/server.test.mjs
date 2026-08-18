@@ -51,3 +51,37 @@ test('an expiring server-side draft can only submit once', async () => {
     if (originalEnv.mode === undefined) delete process.env.BINANCE_ENV; else process.env.BINANCE_ENV = originalEnv.mode;
   }
 });
+
+test('market analysis sends chart context, history, and pasted images to the model gateway', async () => {
+  const originalFetch = globalThis.fetch;
+  const originalEnv = { base: process.env.GATEWAY_BASE_URL, key: process.env.GATEWAY_API_KEY, remoteNews: process.env.NEWS_REMOTE_ONLY };
+  process.env.GATEWAY_BASE_URL = 'https://gateway.example';
+  process.env.GATEWAY_API_KEY = 'gateway-key';
+  process.env.NEWS_REMOTE_ONLY = 'true';
+  let gatewayRequest;
+  globalThis.fetch = async (url, options = {}) => {
+    if (String(url).endsWith('/v1/chat/completions')) {
+      gatewayRequest = JSON.parse(options.body);
+      return new Response(JSON.stringify({ choices: [{ message: { content: '只读分析结果' } }] }), { status: 200 });
+    }
+    return new Response('{}', { status: 200 });
+  };
+  const { createCryptoServer } = await import(`./index.mjs?analysis=${Date.now()}`);
+  const server = createCryptoServer();
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const port = server.address().port;
+  try {
+    const result = await post(port, '/api/chat', { message: '分析这张图', history: [{ role: 'assistant', content: '前文' }], image: 'data:image/png;base64,aGVsbG8=', marketContext: { symbol: 'BTCUSD_PERP', interval: '5m', candles: [{ time: 1, open: 10, high: 12, low: 9, close: 11, volume: 2 }] } });
+    assert.equal(result.status, 200);
+    assert.equal(result.body.reply, '只读分析结果');
+    assert.match(gatewayRequest.messages[0].content, /BTCUSD_PERP/);
+    assert.equal(gatewayRequest.messages[1].content, '前文');
+    assert.equal(gatewayRequest.messages.at(-1).content[1].image_url.url, 'data:image/png;base64,aGVsbG8=');
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+    globalThis.fetch = originalFetch;
+    if (originalEnv.base === undefined) delete process.env.GATEWAY_BASE_URL; else process.env.GATEWAY_BASE_URL = originalEnv.base;
+    if (originalEnv.key === undefined) delete process.env.GATEWAY_API_KEY; else process.env.GATEWAY_API_KEY = originalEnv.key;
+    if (originalEnv.remoteNews === undefined) delete process.env.NEWS_REMOTE_ONLY; else process.env.NEWS_REMOTE_ONLY = originalEnv.remoteNews;
+  }
+});

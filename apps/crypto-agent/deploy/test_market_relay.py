@@ -1,4 +1,5 @@
 import unittest
+import tempfile
 
 from market_relay import Relay
 
@@ -18,6 +19,20 @@ class DepthSequenceTest(unittest.TestCase):
         self.assertEqual(relay.asks, {})
         self.assertEqual(relay.previous_update_id, 13)
         self.assertTrue(relay.depth_ready)
+
+    def test_records_compact_order_book_features(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            relay = Relay(f"{directory}/features.sqlite")
+            relay._init_feature_db()
+            relay.depth_ready = True
+            relay.bids = {"100": "3", "99": "2"}
+            relay.asks = {"101": "1", "102": "4"}
+            relay.price = 100.5
+
+            self.assertTrue(relay._record_feature(1_000_000))
+            summary = relay.feature_summary(1_000_000)
+            self.assertEqual(summary["samples"], 1)
+            self.assertAlmostEqual(summary["avgImbalance20"], 0)
 
 
 if __name__ == "__main__":

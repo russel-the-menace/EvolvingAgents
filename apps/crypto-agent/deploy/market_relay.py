@@ -11,6 +11,7 @@ import json
 import logging
 import os
 import queue
+import sqlite3
 import threading
 import time
 import urllib.parse
@@ -36,6 +37,7 @@ WS_URL = "wss://dstream.binance.com/stream?streams=" + "/".join(
     [*(f"{SYMBOL.lower()}@kline_{interval}" for interval in INTERVALS),
      f"{SYMBOL.lower()}@aggTrade", f"{SYMBOL.lower()}@depth@100ms", f"{SYMBOL.lower()}@markPrice@1s"]
 )
+FEATURE_DB = os.getenv("MARKET_FEATURE_DB_PATH", "/var/lib/custom-api-gateway/market-features.sqlite")
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 
@@ -52,7 +54,7 @@ def fetch_json(path: str, params: dict[str, str]) -> Any:
 
 
 class Relay:
-    def __init__(self) -> None:
+    def __init__(self, feature_db: str = ":memory:") -> None:
         self.lock = threading.RLock()
         self.klines: dict[str, list[list[Any]]] = {interval: [] for interval in INTERVALS}
         self.bids: dict[str, str] = {}
@@ -65,11 +67,62 @@ class Relay:
         self.depth_ready = False
         self.clients: set[queue.Queue[dict[str, Any]]] = set()
         self.route_lock = threading.Lock()
+        self.feature_db = feature_db
+        self.feature_samples = 0
 
     def start(self) -> None:
+        self._init_feature_db()
         threading.Thread(target=self._history_loop, daemon=True, name="market-history").start()
         threading.Thread(target=self._broadcast, daemon=True, name="market-broadcast").start()
         threading.Thread(target=self._socket_loop, daemon=True, name="market-websocket").start()
+        threading.Thread(target=self._feature_loop, daemon=True, name="market-features").start()
+
+    def _init_feature_db(self) -> None:
+        directory = os.path.dirname(self.feature_db)
+        if self.feature_db != ":memory:" and directory: os.makedirs(directory, exist_ok=True)
+        with sqlite3.connect(self.feature_db) as db:
+            if self.feature_db != ":memory:": db.execute("PRAGMA journal_mode=WAL")
+            db.execute("""CREATE TABLE IF NOT EXISTS order_book_features (
+                timestamp_ms INTEGER PRIMARY KEY, symbol TEXT NOT NULL, mid REAL NOT NULL, spread_bps REAL NOT NULL,
+                bid_depth_5 REAL NOT NULL, ask_depth_5 REAL NOT NULL, imbalance_5 REAL NOT NULL,
+                bid_depth_20 REAL NOT NULL, ask_depth_20 REAL NOT NULL, imbalance_20 REAL NOT NULL,
+                mark_price REAL NOT NULL, funding_rate REAL NOT NULL
+            )""")
+
+    def _feature_loop(self) -> None:
+        while True:
+            time.sleep(1)
+            if self.depth_ready: self._record_feature()
+
+    def _record_feature(self, timestamp_ms: int | None = None) -> bool:
+        with self.lock:
+            bids = sorted(self.bids.items(), key=lambda pair: float(pair[0]), reverse=True)[:20]
+            asks = sorted(self.asks.items(), key=lambda pair: float(pair[0]))[:20]
+            if not bids or not asks: return False
+            bid, ask = float(bids[0][0]), float(asks[0][0]); mid = (bid + ask) / 2
+            depth = lambda levels, count: sum(float(quantity) for _, quantity in levels[:count])
+            bid5, ask5, bid20, ask20 = depth(bids, 5), depth(asks, 5), depth(bids, 20), depth(asks, 20)
+            imbalance = lambda left, right: (left - right) / max(left + right, 1e-12)
+            row = (timestamp_ms or int(time.time() * 1000), SYMBOL, mid, (ask - bid) / mid * 10_000,
+                   bid5, ask5, imbalance(bid5, ask5), bid20, ask20, imbalance(bid20, ask20),
+                   self.price or mid, float(self.premium.get("lastFundingRate", 0) or 0))
+        with sqlite3.connect(self.feature_db) as db:
+            db.execute("INSERT OR REPLACE INTO order_book_features VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", row)
+            self.feature_samples += 1
+            if self.feature_samples % 60 == 0: db.execute("DELETE FROM order_book_features WHERE timestamp_ms < ?", (row[0] - 24 * 60 * 60 * 1000,))
+        return True
+
+    def feature_summary(self, now_ms: int | None = None) -> dict[str, Any] | None:
+        cutoff = (now_ms or int(time.time() * 1000)) - 24 * 60 * 60 * 1000
+        try:
+            with sqlite3.connect(self.feature_db) as db:
+                row = db.execute("""SELECT COUNT(*), AVG(spread_bps), AVG(imbalance_5), MIN(imbalance_5), MAX(imbalance_5),
+                                    AVG(imbalance_20), AVG(bid_depth_20), AVG(ask_depth_20), MIN(timestamp_ms), MAX(timestamp_ms)
+                                    FROM order_book_features WHERE timestamp_ms >= ?""", (cutoff,)).fetchone()
+            if not row or not row[0]: return None
+            return dict(zip(("samples", "avgSpreadBps", "avgImbalance5", "minImbalance5", "maxImbalance5", "avgImbalance20", "avgBidDepth20", "avgAskDepth20", "startTime", "endTime"), row))
+        except sqlite3.OperationalError:
+            return None
 
     def _history_loop(self) -> None:
         while not all(self.ready(interval) for interval in INTERVALS):
@@ -219,8 +272,10 @@ class Relay:
             asks = sorted(self.asks.items(), key=lambda pair: float(pair[0]))[:1000]
             premium = {**self.premium, "markPrice": str(self.price or self.premium.get("markPrice", "0"))}
             rows = self.klines.get(interval, [])
-            return {"symbol": SYMBOL, "interval": interval, "klines": list(rows if history else rows[-1:]),
-                    "depth": {"bids": bids, "asks": asks}, "premium": premium, "partial": not history}
+            snapshot = {"symbol": SYMBOL, "interval": interval, "klines": list(rows if history else rows[-1:]),
+                        "depth": {"bids": bids, "asks": asks}, "premium": premium, "partial": not history}
+        if history: snapshot["orderBook24h"] = self.feature_summary()
+        return snapshot
 
     def ready(self, interval: str) -> bool:
         with self.lock:
@@ -250,7 +305,7 @@ class Relay:
                         except queue.Empty: pass
 
 
-relay = Relay()
+relay = Relay(FEATURE_DB)
 
 
 class Handler(BaseHTTPRequestHandler):
