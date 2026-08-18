@@ -35,7 +35,7 @@ The chart loads 1-minute history over REST, then follows Binance's real-time `@t
 
 ## News collection and push policy
 
-News collection combines audited RSS/Atom URLs with the optional public `cryptocurrency.cv` aggregator (200+ crypto and financial publishers). Set `NEWS_RSS_URLS` for direct feeds, or set `NEWS_EXTERNAL_SOURCES=off` to disable the public connector. The service polls every `NEWS_POLL_MS` (five minutes by default), deduplicates by URL and title, and stores up to 500 items with their source and publication time.
+News collection combines audited RSS/Atom URLs with CEX announcement feeds and the optional public `cryptocurrency.cv` aggregator (200+ crypto and financial publishers). `NEWS_CEX_RSS_URLS` includes Kraken's official RSS plus RSSHub bridges for Binance, OKX, and Bybit; those bridges are best-effort because the exchanges do not publish stable documented announcement APIs. Set `NEWS_RSS_URLS` or `NEWS_CEX_RSS_URLS` to replace them. Set `NEWS_EXTERNAL_SOURCES=off` to disable the public aggregator. The service polls every `NEWS_POLL_MS` (five minutes by default), deduplicates by URL and title, and stores up to 500 items with their source and publication time.
 
 For X and additional OpenNews coverage, set `OPENNEWS_TOKEN` and a comma-separated `NEWS_SOCIAL_KEYWORDS` list. This uses the 6551 OpenTwitter/OpenNews APIs from the local research reference; it is opt-in because it requires a separate token and has quota/rate limits. The token is read only by the server and is never sent to Binance or the browser.
 

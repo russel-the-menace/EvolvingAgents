@@ -41,9 +41,15 @@ const defaultNewsFeeds = [
   'https://www.coindesk.com/arc/outboundfeeds/rss/',
   'https://cointelegraph.com/rss',
   'https://decrypt.co/feed',
-  'https://bitcoinmagazine.com/.rss/full/'
+  'https://bitcoinmagazine.com/.rss/full/',
+  'https://blog.kraken.com/feed'
 ];
-const feedUrls = (process.env.NEWS_RSS_URLS || defaultNewsFeeds.join(',')).split(',').map((item) => item.trim()).filter(Boolean);
+const defaultCexFeeds = [
+  'https://rsshub.app/binance/announcement',
+  'https://rsshub.app/okx/announcement',
+  'https://rsshub.app/bybit/announcement'
+];
+const feedUrls = [...(process.env.NEWS_RSS_URLS || defaultNewsFeeds.join(',')).split(','), ...(process.env.NEWS_CEX_RSS_URLS || defaultCexFeeds.join(',')).split(',')].map((item) => item.trim()).filter(Boolean);
 const apiSources = externalNewsEnabled ? [{ name: 'cryptocurrency.cv', url: process.env.CRYPTO_NEWS_URL || 'https://cryptocurrency.cv/api/news?limit=30' }] : [];
 if (process.env.OPENNEWS_TOKEN) {
   for (const keyword of socialKeywords) {
