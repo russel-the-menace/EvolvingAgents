@@ -31,7 +31,7 @@ For a resident macOS window, use `npm run desktop -- crypto-agent`. Closing the 
 
 To create a normal double-clickable Apple Silicon app/DMG, run `npm run dist:mac -- crypto-agent`. The output is `dist/CryptoAgent-0.1.0-arm64.dmg`. For a packaged app, place the ignored `.env` at `~/Library/Application Support/CryptoAgent/.env`; the app starts its local API itself and never bundles that file.
 
-The chart loads 1-minute history over REST, then follows Binance's real-time `@trade` WebSocket stream. Each trade updates the current candle immediately; the socket reconnects after disconnects.
+The Coin-M workspace uses the server-side market relay for history, candles, mark price, and the sequenced depth stream. The relay keeps one long-lived Binance public WebSocket connection through Mihomo, broadcasts server updates every 100 ms, and repairs the order book from a REST snapshot whenever a diff gap is detected. The local app applies the latest server packet every 300 ms and keeps a direct Binance WebSocket as a temporary fallback if the relay is unavailable; Binance API credentials are never used for public market data.
 
 ## News collection and push policy
 
@@ -48,6 +48,19 @@ ssh root@SERVER 'systemctl status custom-api-news.service --no-pager'
 ```
 
 The collector explicitly configures the proxy from `MIHOMO_PROXY` (default `http://127.0.0.1:7890`). A source returning HTTP 403 through that proxy is an upstream/WAF rejection, not a direct-connection fallback. Public RSSHub bridges are therefore best-effort and should eventually be replaced by a self-hosted RSSHub or documented exchange connector.
+
+### Server market relay
+
+The production server also runs [`deploy/market_relay.py`](deploy/market_relay.py). It owns the COIN-M `kline`, `aggTrade`, `markPrice`, and `depth@100ms` streams and serves a loopback SSE endpoint. The gateway exposes the authenticated public routes `/v1/market/coinm/snapshot` and `/v1/market/coinm/stream`; the desktop app connects to those routes through its local API. This avoids one Binance socket set per desktop and keeps the browser off the exchange route.
+
+Install the single WebSocket client dependency in the server venv and enable the service alongside the gateway:
+
+```bash
+mkdir -p /opt/custom-api-gateway/market_deps
+python3 -m pip install --target /opt/custom-api-gateway/market_deps -r market-relay-requirements.txt
+cp deploy/market_relay.py deploy/custom-api-market.service /opt/custom-api-gateway/
+systemctl enable --now custom-api-market.service
+```
 
 For X and additional OpenNews coverage, set `OPENNEWS_TOKEN` and a comma-separated `NEWS_SOCIAL_KEYWORDS` list. This uses the 6551 OpenTwitter/OpenNews APIs from the local research reference; it is opt-in because it requires a separate token and has quota/rate limits. The token is read only by the server and is never sent to Binance or the browser.
 

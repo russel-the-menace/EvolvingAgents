@@ -20,6 +20,8 @@ const socialKeywords = (process.env.NEWS_SOCIAL_KEYWORDS || '').split(',').map((
 const maxOrderUsdt = Number(process.env.MAX_ORDER_USDT || 100);
 const configured = Boolean(process.env.BINANCE_API_KEY && process.env.BINANCE_SECRET_KEY);
 const gatewayProvider = process.env.GATEWAY_PROVIDER || 'openai';
+const marketDataBase = (process.env.MARKET_DATA_BASE_URL || process.env.GATEWAY_BASE_URL || process.env.NEWS_ARCHIVE_BASE_URL || '').replace(/\/$/, '');
+const marketDataKey = process.env.MARKET_DATA_API_KEY || process.env.GATEWAY_API_KEY || process.env.NEWS_ARCHIVE_API_KEY || '';
 const modelOptions = ['gpt-5.6-luna', 'gpt-5.6-sol', 'gpt-5.6-terra'];
 const reasoningOptions = ['low', 'medium', 'high', 'xhigh', 'max'];
 const defaultModel = modelOptions.includes(process.env.GATEWAY_MODEL) ? process.env.GATEWAY_MODEL : 'gpt-5.6-luna';
@@ -124,6 +126,37 @@ async function coinMMarket(symbol, interval) {
     get('/dapi/v1/premiumIndex', { symbol }),
   ]);
   return { symbol, interval, klines, depth, premium: Array.isArray(premium) ? premium[0] : premium };
+}
+
+async function serverCoinMMarket(symbol, interval) {
+  if (!marketDataBase || !marketDataKey) return coinMMarket(symbol, interval);
+  try {
+    const response = await fetch(`${marketDataBase}/v1/market/coinm/snapshot?symbol=${encodeURIComponent(symbol)}&interval=${encodeURIComponent(interval)}`, { headers: { Authorization: `Bearer ${marketDataKey}` }, signal: AbortSignal.timeout(10_000) });
+    if (!response.ok) throw new Error(`market relay returned ${response.status}`);
+    return await response.json();
+  } catch (error) {
+    console.warn('market relay snapshot unavailable; using direct Binance fallback', error instanceof Error ? error.message : error);
+    return coinMMarket(symbol, interval);
+  }
+}
+
+async function pipeServerCoinMStream(request, response, interval) {
+  if (!marketDataBase || !marketDataKey) return false;
+  const controller = new AbortController();
+  const disconnect = () => controller.abort();
+  response.once('close', disconnect);
+  try {
+    const upstream = await fetch(`${marketDataBase}/v1/market/coinm/stream?symbol=BTCUSD_PERP&interval=${encodeURIComponent(interval)}`, { headers: { Authorization: `Bearer ${marketDataKey}` }, signal: controller.signal });
+    if (!upstream.ok || !upstream.body) return false;
+    response.writeHead(200, { 'Content-Type': 'text/event-stream; charset=utf-8', 'Cache-Control': 'no-cache', Connection: 'keep-alive' });
+    for await (const chunk of upstream.body) response.write(chunk);
+    response.end();
+    return true;
+  } catch {
+    if (!response.headersSent) return false;
+    response.end();
+    return true;
+  } finally { response.off('close', disconnect); }
 }
 
 async function createDraft(rawIntent) {
@@ -295,8 +328,14 @@ export function createCryptoServer() {
         const symbol = query.get('symbol')?.toUpperCase() || 'BTCUSD_PERP';
         const interval = query.get('interval') || '5m';
         if (symbol !== 'BTCUSD_PERP') return sendJson(response, 400, { error: 'Only BTCUSD_PERP is available in this first Coin-M view.' });
-        if (!['1m', '3m', '5m', '15m', '30m', '1h'].includes(interval)) return sendJson(response, 400, { error: 'Interval is not allowed.' });
-        return sendJson(response, 200, await coinMMarket(symbol, interval));
+        if (!['1m', '3m', '5m', '15m', '30m', '1h', '2h', '4h', '6h', '8h', '12h', '1d', '1w', '1M'].includes(interval)) return sendJson(response, 400, { error: 'Interval is not allowed.' });
+        return sendJson(response, 200, await serverCoinMMarket(symbol, interval));
+      }
+      if (request.method === 'GET' && request.url?.startsWith('/api/coinm-stream?')) {
+        const interval = new URL(request.url, 'http://localhost').searchParams.get('interval') || '5m';
+        if (!['1m', '3m', '5m', '15m', '30m', '1h', '2h', '4h', '6h', '8h', '12h', '1d', '1w', '1M'].includes(interval)) return sendJson(response, 400, { error: 'Interval is not allowed.' });
+        if (await pipeServerCoinMStream(request, response, interval)) return;
+        return sendJson(response, 503, { error: 'Server market relay unavailable.' });
       }
       if (request.method === 'POST' && request.url === '/api/chat') {
         if (!configured) return sendJson(response, 503, { error: 'Configure Binance credentials before preparing an order.' });

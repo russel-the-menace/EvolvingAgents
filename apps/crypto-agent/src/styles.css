@@ -218,6 +218,13 @@ button { cursor: pointer; }
 .asset-bottom-nav button.active { color: var(--ink); }
 .asset-bottom-nav button.active svg { color: #f0b90b; }
 .spin { animation: spin .8s linear infinite; }
+.news-list { scrollbar-width: none; }
+.news-list::-webkit-scrollbar, .coinm-intervals::-webkit-scrollbar { display: none; }
+.news-pull-indicator { display: flex; align-items: center; justify-content: center; gap: 5px; overflow: hidden; color: var(--muted); font-size: 10px; transition: height .22s ease, opacity .22s ease; }
+.coinm-intervals { scrollbar-width: none; cursor: grab; }
+.coinm-intervals:active { cursor: grabbing; }
+.coinm-chart > .coinm-intervals { display: none; }
+.coinm-full-intervals { border-bottom: 1px solid var(--border); padding: 7px 0; }
 @keyframes spin { to { transform: rotate(360deg); } }
 @keyframes pulse { 0%,100% { opacity: .3; } 50% { opacity: 1; } }
 @media (max-width: 1100px) { .terminal-shell { grid-template-columns: var(--left-width, 14vw) minmax(360px, 1fr) var(--right-width, 36vw); } }

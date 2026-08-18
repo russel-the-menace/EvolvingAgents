@@ -18,7 +18,7 @@ type FuturesPosition = { symbol: string; positionAmt: string; entryPrice: string
 type MarginAccount = { marginLevel?: string; totalAssetOfBtc?: string; totalLiabilityOfBtc?: string; userAssets?: Array<{ asset: string; borrowed: string; interest: string; free: string }> };
 type AssetSnapshot = { configured: boolean; spot: { balances?: Balance[] } | null; funding: Array<{ asset: string; free: string; locked: string; freeze?: string; withdrawing?: string }> | null; earn: { rows?: Array<{ asset: string; totalAmount?: string; holdingAmount?: string; cumulativeTotalRewards?: string; latestAnnualPercentageRate?: string; productName?: string; productId?: string }> } | null; futures: { totalWalletBalance?: string; totalUnrealizedProfit?: string; availableBalance?: string; assets?: Array<{ asset: string; walletBalance: string; unrealizedProfit: string; availableBalance: string }>; positions?: Array<{ symbol: string; positionAmt: string; unrealizedProfit: string }> } | null; wallets: Array<{ walletName: string; balance: string; activate: boolean }> | null; errors: string[] };
 type AssetTab = 'overview' | 'earn' | 'spot' | 'funding' | 'futures';
-type CoinMMarket = { symbol: string; interval: string; klines: Array<Array<string | number>>; depth: { bids: string[][]; asks: string[][] }; premium: { markPrice: string; indexPrice: string; lastFundingRate?: string; nextFundingTime?: number } };
+type CoinMMarket = { symbol: string; interval: string; klines: Array<Array<string | number>>; depth: { bids: string[][]; asks: string[][] }; premium: { markPrice: string; indexPrice: string; lastFundingRate?: string; nextFundingTime?: number }; partial?: boolean };
 const LEFT_SIDEBAR_MIN = 160;
 
 declare global { interface Window { cryptoAgent?: { notify: (title: string, body: string) => void } } }
@@ -44,9 +44,10 @@ function recentNewsWelcome(items: NewsItem[]) {
 }
 
 function NewsPanel({ items, onLoadMore, loading, hasMore }: { items: NewsItem[]; onLoadMore: () => void; loading: boolean; hasMore: boolean }) {
-  const list = useRef<HTMLDivElement>(null); const pullStart = useRef<number | null>(null); const known = useRef<Set<string> | null>(null);
+  const list = useRef<HTMLDivElement>(null); const pullStart = useRef<number | null>(null); const known = useRef<Set<string> | null>(null); const [pullDistance, setPullDistance] = useState(0); const pullThreshold = 44;
   useEffect(() => { if (!known.current) known.current = new Set(items.map((item) => item.id)); else for (const item of items) known.current.add(item.id); }, [items]);
-  return <section className="news-panel" aria-label="市场新闻"><div className="section-title"><span>News</span></div><div className="news-list" ref={list} onPointerDown={(event) => { pullStart.current = list.current?.scrollTop === 0 ? event.clientY : null; }} onPointerUp={(event) => { if (pullStart.current !== null && event.clientY - pullStart.current > 44 && hasMore && !loading) onLoadMore(); pullStart.current = null; }}>{items.length ? items.map((item) => <article className={`news-item${item.urgency === 'breaking' ? ' breaking' : ''}${known.current && !known.current.has(item.id) ? ' entering' : ''}`} key={item.id}><div><span>{item.source}</span><time>{new Date(item.publishedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</time></div><a href={item.url} target="_blank" rel="noreferrer">{item.title}</a></article>) : <p className="news-empty">新闻正在同步</p>}</div></section>;
+  const finishPull = (clientY: number) => { const distance = pullStart.current === null ? 0 : clientY - pullStart.current; if (distance >= pullThreshold && hasMore && !loading) onLoadMore(); pullStart.current = null; setPullDistance(0); };
+  return <section className="news-panel" aria-label="市场新闻"><div className="section-title"><span>News</span></div><div className="news-list" ref={list} onPointerDown={(event) => { if (list.current?.scrollTop === 0 && !loading) { pullStart.current = event.clientY; event.currentTarget.setPointerCapture(event.pointerId); } }} onPointerMove={(event) => { if (pullStart.current !== null) setPullDistance(Math.min(76, Math.max(0, event.clientY - pullStart.current))); }} onPointerUp={(event) => { finishPull(event.clientY); if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId); }} onPointerCancel={() => { pullStart.current = null; setPullDistance(0); }}><div className={`news-pull-indicator${loading ? ' loading' : ''}`} style={{ height: loading ? 28 : pullDistance, opacity: loading || pullDistance > 0 ? 1 : 0 }}>{loading ? <><RefreshCw size={13} className="spin" />加载中</> : pullDistance >= pullThreshold ? '释放加载' : '下拉加载'}</div>{items.length ? items.map((item) => <article className={`news-item${item.urgency === 'breaking' ? ' breaking' : ''}${known.current && !known.current.has(item.id) ? ' entering' : ''}`} key={item.id}><div><span>{item.source}</span><time>{new Date(item.publishedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</time></div><a href={item.url} target="_blank" rel="noreferrer">{item.title}</a></article>) : <p className="news-empty">新闻正在同步</p>}</div></section>;
 }
 
 function EmergencyPanel({ state, onChange }: { state: EmergencyState; onChange: (next: EmergencyState) => void }) {
@@ -158,6 +159,7 @@ function CoinMWorkspace() {
   const previousPrice = useRef(0);
   const pendingPrice = useRef<number | null>(null);
   const pendingDepth = useRef<{ bids: string[][]; asks: string[][] } | null>(null);
+  const pendingRelay = useRef<CoinMMarket | null>(null);
   const orderBook = useRef({ bids: new Map<string, string>(), asks: new Map<string, string>() });
   useEffect(() => {
     const dismiss = (event: PointerEvent) => { if (!(event.target as Element).closest?.('.coinm-chart-canvas svg')) setSelectedIndex(null); };
@@ -166,46 +168,27 @@ function CoinMWorkspace() {
   }, []);
   useEffect(() => {
     let active = true;
-    const load = () => api<CoinMMarket>(`/coinm-market?symbol=BTCUSD_PERP&interval=${interval}`).then((result) => { if (active) { orderBook.current = { bids: new Map(result.depth.bids.map(([price, quantity]) => [price, quantity] as const)), asks: new Map(result.depth.asks.map(([price, quantity]) => [price, quantity] as const)) }; setMarket(result); setError(''); } }).catch((caught) => { if (active) setError(caught instanceof Error ? caught.message : '币本位行情不可用'); });
+    const sourceInterval = interval === 'time' ? '1m' : interval;
+    const load = () => api<CoinMMarket>(`/coinm-market?symbol=BTCUSD_PERP&interval=${sourceInterval}`).then((result) => { if (active) { orderBook.current = { bids: new Map(result.depth.bids.map(([price, quantity]) => [price, quantity] as const)), asks: new Map(result.depth.asks.map(([price, quantity]) => [price, quantity] as const)) }; setMarket(result); setError(''); } }).catch((caught) => { if (active) setError(caught instanceof Error ? caught.message : '币本位行情不可用'); });
     void load();
     const timer = window.setInterval(load, 60_000);
-    const stream = new WebSocket(`wss://dstream.binance.com/ws/btcusd_perp@kline_${interval}`);
-    stream.onmessage = (event) => {
-      let payload;
-      try { payload = JSON.parse(event.data); } catch { return; }
-      const item = payload.k;
-      if (!active || !item) return;
-      const next = [item.t, item.o, item.h, item.l, item.c, item.v, item.T, item.q];
-      setMarket((current) => {
-        if (!current) return current;
-        const klines = [...current.klines];
-        const last = klines.at(-1);
-        if (Number(last?.[0]) === Number(item.t)) klines[klines.length - 1] = next;
-        else klines.push(next);
-        return { ...current, klines: klines.slice(-240) };
-      });
+    let fallbackStarted = false;
+    let directSockets: WebSocket[] = [];
+    const connectDirect = () => {
+      if (fallbackStarted || !active) return;
+      fallbackStarted = true;
+      const stream = new WebSocket(`wss://dstream.binance.com/ws/btcusd_perp@kline_${sourceInterval}`);
+      stream.onmessage = (event) => { let payload; try { payload = JSON.parse(event.data); } catch { return; } const item = payload.k; if (!active || !item) return; const next = [item.t, item.o, item.h, item.l, item.c, item.v, item.T, item.q]; setMarket((current) => { if (!current) return current; const klines = [...current.klines]; if (Number(klines.at(-1)?.[0]) === Number(item.t)) klines[klines.length - 1] = next; else klines.push(next); return { ...current, klines: klines.slice(-240) }; }); };
+      const tradeStream = new WebSocket('wss://dstream.binance.com/ws/btcusd_perp@aggTrade');
+      tradeStream.onmessage = (event) => { let payload; try { payload = JSON.parse(event.data); } catch { return; } const price = Number(payload?.p); if (active && Number.isFinite(price)) pendingPrice.current = price; };
+      const depthStream = new WebSocket('wss://dstream.binance.com/ws/btcusd_perp@depth@100ms');
+      depthStream.onmessage = (event) => { let payload; try { payload = JSON.parse(event.data); } catch { return; } if (!active || !payload?.b || !payload?.a) return; for (const [price, quantity] of payload.b as string[][]) Number(quantity) ? orderBook.current.bids.set(price, quantity) : orderBook.current.bids.delete(price); for (const [price, quantity] of payload.a as string[][]) Number(quantity) ? orderBook.current.asks.set(price, quantity) : orderBook.current.asks.delete(price); pendingDepth.current = { bids: [...orderBook.current.bids].sort(([left], [right]) => Number(right) - Number(left)).slice(0, 1000), asks: [...orderBook.current.asks].sort(([left], [right]) => Number(left) - Number(right)).slice(0, 1000) }; };
+      directSockets = [stream, tradeStream, depthStream];
+      for (const socket of directSockets) socket.onerror = () => { if (active) setError('实时行情暂时中断'); };
     };
-    stream.onerror = () => { if (active) setError('实时连接暂时中断，正在使用分钟级行情兜底'); };
-    const tradeStream = new WebSocket('wss://dstream.binance.com/ws/btcusd_perp@aggTrade');
-    tradeStream.onmessage = (event) => {
-      let payload;
-      try { payload = JSON.parse(event.data); } catch { return; }
-      const price = Number(payload?.p);
-      if (!active || !Number.isFinite(price)) return;
-      pendingPrice.current = price;
-    };
-    const depthStream = new WebSocket('wss://dstream.binance.com/ws/btcusd_perp@depth@100ms');
-    depthStream.onmessage = (event) => {
-      let payload;
-      try { payload = JSON.parse(event.data); } catch { return; }
-      if (!active || !payload?.b || !payload?.a) return;
-      for (const [price, quantity] of payload.b as string[][]) Number(quantity) ? orderBook.current.bids.set(price, quantity) : orderBook.current.bids.delete(price);
-      for (const [price, quantity] of payload.a as string[][]) Number(quantity) ? orderBook.current.asks.set(price, quantity) : orderBook.current.asks.delete(price);
-      pendingDepth.current = {
-        bids: [...orderBook.current.bids].sort(([left], [right]) => Number(right) - Number(left)).slice(0, 1000),
-        asks: [...orderBook.current.asks].sort(([left], [right]) => Number(left) - Number(right)).slice(0, 1000),
-      };
-    };
+    const serverStream = new EventSource(`/api/coinm-stream?interval=${sourceInterval}`);
+    serverStream.addEventListener('market', (event) => { try { pendingRelay.current = JSON.parse((event as MessageEvent).data) as CoinMMarket; } catch { /* ignore malformed relay events */ } });
+    serverStream.onerror = () => { serverStream.close(); connectDirect(); if (active) setError('服务端行情暂时中断，已切换直连兜底'); };
     const bookTimer = window.setInterval(() => {
       const price = pendingPrice.current; const depth = pendingDepth.current;
       if (price === null && !depth) return;
@@ -216,7 +199,19 @@ function CoinMWorkspace() {
       setMarket((current) => current ? { ...current, ...(depth ? { depth } : {}), ...(price !== null ? { premium: { ...current.premium, markPrice: String(price) } } : {}) } : current);
       pendingPrice.current = null; pendingDepth.current = null;
     }, 400);
-    return () => { active = false; window.clearInterval(timer); window.clearInterval(bookTimer); stream.close(); tradeStream.close(); depthStream.close(); };
+    const relayTimer = window.setInterval(() => {
+      const next = pendingRelay.current;
+      if (!next || !active) return;
+      pendingRelay.current = null;
+      setMarket((current) => {
+        if (!next.partial || !current || !next.klines[0]) return next;
+        const klines = [...current.klines];
+        if (Number(klines.at(-1)?.[0]) === Number(next.klines[0][0])) klines[klines.length - 1] = next.klines[0];
+        else klines.push(next.klines[0]);
+        return { ...next, klines: klines.slice(-240) };
+      });
+    }, 300);
+    return () => { active = false; window.clearInterval(timer); window.clearInterval(bookTimer); window.clearInterval(relayTimer); serverStream.close(); directSockets.forEach((socket) => socket.close()); };
   }, [interval]);
   const allCandles = (market?.klines || []).map((item) => ({ time: Number(item[0]), open: Number(item[1]), high: Number(item[2]), low: Number(item[3]), close: Number(item[4]), volume: Number(item[5]), quoteVolume: Number(item[7]) }));
   const candles = allCandles.slice(-120);
@@ -264,6 +259,7 @@ function CoinMWorkspace() {
     <div className="coinm-heading"><div><strong>BTCUSD CM</strong><span>永续</span><b className={change >= 0 ? 'positive' : 'negative'}>{change >= 0 ? '+' : ''}{change.toFixed(2)}%</b></div><small>资金费率 {(Number(market?.premium.lastFundingRate || 0) * 100).toFixed(6)}%</small></div>
     <div className="coinm-trade-grid"><section className="coinm-order"><div className="coinm-order-tabs"><button className="active">开仓</button><button>平仓</button></div><div className="coinm-order-options"><button>全仓</button><button>20x</button></div><button className="coinm-select">市价单</button><label>数量 <span>张</span><input inputMode="decimal" placeholder="0" /></label><div className="coinm-order-buttons"><button disabled>开多 · 看涨</button><button disabled>开空 · 看跌</button></div></section><section className="coinm-book"><header><span>价格 (USD)</span><span>数量 (张)</span></header>{displayAsks.slice(0, 6).reverse().map(([price, quantity]) => <div className="ask" key={price}><i style={{ width: `${Math.min(100, Number(quantity) / depthMax * 100)}%` }} /><span>{bookPrice(price)}</span><span>{Number(quantity).toLocaleString()}</span></div>)}<strong className={tickDirection === 'up' ? 'tick-up' : tickDirection === 'down' ? 'tick-down' : ''}>{bookPrice(last)}</strong>{displayBids.slice(0, 6).map(([price, quantity]) => <div className="bid" key={price}><i style={{ width: `${Math.min(100, Number(quantity) / depthMax * 100)}%` }} /><span>{bookPrice(price)}</span><span>{Number(quantity).toLocaleString()}</span></div>)}<div className="depth-ratio"><span>{bidPercent.toFixed(2)}%</span><i><b style={{ width: `${bidPercent}%` }} /></i><span>{(100 - bidPercent).toFixed(2)}%</span></div><label className="depth-grouping"><select value={priceGrouping} onChange={(event) => setPriceGrouping(event.target.value)}>{['0.1', '1', '10', '50', '100', '1000'].map((value) => <option key={value} value={value}>{value}</option>)}</select></label></section></div>
     <div className="coinm-position-tabs"><b>持有仓位 (0)</b><span>当前委托 (0)</span><span>交易机器人</span></div>
+    <div className="coinm-intervals coinm-full-intervals">{[['time', '分时'], ['1m', '1分'], ['3m', '3分'], ['5m', '5分'], ['15m', '15分'], ['30m', '30分'], ['1h', '1小时'], ['2h', '2小时'], ['4h', '4小时'], ['6h', '6小时'], ['8h', '8小时'], ['12h', '12小时'], ['1d', '1天'], ['1w', '1周'], ['1M', '1月']].map(([id, label]) => <button className={interval === id ? 'active' : ''} key={id} onClick={() => { setInterval(id); setSelectedIndex(null); }}>{label}</button>)}</div>
     <section className="coinm-chart"><div className="coinm-intervals">{[['1m', '分时'], ['3m', '3分'], ['5m', '5分'], ['15m', '15分'], ['30m', '30分'], ['1h', '1小时']].map(([id, label]) => <button className={interval === id ? 'active' : ''} key={id} onClick={() => { setInterval(id); setSelectedIndex(null); }}>{label}</button>)}</div><div className="coinm-ma-legend"><span>MA(7): {ma7.at(-1)?.toLocaleString(undefined, { maximumFractionDigits: 1 }) || '-'}</span><span>MA(25): {ma25.at(-1)?.toLocaleString(undefined, { maximumFractionDigits: 1 }) || '-'}</span><span>MA(99): {ma99.at(-1)?.toLocaleString(undefined, { maximumFractionDigits: 1 }) || '-'}</span></div>{candles.length ? <div className="coinm-chart-canvas"><svg viewBox={`0 0 ${width} ${height}`} role="img" aria-label="BTCUSD coin-m candlestick chart" onClick={selectCandle}><g className="chart-grid">{[0, 1, 2, 3, 4].map((line) => <line key={line} x1={pad} x2={width - pad} y1={pad + line * (height - pad * 2) / 4} y2={pad + line * (height - pad * 2) / 4} />)}</g>{candles.map((item, index) => { const x = pad + index * step + step / 2; const rising = item.close >= item.open; return <g className={rising ? 'candle-up' : 'candle-down'} key={item.time}><line x1={x} x2={x} y1={y(item.high)} y2={y(item.low)} /><rect x={x - Math.max(1, step * .28)} y={Math.min(y(item.open), y(item.close))} width={Math.max(2, step * .56)} height={Math.max(1, Math.abs(y(item.open) - y(item.close)))} /></g>; })}<path className="ma ma7" d={maPath(ma7)} /><path className="ma ma25" d={maPath(ma25)} /><path className="ma ma99" d={maPath(ma99)} />{selected && <g className="chart-crosshair"><line x1={pad + selectedIndex! * step + step / 2} x2={pad + selectedIndex! * step + step / 2} y1={pad} y2={height - pad} /><line x1={pad} x2={width - pad} y1={y(selected.close)} y2={y(selected.close)} /><circle cx={pad + selectedIndex! * step + step / 2} cy={y(selected.close)} r="4" /></g>}</svg><div className="coinm-axis">{axisValues.map((value, index) => <span key={index} style={{ top: `${index * 25}%` }}>{value.toLocaleString(undefined, { maximumFractionDigits: 1 })}</span>)}</div>{selected && <div className="coinm-tooltip"><b>{new Date(selected.time).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })}</b><span>开 <em>{selected.open.toLocaleString()}</em></span><span>高 <em>{selected.high.toLocaleString()}</em></span><span>低 <em>{selected.low.toLocaleString()}</em></span><span>收 <em>{selected.close.toLocaleString()}</em></span><span>涨跌 <em className={selected.close >= selected.open ? 'positive' : 'negative'}>{(selected.close - selected.open).toFixed(1)}</em></span><span>涨跌幅 <em>{((selected.close - selected.open) / selected.open * 100).toFixed(2)}%</em></span><span>振幅 <em>{((selected.high - selected.low) / selected.open * 100).toFixed(2)}%</em></span><span>量 <em>{selected.volume.toLocaleString()}</em></span><span>额 <em>{selected.quoteVolume.toLocaleString()}</em></span></div>}</div> : <div className="chart-empty">{error || '正在读取币本位 K 线…'}</div>}<div className="coinm-chart-price">最新 {last ? last.toLocaleString() : '-'}</div></section>
   </div>;
 }
@@ -377,7 +373,7 @@ export function App() {
       const result = await api<{ items: NewsItem[]; nextCursor: string | null }>(`/news?limit=30&before=${encodeURIComponent(newsCursor)}`);
       setNews((current) => [...current, ...result.items.filter((item) => !current.some((existing) => existing.id === item.id))]);
       setNewsCursor(result.nextCursor);
-    } finally { setNewsLoading(false); }
+    } catch { /* The next pull can retry the same cursor. */ } finally { setNewsLoading(false); }
   }
   useEffect(() => { void refresh(); }, []);
   useEffect(() => {
