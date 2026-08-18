@@ -225,6 +225,18 @@ button { cursor: pointer; }
 .coinm-intervals:active { cursor: grabbing; }
 .coinm-chart > .coinm-intervals { display: none; }
 .coinm-full-intervals { border-bottom: 1px solid var(--border); padding: 7px 0; }
+.time-mode .coinm-chart { display: none; }
+.coinm-time-share { margin-top: 10px; }
+.coinm-time-share .coinm-ma-legend { justify-content: flex-start; }
+.time-price-legend { color: #f0b90b; }
+.time-ma-legend { color: #a5adb9; }
+.time-area { fill: rgb(240 185 11 / 20%); }
+.time-line { fill: none; stroke: #f0b90b; stroke-width: 2; }
+.time-ma { fill: none; stroke: #a5adb9; stroke-width: 1.5; }
+.time-ma { stroke-linecap: round; stroke-linejoin: round; }
+.time-price-guide { stroke: var(--muted); stroke-width: 1; stroke-dasharray: 4 4; }
+.time-price-label rect { fill: var(--panel); stroke: var(--ink); stroke-width: 1; }
+.time-price-label text { fill: var(--ink); font-size: 15px; text-anchor: middle; dominant-baseline: middle; font-variant-numeric: tabular-nums; }
 @keyframes spin { to { transform: rotate(360deg); } }
 @keyframes pulse { 0%,100% { opacity: .3; } 50% { opacity: 1; } }
 @media (max-width: 1100px) { .terminal-shell { grid-template-columns: var(--left-width, 14vw) minmax(360px, 1fr) var(--right-width, 36vw); } }
