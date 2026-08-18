@@ -92,3 +92,26 @@ export function createBinanceUsdMClient({ apiKey, secretKey, environment = 'test
     placeOrder: (order) => request('POST', '/fapi/v1/order', order, true),
   };
 }
+
+export function createBinanceMarginClient({ apiKey, secretKey, environment = 'testnet', fetchImpl = fetch, now = Date.now, recvWindow = 5_000 } = {}) {
+  const baseUrl = BASE_URLS[environment];
+  if (!baseUrl) throw new Error('Binance environment must be testnet or live.');
+  let clockOffset = 0; let clockSynced = false;
+  async function request(method, path, params = {}, signed = false) {
+    if (signed && (!apiKey || !secretKey)) throw new BinanceApiError('Binance API credentials are not configured.', { status: 503 });
+    if (signed && !clockSynced) { const { serverTime } = await request('GET', '/api/v3/time'); clockOffset = Number(serverTime) - now(); clockSynced = true; }
+    const values = signed ? { ...params, recvWindow, timestamp: now() + clockOffset } : params;
+    const query = signed ? signQuery(values, secretKey) : new URLSearchParams(compactParams(values)).toString();
+    const response = await fetchImpl(`${baseUrl}${path}${query ? `?${query}` : ''}`, { method, headers: signed ? { 'X-MBX-APIKEY': apiKey } : undefined, signal: AbortSignal.timeout(10_000) });
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok) { const executionUnknown = response.status >= 500 && method !== 'GET'; throw new BinanceApiError(body.msg || `Binance request failed (${response.status}).`, { status: response.status, code: body.code, executionUnknown }); }
+    return body;
+  }
+  return {
+    environment,
+    account: () => request('GET', '/sapi/v1/margin/account', {}, true),
+    order: (order) => request('POST', '/sapi/v1/margin/order', order, true),
+    borrow: (params) => request('POST', '/sapi/v1/margin/loan', params, true),
+    repay: (params) => request('POST', '/sapi/v1/margin/repay', params, true),
+  };
+}

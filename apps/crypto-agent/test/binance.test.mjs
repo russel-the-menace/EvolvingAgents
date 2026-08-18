@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createHmac } from 'node:crypto';
-import { createBinanceSpotClient, createBinanceUsdMClient, signQuery } from '../src/binance.mjs';
+import { createBinanceMarginClient, createBinanceSpotClient, createBinanceUsdMClient, signQuery } from '../src/binance.mjs';
 
 test('signQuery signs the exact encoded query', () => {
   const signed = signQuery({ symbol: 'BTCUSDT', side: 'BUY', note: 'a b' }, 'secret');
@@ -32,4 +32,13 @@ test('USD-M Futures client uses the Futures time and account endpoints', async (
   await client.account();
   assert.match(calls[0], /testnet\.binancefuture\.com\/fapi\/v1\/time/);
   assert.match(calls[1], /\/fapi\/v2\/account\?/);
+});
+
+test('Margin client uses signed margin account and order endpoints', async () => {
+  const calls = [];
+  const fetchImpl = async (url) => { calls.push(url); return new Response(JSON.stringify(url.endsWith('/api/v3/time') ? { serverTime: 2_000 } : { userAssets: [] }), { status: 200 }); };
+  const client = createBinanceMarginClient({ apiKey: 'public', secretKey: 'private', fetchImpl, now: () => 1_000 });
+  await client.account();
+  assert.match(calls[0], /\/api\/v3\/time/);
+  assert.match(calls[1], /\/sapi\/v1\/margin\/account/);
 });

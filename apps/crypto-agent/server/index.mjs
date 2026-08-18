@@ -2,7 +2,7 @@ import { createServer } from 'node:http';
 import { randomUUID } from 'node:crypto';
 import { createModelGateway } from '@evolving-agents/model-gateway';
 import { parseModelJson } from '@evolving-agents/learning-engine';
-import { BinanceApiError, createBinanceSpotClient, createBinanceUsdMClient } from '../src/binance.mjs';
+import { BinanceApiError, createBinanceMarginClient, createBinanceSpotClient, createBinanceUsdMClient } from '../src/binance.mjs';
 import { auditBinancePermissions } from '../src/permissions.mjs';
 import { fallbackIntent, hasUnsupportedRiskInstruction, normalizeOrderIntent, tradePrompt, validateOrder } from '../src/trading.mjs';
 import { NewsService } from '../src/news.mjs';
@@ -23,11 +23,13 @@ const defaultModel = modelOptions.includes(process.env.GATEWAY_MODEL) ? process.
 const defaultReasoning = reasoningOptions.includes(process.env.GATEWAY_REASONING_EFFORT) ? process.env.GATEWAY_REASONING_EFFORT : 'medium';
 const binance = createBinanceSpotClient({ apiKey: process.env.BINANCE_API_KEY, secretKey: process.env.BINANCE_SECRET_KEY, environment });
 const futures = createBinanceUsdMClient({ apiKey: process.env.BINANCE_API_KEY, secretKey: process.env.BINANCE_SECRET_KEY, environment });
+const margin = createBinanceMarginClient({ apiKey: process.env.BINANCE_API_KEY, secretKey: process.env.BINANCE_SECRET_KEY, environment });
 const gateway = process.env.GATEWAY_BASE_URL && process.env.GATEWAY_API_KEY
   ? createModelGateway({ baseUrl: process.env.GATEWAY_BASE_URL, apiKey: process.env.GATEWAY_API_KEY, provider: gatewayProvider, model: defaultModel, reasoningEffort: defaultReasoning })
   : null;
 const drafts = new Map();
 const futuresDrafts = new Map();
+const marginDrafts = new Map();
 const symbolAllowed = (symbol) => !allowedSymbols || allowedSymbols.includes(symbol);
 const defaultNewsState = process.platform === 'darwin' && process.env.HOME ? `${process.env.HOME}/Library/Application Support/CryptoAgent/news-state.json` : '';
 const defaultNewsKnowledge = process.platform === 'darwin' && process.env.HOME ? `${process.env.HOME}/Library/Application Support/CryptoAgent/news-knowledge.sqlite` : '';
@@ -97,11 +99,22 @@ function createFuturesDraft(raw) {
   return draft;
 }
 
+function createMarginDraft(raw) {
+  const symbol = String(raw?.symbol || '').toUpperCase(); const side = String(raw?.side || '').toUpperCase(); const type = String(raw?.type || 'MARKET').toUpperCase();
+  const isIsolated = String(raw?.marginType || 'ISOLATED').toUpperCase() === 'ISOLATED'; const quantity = String(raw?.quantity || ''); const quoteOrderQty = String(raw?.quoteOrderQty || '');
+  if (!symbol || !symbolAllowed(symbol)) throw new Error('Margin symbol is not in the trading allowlist.');
+  if (!['BUY', 'SELL'].includes(side) || type !== 'MARKET') throw new Error('Margin currently supports MARKET BUY or SELL only.');
+  if (!(quantity || quoteOrderQty) || (quantity && !/^\d+(?:\.\d+)?$/.test(quantity)) || (quoteOrderQty && !/^\d+(?:\.\d+)?$/.test(quoteOrderQty))) throw new Error('Margin quantity must be a positive decimal.');
+  const intent = { symbol, side, type, isIsolated: String(isIsolated), ...(quantity ? { quantity } : { quoteOrderQty }) };
+  const draft = { id: randomUUID(), confirmationToken: randomUUID(), intent, environment, createdAt: Date.now(), state: 'pending' };
+  marginDrafts.set(draft.id, draft); return draft;
+}
+
 export function createCryptoServer() {
   return createServer(async (request, response) => {
     try {
       if (request.method === 'GET' && request.url === '/api/status') {
-        return sendJson(response, 200, { configured, environment, liveTradingEnabled, allowedSymbols, maxOrderUsdt, futures: { configured, maxLeverage: 125, confirmationRequired: true }, news: { configured: news.feedUrls.length > 0, learningEnabled: Boolean(newsLearner), pollMs: news.pollMs }, model: { provider: gatewayProvider, models: modelOptions, reasoning: reasoningOptions, defaultModel, defaultReasoning } });
+        return sendJson(response, 200, { configured, environment, liveTradingEnabled, allowedSymbols, maxOrderUsdt, futures: { configured, maxLeverage: 125, confirmationRequired: true }, margin: { configured, confirmationRequired: true, borrowRepayEnabled: false }, news: { configured: news.feedUrls.length > 0, learningEnabled: Boolean(newsLearner), pollMs: news.pollMs }, model: { provider: gatewayProvider, models: modelOptions, reasoning: reasoningOptions, defaultModel, defaultReasoning } });
       }
       if (request.method === 'GET' && request.url === '/api/news') {
         const mode = new URL(request.url, 'http://localhost').searchParams.get('mode');
@@ -140,6 +153,25 @@ export function createCryptoServer() {
       if (request.method === 'GET' && request.url === '/api/futures/account') {
         if (!configured) return sendJson(response, 503, { error: 'Configure Binance credentials before reading Futures.' });
         return sendJson(response, 200, await futures.account());
+      }
+      if (request.method === 'GET' && request.url === '/api/margin/account') {
+        if (!configured) return sendJson(response, 503, { error: 'Configure Binance credentials before reading Margin.' });
+        return sendJson(response, 200, await margin.account());
+      }
+      if (request.method === 'POST' && request.url === '/api/margin/drafts') {
+        if (!configured) return sendJson(response, 503, { error: 'Configure Binance credentials before preparing a Margin order.' });
+        return sendJson(response, 200, { draft: createMarginDraft(await body(request)) });
+      }
+      const marginConfirm = request.url?.match(/^\/api\/margin\/drafts\/([^/]+)\/confirm$/);
+      if (request.method === 'POST' && marginConfirm) {
+        const payload = await body(request); const draft = marginDrafts.get(marginConfirm[1]);
+        if (!draft || Date.now() - draft.createdAt > 5 * 60_000) return sendJson(response, 404, { error: 'Margin draft expired or was not found.' });
+        if (draft.state !== 'pending') return sendJson(response, 409, { error: 'This Margin draft was already handled.' });
+        if (payload.confirmation !== 'CONFIRM' || payload.confirmationToken !== draft.confirmationToken) return sendJson(response, 400, { error: 'Explicit confirmation for this exact Margin draft is required.' });
+        if (!liveTradingEnabled) return sendJson(response, 403, { error: 'Live trading is locked; Margin submission is disabled.' });
+        draft.state = 'submitting';
+        try { const order = await margin.order(draft.intent); draft.state = 'submitted'; return sendJson(response, 200, { order }); }
+        catch (error) { draft.state = error instanceof BinanceApiError && error.executionUnknown ? 'unknown' : 'failed'; throw error; }
       }
       if (request.method === 'GET' && request.url?.startsWith('/api/futures/positions')) {
         if (!configured) return sendJson(response, 503, { error: 'Configure Binance credentials before reading Futures.' });
