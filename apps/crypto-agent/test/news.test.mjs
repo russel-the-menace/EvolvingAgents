@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { parseFeed, parseNewsJson } from '../src/news.mjs';
+import { parseBinanceAnnouncements, parseFeed, parseNewsJson, parseOkxAnnouncements } from '../src/news.mjs';
 
 test('parses RSS items and marks urgent headlines', () => {
   const items = parseFeed('<rss><channel><item><title>Binance halts withdrawals after exploit</title><link>https://example.test/a</link><pubDate>Tue, 18 Aug 2026 10:00:00 GMT</pubDate><description><![CDATA[Security incident]]></description></item></channel></rss>', 'example.test');
@@ -16,6 +16,15 @@ test('normalizes aggregated JSON news and social items', () => {
   assert.equal(items[0].source, 'KOL');
   assert.equal(items[0].urgency, 'breaking');
   assert.equal(items[0].url, 'https://x.com/i/web/status/42');
+});
+
+test('normalizes official Binance and OKX announcement payloads', () => {
+  const binance = parseBinanceAnnouncements({ data: { catalogs: [{ articles: [{ code: 'abc', title: 'Binance listing', releaseDate: 1_756_000_000_000 }] }] } });
+  const okx = parseOkxAnnouncements({ data: [{ details: [{ title: 'OKX listing', url: 'https://www.okx.com/help/a', pTime: '1756000000000' }] }] });
+  assert.equal(binance[0].source, 'Binance');
+  assert.match(binance[0].url, /binance\.com\/en\/support\/announcement\/abc/);
+  assert.equal(okx[0].source, 'OKX');
+  assert.equal(okx[0].url, 'https://www.okx.com/help/a');
 });
 
 test('polls configured JSON sources alongside RSS', async () => {
