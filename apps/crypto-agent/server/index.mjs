@@ -118,7 +118,7 @@ async function coinMMarket(symbol, interval) {
     return result;
   };
   const [klines, depth, premium] = await Promise.all([
-    get('/dapi/v1/klines', { symbol, interval, limit: '120' }),
+    get('/dapi/v1/klines', { symbol, interval, limit: '240' }),
     get('/dapi/v1/depth', { symbol, limit: '10' }),
     get('/dapi/v1/premiumIndex', { symbol }),
   ]);
