@@ -5,11 +5,19 @@ export function klineWindow<T>(rows: T[], offset: number, limit = 120) {
   return rows.slice(Math.max(0, end - limit), end);
 }
 
-export function timeAxisTicks(startTime: number, endTime: number, originTime: number, spacing: number) {
-  if (![startTime, endTime, originTime, spacing].every(Number.isFinite) || spacing <= 0 || endTime < startTime) return [];
-  const first = Math.ceil((startTime - originTime) / spacing);
-  const last = Math.floor((endTime - originTime) / spacing);
-  return Array.from({ length: last - first + 1 }, (_, index) => originTime + (first + index) * spacing);
+export function anchoredTickIndices(times: number[], start: number, end: number, anchorTime: number, spacing: number) {
+  if (!times.length || spacing <= 0 || end < start) return [];
+  const anchor = times.indexOf(anchorTime);
+  if (anchor < 0) return [];
+  const first = Math.ceil((start - anchor) / spacing);
+  const last = Math.floor((end - anchor) / spacing);
+  return Array.from({ length: last - first + 1 }, (_, index) => anchor + (first + index) * spacing);
+}
+
+export function appendedPointCount(times: number[], previousLastTime: number | null) {
+  if (previousLastTime === null) return 0;
+  const previousLast = times.indexOf(previousLastTime);
+  return previousLast < 0 ? 0 : times.length - previousLast - 1;
 }
 
 export function mergeKlineRows(current: KlineRow[], incoming: KlineRow[]) {

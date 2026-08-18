@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { klineWindow, mergeKlineRows, mergeTradeIntoSecondRows, timeAxisTicks } from '../src/chart-data.ts';
+import { anchoredTickIndices, appendedPointCount, klineWindow, mergeKlineRows, mergeTradeIntoSecondRows } from '../src/chart-data.ts';
 
 test('merges older pages and live candles without sorting or duplicates', () => {
   const current = [[3, 'old-3'], [4, 'old-4']];
@@ -25,6 +25,12 @@ test('moves the visible K-line window left and right without crossing its bounds
 });
 
 test('keeps time-axis ticks anchored while the visible window moves', () => {
-  assert.deepEqual(timeAxisTicks(1_000, 7_000, 1_000, 3_000), [1_000, 4_000, 7_000]);
-  assert.deepEqual(timeAxisTicks(-2_500, 5_000, 1_000, 3_000), [-2_000, 1_000, 4_000]);
+  const times = [1_000, 2_000, 4_000, 5_000, 6_000, 8_000, 9_000];
+  assert.deepEqual(anchoredTickIndices(times, 1, 6, 4_000, 2), [2, 4, 6]);
+  assert.deepEqual(anchoredTickIndices([0, ...times], 0, 5, 4_000, 2), [1, 3, 5]);
+});
+
+test('distinguishes older history prepends from live appends', () => {
+  assert.equal(appendedPointCount([1, 2, 3, 4], 4), 0);
+  assert.equal(appendedPointCount([3, 4, 5], 4), 1);
 });

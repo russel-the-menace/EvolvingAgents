@@ -2,7 +2,7 @@ import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from
 import { ArrowDownLeft, ArrowLeft, ArrowLeftRight, ArrowUpRight, Bot, Check, ChevronDown, ChevronRight, CircleDollarSign, Eye, FileText, History, Home, LineChart, MessageSquare, Monitor, Moon, MoreHorizontal, PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen, Plus, RefreshCw, Search, SendHorizontal, Settings2, ShieldCheck, Sun, WalletCards, X } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { klineWindow, mergeKlineRows, mergeTradeIntoSecondRows, timeAxisTicks, type KlineRow } from './chart-data';
+import { anchoredTickIndices, appendedPointCount, klineWindow, mergeKlineRows, mergeTradeIntoSecondRows, type KlineRow } from './chart-data';
 import { aggregateAssetBalances } from './asset-summary';
 
 type ModelId = 'gpt-5.6-luna' | 'gpt-5.6-sol' | 'gpt-5.6-terra';
@@ -169,21 +169,22 @@ type CoinMCandle = { time: number; open: number; high: number; low: number; clos
 
 function TimeShareChart({ candles, selectedIndex, onSelect, onLoadOlder, onVisibleChange, last }: { candles: CoinMCandle[]; selectedIndex: number | null; onSelect: (index: number) => void; onLoadOlder: () => void; onVisibleChange: (candles: CoinMCandle[]) => void; last: number }) {
   const [historyOffset, setHistoryOffset] = useState(0);
+  const candleTimes = candles.map((item) => item.time);
   const dragStart = useRef<number | null>(null);
   const dragAnchor = useRef(0);
   const pendingPointerX = useRef<number | null>(null);
   const dragFrame = useRef<number | null>(null);
   const dragged = useRef(false);
-  const previousLength = useRef(candles.length);
-  const timeAxis = useRef<{ origin: number; spacing: number; candleSpacing: number } | null>(null);
+  const previousLastTime = useRef<number | null>(candleTimes.at(-1) ?? null);
+  const timeAxis = useRef<{ anchorTime: number; spacing: number; candleSpacing: number } | null>(null);
   useEffect(() => {
-    const added = candles.length - previousLength.current;
-    if (added > 0) {
-      setHistoryOffset((current) => current > 0 ? current + added : 0);
-      if (dragStart.current !== null) dragAnchor.current += added;
+    const appended = appendedPointCount(candleTimes, previousLastTime.current);
+    if (appended > 0) {
+      setHistoryOffset((current) => current > 0 ? current + appended : 0);
+      if (dragStart.current !== null) dragAnchor.current += appended;
     }
-    previousLength.current = candles.length;
-  }, [candles.length]);
+    previousLastTime.current = candleTimes.at(-1) ?? null;
+  }, [candles.length, candleTimes.at(-1)]);
   const width = 900; const height = 330; const pad = 36;
   const visibleEnd = Math.max(0, candles.length - 1 - historyOffset); const start = Math.max(0, visibleEnd - 119); const visibleCandles = candles.slice(start, visibleEnd + 1);
   const low = visibleCandles.length ? Math.min(...visibleCandles.map((item) => item.low)) : 0; const high = visibleCandles.length ? Math.max(...visibleCandles.map((item) => item.high)) : 1; const range = high - low || 1; const step = (width - pad * 2) / Math.max(visibleCandles.length, 1);
@@ -200,10 +201,9 @@ function TimeShareChart({ candles, selectedIndex, onSelect, onLoadOlder, onVisib
   const candleSpacing = visibleCandles.length > 1 ? visibleCandles.at(-1)!.time - visibleCandles.at(-2)!.time : 0;
   if (visibleCandles.length > 2 && candleSpacing > 0 && timeAxis.current?.candleSpacing !== candleSpacing) {
     const middle = Math.floor((visibleCandles.length - 1) / 2);
-    timeAxis.current = { origin: visibleCandles[0].time, spacing: candleSpacing * middle, candleSpacing };
+    timeAxis.current = { anchorTime: visibleCandles[0].time, spacing: middle, candleSpacing };
   }
-  const firstTime = visibleCandles[0]?.time ?? 0; const lastTime = visibleCandles.at(-1)?.time ?? firstTime;
-  const datePoints = timeAxis.current ? timeAxisTicks(firstTime, lastTime, timeAxis.current.origin, timeAxis.current.spacing).map((time) => ({ time, x: pad + step / 2 + (time - firstTime) / Math.max(lastTime - firstTime, 1) * Math.max(visibleCandles.length - 1, 0) * step })) : [];
+  const datePoints = timeAxis.current ? anchoredTickIndices(candleTimes, start, visibleEnd, timeAxis.current.anchorTime, timeAxis.current.spacing).map((index) => ({ time: candles[index].time, x: pad + (index - start) * step + step / 2 })) : [];
   const formatTime = (time: number) => new Date(time).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
   const handlePointerDown = (event: React.PointerEvent<SVGSVGElement>) => { dragStart.current = event.clientX; dragAnchor.current = historyOffset; dragged.current = false; event.currentTarget.setPointerCapture(event.pointerId); };
   const handlePointerMove = (event: React.PointerEvent<SVGSVGElement>) => {
