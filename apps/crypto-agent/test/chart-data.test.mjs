@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { klineWindow, mergeKlineRows, mergeTradeIntoSecondRows } from '../src/chart-data.ts';
+import { klineWindow, mergeKlineRows, mergeTradeIntoSecondRows, timeAxisTicks } from '../src/chart-data.ts';
 
 test('merges older pages and live candles without sorting or duplicates', () => {
   const current = [[3, 'old-3'], [4, 'old-4']];
@@ -22,4 +22,9 @@ test('moves the visible K-line window left and right without crossing its bounds
   assert.deepEqual(klineWindow(rows, 0, 120), rows.slice(120));
   assert.deepEqual(klineWindow(rows, 60, 120), rows.slice(60, 180));
   assert.deepEqual(klineWindow(rows, 999, 120), rows.slice(0, 120));
+});
+
+test('keeps time-axis ticks anchored while the visible window moves', () => {
+  assert.deepEqual(timeAxisTicks(1_000, 7_000, 1_000, 3_000), [1_000, 4_000, 7_000]);
+  assert.deepEqual(timeAxisTicks(-2_500, 5_000, 1_000, 3_000), [-2_000, 1_000, 4_000]);
 });

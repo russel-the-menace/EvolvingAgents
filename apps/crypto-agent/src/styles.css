@@ -243,7 +243,7 @@ button { cursor: pointer; }
 .time-ma { stroke-linecap: round; stroke-linejoin: round; }
 .time-price-guide { stroke: var(--muted); stroke-width: 1; stroke-dasharray: 4 4; }
 .time-price-overlay { position: absolute; z-index: 4; right: -6px; min-width: 50px; transform: translateY(-50%); border: 1px solid var(--ink); border-radius: 6px; padding: 3px 4px; color: var(--ink); background: var(--panel); font-size: 9px; line-height: 1; text-align: center; font-variant-numeric: tabular-nums; pointer-events: none; white-space: nowrap; }
-.time-x-axis { position: absolute; right: 52px; bottom: -18px; left: 0; display: flex; justify-content: space-between; color: var(--muted); font-size: 9px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.time-x-axis { position: absolute; right: 52px; bottom: -18px; left: 0; color: var(--muted); font-size: 9px; font-variant-numeric: tabular-nums; white-space: nowrap; }.time-x-axis span { position: absolute; transform: translateX(-50%); }
 @keyframes spin { to { transform: rotate(360deg); } }
 @keyframes pulse { 0%,100% { opacity: .3; } 50% { opacity: 1; } }
 @media (max-width: 1100px) { .terminal-shell { grid-template-columns: var(--left-width, 14vw) minmax(360px, 1fr) var(--right-width, 36vw); } }

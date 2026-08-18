@@ -2,7 +2,7 @@ import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from
 import { ArrowDownLeft, ArrowLeft, ArrowLeftRight, ArrowUpRight, Bot, Check, ChevronDown, ChevronRight, CircleDollarSign, Eye, FileText, History, Home, LineChart, MessageSquare, Monitor, Moon, MoreHorizontal, PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen, Plus, RefreshCw, Search, SendHorizontal, Settings2, ShieldCheck, Sun, WalletCards, X } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { klineWindow, mergeKlineRows, mergeTradeIntoSecondRows, type KlineRow } from './chart-data';
+import { klineWindow, mergeKlineRows, mergeTradeIntoSecondRows, timeAxisTicks, type KlineRow } from './chart-data';
 import { aggregateAssetBalances } from './asset-summary';
 
 type ModelId = 'gpt-5.6-luna' | 'gpt-5.6-sol' | 'gpt-5.6-terra';
@@ -175,6 +175,7 @@ function TimeShareChart({ candles, selectedIndex, onSelect, onLoadOlder, onVisib
   const dragFrame = useRef<number | null>(null);
   const dragged = useRef(false);
   const previousLength = useRef(candles.length);
+  const timeAxis = useRef<{ origin: number; spacing: number; candleSpacing: number } | null>(null);
   useEffect(() => {
     const added = candles.length - previousLength.current;
     if (added > 0) {
@@ -196,8 +197,13 @@ function TimeShareChart({ candles, selectedIndex, onSelect, onLoadOlder, onVisib
   useEffect(() => { onVisibleChange(visibleCandles); }, [start, visibleEnd, visibleLast, candles.length]);
   const lastX = pad + Math.max(visibleCandles.length - 1, 0) * step + step / 2; const lastY = y(visibleLast); const priceLabel = visibleLast.toLocaleString(undefined, { maximumFractionDigits: 1 });
   const axisPoints = [0, 1, 2, 3, 4, 5];
-  const datePoints = visibleCandles.length ? [visibleCandles[0], visibleCandles[Math.floor((visibleCandles.length - 1) / 2)], visibleCandles[visibleCandles.length - 1]] : [];
-  const dateIndices = visibleCandles.length ? [0, Math.floor((visibleCandles.length - 1) / 2), visibleCandles.length - 1] : [];
+  const candleSpacing = visibleCandles.length > 1 ? visibleCandles.at(-1)!.time - visibleCandles.at(-2)!.time : 0;
+  if (visibleCandles.length > 2 && candleSpacing > 0 && timeAxis.current?.candleSpacing !== candleSpacing) {
+    const middle = Math.floor((visibleCandles.length - 1) / 2);
+    timeAxis.current = { origin: visibleCandles[0].time, spacing: candleSpacing * middle, candleSpacing };
+  }
+  const firstTime = visibleCandles[0]?.time ?? 0; const lastTime = visibleCandles.at(-1)?.time ?? firstTime;
+  const datePoints = timeAxis.current ? timeAxisTicks(firstTime, lastTime, timeAxis.current.origin, timeAxis.current.spacing).map((time) => ({ time, x: pad + step / 2 + (time - firstTime) / Math.max(lastTime - firstTime, 1) * Math.max(visibleCandles.length - 1, 0) * step })) : [];
   const formatTime = (time: number) => new Date(time).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
   const handlePointerDown = (event: React.PointerEvent<SVGSVGElement>) => { dragStart.current = event.clientX; dragAnchor.current = historyOffset; dragged.current = false; event.currentTarget.setPointerCapture(event.pointerId); };
   const handlePointerMove = (event: React.PointerEvent<SVGSVGElement>) => {
@@ -212,7 +218,24 @@ function TimeShareChart({ candles, selectedIndex, onSelect, onLoadOlder, onVisib
   };
   const handlePointerUp = (event: React.PointerEvent<SVGSVGElement>) => { if (dragFrame.current !== null) window.cancelAnimationFrame(dragFrame.current); dragFrame.current = null; pendingPointerX.current = null; dragStart.current = null; event.currentTarget.releasePointerCapture(event.pointerId); };
   const handleClick = (event: React.MouseEvent<SVGSVGElement>) => { if (dragged.current) { dragged.current = false; return; } const bounds = event.currentTarget.getBoundingClientRect(); const chartX = (event.clientX - bounds.left) / bounds.width * width; onSelect(start + Math.max(0, Math.min(visibleCandles.length - 1, Math.round((chartX - pad - step / 2) / step)))); };
-  return <section className="coinm-time-share"><div className="coinm-ma-legend"><span className="time-ma-legend">MA(60): {average.at(-1)?.toLocaleString(undefined, { maximumFractionDigits: 1 }) || '-'}</span></div><div className="coinm-chart-canvas"><svg viewBox={`0 0 ${width} ${height}`} role="img" aria-label="BTCUSD coin-m time-sharing chart" onClick={handleClick} onPointerDown={handlePointerDown} onPointerMove={handlePointerMove} onPointerUp={handlePointerUp} onPointerCancel={handlePointerUp}><g className="chart-grid">{axisPoints.map((line) => <line key={line} x1={pad} x2={width - pad} y1={pad + line * (height - pad * 2) / 5} y2={pad + line * (height - pad * 2) / 5} />)}{dateIndices.map((index, position) => <line className="time-date-guide" key={`${index}-${position}`} x1={pad + index * step + step / 2} x2={pad + index * step + step / 2} y1={pad} y2={height - pad} />)}<path className="time-area" d={areaPath} /><path className="time-line" d={linePath} /><path className="time-ma" d={pathFor(average)} />{selected && selectedLocalIndex !== null && selectedLocalIndex >= 0 && selectedLocalIndex < visibleCandles.length && <g className="chart-crosshair"><line x1={pad + selectedLocalIndex * step + step / 2} x2={pad + selectedLocalIndex * step + step / 2} y1={pad} y2={height - pad} /><line x1={pad} x2={width - pad} y1={y(selected.close)} y2={y(selected.close)} /><circle cx={pad + selectedLocalIndex * step + step / 2} cy={y(selected.close)} r="4" /></g>}</g><line className="time-price-guide" x1={lastX} x2={width - pad} y1={lastY} y2={lastY} /></svg><div className="coinm-axis">{axisPoints.map((line) => <span key={line} style={{ top: `${line * 20}%` }}>{(high - line * range / 5).toLocaleString(undefined, { minimumFractionDigits: 1, maximumFractionDigits: 1 })}</span>)}</div>{visibleCandles.length > 0 && <div className="time-price-overlay" style={{ top: `${lastY / height * 100}%` }}>{priceLabel}</div>}<div className="time-x-axis">{datePoints.map((item, position) => <span key={`${item.time}-${position}`}>{formatTime(item.time)}</span>)}</div>{selected && <div className="coinm-tooltip"><b>{formatTime(selected.time)}</b><span>价格 <em>{selected.close.toLocaleString()}</em></span><span>涨跌 <em className={selected.close >= selected.open ? 'positive' : 'negative'}>{(selected.close - selected.open).toFixed(1)}</em></span><span>涨跌幅 <em>{((selected.close - selected.open) / selected.open * 100).toFixed(2)}%</em></span><span>量 <em>{selected.volume.toLocaleString()}</em></span></div>}</div></section>;
+  return <section className="coinm-time-share">
+    <div className="coinm-ma-legend"><span className="time-ma-legend">MA(60): {average.at(-1)?.toLocaleString(undefined, { maximumFractionDigits: 1 }) || '-'}</span></div>
+    <div className="coinm-chart-canvas">
+      <svg viewBox={`0 0 ${width} ${height}`} role="img" aria-label="BTCUSD coin-m time-sharing chart" onClick={handleClick} onPointerDown={handlePointerDown} onPointerMove={handlePointerMove} onPointerUp={handlePointerUp} onPointerCancel={handlePointerUp}>
+        <g className="chart-grid">
+          {axisPoints.map((line) => <line key={line} x1={pad} x2={width - pad} y1={pad + line * (height - pad * 2) / 5} y2={pad + line * (height - pad * 2) / 5} />)}
+          {datePoints.map((item) => <line className="time-date-guide" key={item.time} x1={item.x} x2={item.x} y1={pad} y2={height - pad} />)}
+          <path className="time-area" d={areaPath} /><path className="time-line" d={linePath} /><path className="time-ma" d={pathFor(average)} />
+          {selected && selectedLocalIndex !== null && selectedLocalIndex >= 0 && selectedLocalIndex < visibleCandles.length && <g className="chart-crosshair"><line x1={pad + selectedLocalIndex * step + step / 2} x2={pad + selectedLocalIndex * step + step / 2} y1={pad} y2={height - pad} /><line x1={pad} x2={width - pad} y1={y(selected.close)} y2={y(selected.close)} /><circle cx={pad + selectedLocalIndex * step + step / 2} cy={y(selected.close)} r="4" /></g>}
+        </g>
+        <line className="time-price-guide" x1={lastX} x2={width - pad} y1={lastY} y2={lastY} />
+      </svg>
+      <div className="coinm-axis">{axisPoints.map((line) => <span key={line} style={{ top: `${line * 20}%` }}>{(high - line * range / 5).toLocaleString(undefined, { minimumFractionDigits: 1, maximumFractionDigits: 1 })}</span>)}</div>
+      {visibleCandles.length > 0 && <div className="time-price-overlay" style={{ top: `${lastY / height * 100}%` }}>{priceLabel}</div>}
+      <div className="time-x-axis">{datePoints.map((item) => <span key={item.time} style={{ left: `${item.x / width * 100}%` }}>{formatTime(item.time)}</span>)}</div>
+      {selected && <div className="coinm-tooltip"><b>{formatTime(selected.time)}</b><span>价格 <em>{selected.close.toLocaleString()}</em></span><span>涨跌 <em className={selected.close >= selected.open ? 'positive' : 'negative'}>{(selected.close - selected.open).toFixed(1)}</em></span><span>涨跌幅 <em>{((selected.close - selected.open) / selected.open * 100).toFixed(2)}%</em></span><span>量 <em>{selected.volume.toLocaleString()}</em></span></div>}
+    </div>
+  </section>;
 }
 
 function ContractHistory({ marketType, onBack }: { marketType: 'usdm' | 'coinm'; onBack: () => void }) {
