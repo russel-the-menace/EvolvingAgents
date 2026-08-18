@@ -48,10 +48,10 @@ function recentNewsWelcome(items: NewsItem[]) {
   return sentence.length > 120 ? `${sentence.slice(0, 117)}...` : sentence;
 }
 
-function NewsPanel({ items, onLoadMore, loading, hasMore }: { items: NewsItem[]; onLoadMore: () => void; loading: boolean; hasMore: boolean }) {
+function NewsPanel({ items, onRefresh, loading }: { items: NewsItem[]; onRefresh: () => void; loading: boolean }) {
   const list = useRef<HTMLDivElement>(null); const pullStart = useRef<number | null>(null); const known = useRef<Set<string> | null>(null); const [pullDistance, setPullDistance] = useState(0); const pullThreshold = 44;
   useEffect(() => { if (!known.current) known.current = new Set(items.map((item) => item.id)); else for (const item of items) known.current.add(item.id); }, [items]);
-  const finishPull = (clientY: number) => { const distance = pullStart.current === null ? 0 : clientY - pullStart.current; if (distance >= pullThreshold && hasMore && !loading) onLoadMore(); pullStart.current = null; setPullDistance(0); };
+  const finishPull = (clientY: number) => { const distance = pullStart.current === null ? 0 : clientY - pullStart.current; if (distance >= pullThreshold && !loading) onRefresh(); pullStart.current = null; setPullDistance(0); };
   return <section className="news-panel" aria-label="市场新闻"><div className="section-title"><span>News</span></div><div className="news-list" ref={list} onPointerDown={(event) => { if (list.current?.scrollTop === 0 && !loading) { pullStart.current = event.clientY; event.currentTarget.setPointerCapture(event.pointerId); } }} onPointerMove={(event) => { if (pullStart.current !== null) setPullDistance(Math.min(76, Math.max(0, event.clientY - pullStart.current))); }} onPointerUp={(event) => { finishPull(event.clientY); if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId); }} onPointerCancel={() => { pullStart.current = null; setPullDistance(0); }}><div className={`news-pull-indicator${loading ? ' loading' : ''}`} style={{ height: loading ? 28 : pullDistance, opacity: loading || pullDistance > 0 ? 1 : 0 }}>{loading ? <><RefreshCw size={13} className="spin" />加载中</> : pullDistance >= pullThreshold ? '释放加载' : '下拉加载'}</div>{items.length ? items.map((item) => <article className={`news-item${item.urgency === 'breaking' ? ' breaking' : ''}${known.current && !known.current.has(item.id) ? ' entering' : ''}`} key={item.id}><div><span>{item.source}</span><time>{new Date(item.publishedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</time></div><a href={item.url} target="_blank" rel="noreferrer">{item.title}</a></article>) : <p className="news-empty">新闻正在同步</p>}</div></section>;
 }
 
@@ -461,7 +461,6 @@ export function App() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [news, setNews] = useState<NewsItem[]>([]);
-  const [newsCursor, setNewsCursor] = useState<string | null>(null);
   const [newsLoading, setNewsLoading] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [leftWidth, setLeftWidth] = useState(() => Math.min(window.innerWidth * .2, Math.max(LEFT_SIDEBAR_MIN, Number(window.localStorage.getItem('crypto-agent-left-width')) || window.innerWidth * .14)));
@@ -479,14 +478,14 @@ export function App() {
       if (next.model) { setModelId((current) => next.model?.models.includes(current) ? current : next.model!.defaultModel); setReasoningEffort((current) => next.model?.reasoning.includes(current) ? current : next.model!.defaultReasoning); }
     } catch (caught) { setError(caught instanceof Error ? caught.message : 'Unable to connect.'); }
   }
-  async function loadMoreNews() {
-    if (!newsCursor || newsLoading) return;
+  async function refreshNews() {
+    if (newsLoading) return;
     setNewsLoading(true);
     try {
-      const result = await api<{ items: NewsItem[]; nextCursor: string | null }>(`/news?limit=30&before=${encodeURIComponent(newsCursor)}`);
-      setNews((current) => [...current, ...result.items.filter((item) => !current.some((existing) => existing.id === item.id))]);
-      setNewsCursor(result.nextCursor);
-    } catch { /* The next pull can retry the same cursor. */ } finally { setNewsLoading(false); }
+      await new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve()));
+      const result = await api<{ items: NewsItem[] }>('/news?limit=30');
+      setNews((current) => [...result.items, ...current.filter((item) => !result.items.some((next) => next.id === item.id))]);
+    } catch { /* The next pull can retry the refresh. */ } finally { setNewsLoading(false); }
   }
   useEffect(() => { void refresh(); }, []);
   useEffect(() => {
@@ -498,7 +497,6 @@ export function App() {
     void api<{ items: NewsItem[]; nextCursor: string | null }>('/news?mode=startup&limit=30').then((result) => {
       if (!active) return;
       setNews(result.items);
-      setNewsCursor(result.nextCursor);
       if (result.items.length) notify('CryptoAgent 今日新闻', `${result.items.length} 条重要新闻已准备好`);
     }).catch(() => {});
     const stream = new EventSource('/api/news/stream');
@@ -592,7 +590,7 @@ export function App() {
       <button className="new-chat" onClick={newChat}><Plus size={17} />New chat</button>
       <div className="sidebar-lists">
       <nav className="recents" aria-label="最近对话"><div className="section-title"><span>Recents</span></div><div className="recents-list">{sessions.length ? sessions.map((session) => <button className={activeSessionId === session.id ? 'active' : ''} key={session.id} onClick={() => openSession(session)}><MessageSquare size={14} /><span>{session.title}</span></button>) : <p>暂无最近对话</p>}</div></nav>
-      <NewsPanel items={news} onLoadMore={() => void loadMoreNews()} loading={newsLoading} hasMore={Boolean(newsCursor)} />
+      <NewsPanel items={news} onRefresh={() => void refreshNews()} loading={newsLoading} />
       </div>
       <button className="settings-entry" onClick={() => setSettingsOpen(true)}><Settings2 size={16} />设置与外观</button>
       <button className="resize-handle left-resize" title="调整左侧栏宽度" aria-label="调整左侧栏宽度" onPointerDown={(event) => { event.currentTarget.setPointerCapture(event.pointerId); setResizing('left'); }} />
@@ -606,7 +604,7 @@ export function App() {
         {busy && <article className="message assistant"><div className="bubble thinking"><i /><i /><i /></div></article>}
         {error && <div className="global-error">{error}</div>}
       </div>
-      <div className="composer-wrap"><div className="composer"><div className="composer-input">{attachment && <div className="composer-attachment"><img src={attachment.dataUrl} alt={attachment.name} /><span>{attachment.name}</span><button title="移除图片" aria-label="移除图片" onClick={() => setAttachment(null)}><X size={14} /></button></div>}<textarea rows={1} value={input} onChange={(event) => setInput(event.target.value)} onPaste={(event) => { const file = [...event.clipboardData.items].find((item) => item.type.startsWith('image/'))?.getAsFile(); if (!file) return; event.preventDefault(); void readImageAttachment(file).then(setAttachment).catch((caught) => setError(caught instanceof Error ? caught.message : '无法读取图片')); }} onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); void send(); } }} placeholder="输入交易指令、分析问题或粘贴图片" /></div><div className="model-picker" ref={modelPickerRef}><button className="model-trigger" aria-haspopup="menu" aria-expanded={modelOpen} onClick={() => setModelOpen((open) => !open)}>5.6 {modelId.split('-').at(-1)![0].toUpperCase() + modelId.split('-').at(-1)!.slice(1)} · {({ low: 'Light', medium: 'Medium', high: 'High', xhigh: 'Extra High', max: 'Ultra' } as Record<ReasoningId, string>)[reasoningEffort]}<ChevronDown size={15} /></button>{modelOpen && <div className="model-menu" role="menu"><div className="model-menu-label">Reasoning</div>{(status?.model?.reasoning || ['low', 'medium', 'high', 'xhigh', 'max']).map((option) => <button key={option} className={reasoningEffort === option ? 'selected' : ''} onClick={() => { setReasoningEffort(option); setModelOpen(false); }}>{({ low: 'Light', medium: 'Medium', high: 'High', xhigh: 'Extra High', max: 'Ultra' } as Record<ReasoningId, string>)[option]}{reasoningEffort === option && <Check size={15} />}</button>)}<div className="model-menu-divider" /><div className="model-menu-label">Model</div>{(['gpt-5.6-luna', 'gpt-5.6-terra', 'gpt-5.6-sol'] as ModelId[]).filter((option) => (status?.model?.models || ['gpt-5.6-luna', 'gpt-5.6-sol', 'gpt-5.6-terra']).includes(option)).map((option) => <button key={option} className={modelId === option ? 'selected' : ''} onClick={() => { setModelId(option); setModelOpen(false); }}>{modelLabel(option)}</button>)}</div>}</div><button className="composer-send" title="发送" aria-label="发送" disabled={(!input.trim() && !attachment) || busy} onClick={() => void send()}><SendHorizontal size={19} /></button></div><small>行情分析只读；订单仍需明确确认。</small></div>
+      <div className="composer-wrap"><div className="composer"><div className="composer-input">{attachment && <div className="composer-attachment"><img src={attachment.dataUrl} alt={attachment.name} /><span>{attachment.name}</span><button title="移除图片" aria-label="移除图片" onClick={() => setAttachment(null)}><X size={14} /></button></div>}<textarea rows={1} value={input} onChange={(event) => setInput(event.target.value)} onPaste={(event) => { const file = [...event.clipboardData.items].find((item) => item.type.startsWith('image/'))?.getAsFile(); if (!file) return; event.preventDefault(); void readImageAttachment(file).then(setAttachment).catch((caught) => setError(caught instanceof Error ? caught.message : '无法读取图片')); }} onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); void send(); } }} placeholder="输入交易指令、分析问题或粘贴图片" /></div><div className="model-picker" ref={modelPickerRef}><button className="model-trigger" aria-haspopup="menu" aria-expanded={modelOpen} onClick={() => setModelOpen((open) => !open)}>5.6 {modelId.split('-').at(-1)![0].toUpperCase() + modelId.split('-').at(-1)!.slice(1)} · {({ low: 'Light', medium: 'Medium', high: 'High', xhigh: 'Extra High', max: 'Ultra' } as Record<ReasoningId, string>)[reasoningEffort]}<ChevronDown size={15} /></button>{modelOpen && <div className="model-menu" role="menu"><div className="model-menu-label">Reasoning</div>{(status?.model?.reasoning || ['low', 'medium', 'high', 'xhigh', 'max']).map((option) => <button key={option} className={reasoningEffort === option ? 'selected' : ''} onClick={() => { setReasoningEffort(option); setModelOpen(false); }}>{({ low: 'Light', medium: 'Medium', high: 'High', xhigh: 'Extra High', max: 'Ultra' } as Record<ReasoningId, string>)[option]}{reasoningEffort === option && <Check size={15} />}</button>)}<div className="model-menu-divider" /><div className="model-menu-label">Model</div>{(['gpt-5.6-luna', 'gpt-5.6-terra', 'gpt-5.6-sol'] as ModelId[]).filter((option) => (status?.model?.models || ['gpt-5.6-luna', 'gpt-5.6-sol', 'gpt-5.6-terra']).includes(option)).map((option) => <button key={option} className={modelId === option ? 'selected' : ''} onClick={() => { setModelId(option); setModelOpen(false); }}>{modelLabel(option)}</button>)}</div>}</div><button className="composer-send" title="发送" aria-label="发送" disabled={(!input.trim() && !attachment) || busy} onClick={() => void send()}><SendHorizontal size={19} /></button></div></div>
     </section>
     <aside className="market-rail"><button className="sidebar-toggle right-panel-toggle" title="隐藏右侧栏" aria-label="隐藏右侧栏" onClick={() => setRightCollapsed(true)}><PanelRightClose size={17} /></button><AssetWorkspace onMarketContext={(context) => { marketContext.current = context; }} /><button className="resize-handle right-resize" title="调整右侧栏宽度" aria-label="调整右侧栏宽度" onPointerDown={(event) => { event.currentTarget.setPointerCapture(event.pointerId); setResizing('right'); }} /></aside>
     {rightCollapsed && <button className="sidebar-reopen right-reopen" title="显示右侧栏" aria-label="显示右侧栏" onClick={() => setRightCollapsed(false)}><PanelRightOpen size={18} /></button>}

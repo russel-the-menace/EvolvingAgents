@@ -39,7 +39,7 @@ News collection combines audited RSS/Atom URLs with CEX announcement feeds and t
 
 ### Server news collector
 
-Production news collection runs independently of the desktop app. [`deploy/news-collector.py`](deploy/news-collector.py) polls public sources every 60 seconds through Mihomo and writes an unlimited, deduplicated history to `/var/lib/custom-api-gateway/news.sqlite`. [`deploy/custom-api-news.service`](deploy/custom-api-news.service) keeps it running across logouts and server restarts. The desktop app uses `NEWS_REMOTE_ONLY=true`, receives live local events when available, and checks the remote archive every 15 seconds.
+Production news collection runs independently of the desktop app. [`deploy/news-collector.py`](deploy/news-collector.py) polls public sources, including the Binance and OKX announcement APIs, every 60 seconds through Mihomo and writes an unlimited, deduplicated history to `/var/lib/custom-api-gateway/news.sqlite`. [`deploy/custom-api-news.service`](deploy/custom-api-news.service) keeps it running across logouts and server restarts. The desktop app uses `NEWS_REMOTE_ONLY=true`, receives live local events when available, and checks the remote archive every 15 seconds.
 
 ```bash
 scp deploy/news-collector.py deploy/custom-api-news.service root@SERVER:/opt/custom-api-gateway/

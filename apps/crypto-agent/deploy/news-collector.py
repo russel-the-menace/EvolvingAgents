@@ -24,11 +24,11 @@ FEEDS = [
     "https://decrypt.co/feed",
     "https://bitcoinmagazine.com/.rss/full/",
     "https://blog.kraken.com/feed",
-    "https://rsshub.app/binance/announcement",
-    "https://rsshub.app/okx/announcement",
     "https://rsshub.app/bybit/announcement",
 ]
 API = os.getenv("CRYPTO_NEWS_URL", "https://cryptocurrency.cv/api/news?limit=100")
+BINANCE_ANNOUNCEMENTS = "https://www.binance.com/bapi/composite/v1/public/cms/article/list/query?type=1&pageNo=1&pageSize=30"
+OKX_ANNOUNCEMENTS = "https://www.okx.com/api/v5/support/announcements?limit=30"
 URGENT = ("hack", "exploit", "breach", "bankrupt", "halt", "outage", "delist", "listing", "liquidat", "黑客", "攻击", "漏洞", "暂停", "下架", "清算", "破产", "暴跌", "暴涨")
 
 
@@ -39,7 +39,10 @@ def clean(value=""):
 def iso_date(value):
     raw = str(value or "")
     try:
-        date = parsedate_to_datetime(raw) if "," in raw else datetime.fromisoformat(raw.replace("Z", "+00:00"))
+        if re.fullmatch(r"\d{10,13}", raw):
+            date = datetime.fromtimestamp(int(raw) / (1000 if len(raw) == 13 else 1), timezone.utc)
+        else:
+            date = parsedate_to_datetime(raw) if "," in raw else datetime.fromisoformat(raw.replace("Z", "+00:00"))
         return date.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
     except (TypeError, ValueError, OverflowError):
         return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
@@ -83,6 +86,27 @@ def api_news():
     return results
 
 
+def binance_announcements():
+    payload, results = json.loads(fetch(BINANCE_ANNOUNCEMENTS)), []
+    for catalog in payload.get("data", {}).get("catalogs", []):
+        for row in catalog.get("articles", []):
+            code = row.get("code") or row.get("id")
+            value = normalize(row.get("title"), row.get("url") or f"https://www.binance.com/en/support/announcement/{code}", "Binance 官方公告", "", row.get("releaseDate"))
+            if value:
+                results.append(value)
+    return results
+
+
+def okx_announcements():
+    payload, results = json.loads(fetch(OKX_ANNOUNCEMENTS)), []
+    for group in payload.get("data", []):
+        for row in group.get("details", []):
+            value = normalize(row.get("title"), row.get("url"), "OKX 官方公告", "", row.get("pTime"))
+            if value:
+                results.append(value)
+    return results
+
+
 def store(items):
     DB.parent.mkdir(parents=True, exist_ok=True)
     with sqlite3.connect(DB) as db:
@@ -104,6 +128,11 @@ def collect():
         items.extend(api_news())
     except Exception as error:
         print(f"api failed: {error}", flush=True)
+    for name, collector in (("Binance", binance_announcements), ("OKX", okx_announcements)):
+        try:
+            items.extend(collector())
+        except Exception as error:
+            print(f"{name} announcements failed: {error}", flush=True)
     return store(items)
 
 

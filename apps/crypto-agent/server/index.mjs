@@ -5,7 +5,7 @@ import { parseModelJson } from '@evolving-agents/learning-engine';
 import { BinanceApiError, createBinanceMarginClient, createBinanceSpotClient, createBinanceUsdMClient } from '../src/binance.mjs';
 import { auditBinancePermissions } from '../src/permissions.mjs';
 import { fallbackIntent, inferProduct, multiProductTradePrompt, normalizeOrderIntent, tradePrompt, validateOrder } from '../src/trading.mjs';
-import { NewsService, parseBinanceAnnouncements, parseOkxAnnouncements } from '../src/news.mjs';
+import { NewsService } from '../src/news.mjs';
 import { createNewsLearner } from '../src/news-learning.mjs';
 import { EmergencyPolicy } from '../src/emergency-policy.mjs';
 import { analysisMessages, isTradeCommand, validImageDataUrl } from './market-context.mjs';
@@ -22,6 +22,8 @@ const socialKeywords = (process.env.NEWS_SOCIAL_KEYWORDS || '').split(',').map((
 const maxOrderUsdt = Number(process.env.MAX_ORDER_USDT || 100);
 const configured = Boolean(process.env.BINANCE_API_KEY && process.env.BINANCE_SECRET_KEY);
 const gatewayProvider = process.env.GATEWAY_PROVIDER || 'openai';
+const gatewayBaseUrl = (process.env.GATEWAY_BASE_URL || process.env.NEWS_ARCHIVE_BASE_URL || '').replace(/\/$/, '');
+const gatewayApiKey = process.env.GATEWAY_API_KEY || process.env.NEWS_ARCHIVE_API_KEY || '';
 const marketDataBase = (process.env.MARKET_DATA_BASE_URL || process.env.GATEWAY_BASE_URL || process.env.NEWS_ARCHIVE_BASE_URL || '').replace(/\/$/, '');
 const marketDataKey = process.env.MARKET_DATA_API_KEY || process.env.GATEWAY_API_KEY || process.env.NEWS_ARCHIVE_API_KEY || '';
 const modelOptions = ['gpt-5.6-luna', 'gpt-5.6-sol', 'gpt-5.6-terra'];
@@ -31,8 +33,8 @@ const defaultReasoning = reasoningOptions.includes(process.env.GATEWAY_REASONING
 const binance = createBinanceSpotClient({ apiKey: process.env.BINANCE_API_KEY, secretKey: process.env.BINANCE_SECRET_KEY, environment });
 const futures = createBinanceUsdMClient({ apiKey: process.env.BINANCE_API_KEY, secretKey: process.env.BINANCE_SECRET_KEY, environment });
 const margin = createBinanceMarginClient({ apiKey: process.env.BINANCE_API_KEY, secretKey: process.env.BINANCE_SECRET_KEY, environment });
-const gateway = process.env.GATEWAY_BASE_URL && process.env.GATEWAY_API_KEY
-  ? createModelGateway({ baseUrl: process.env.GATEWAY_BASE_URL, apiKey: process.env.GATEWAY_API_KEY, provider: gatewayProvider, model: defaultModel, reasoningEffort: defaultReasoning })
+const gateway = gatewayBaseUrl && gatewayApiKey
+  ? createModelGateway({ baseUrl: gatewayBaseUrl, apiKey: gatewayApiKey, provider: gatewayProvider, model: defaultModel, reasoningEffort: defaultReasoning })
   : null;
 const drafts = new Map();
 const futuresDrafts = new Map();
@@ -54,13 +56,8 @@ const defaultCexFeeds = [
   'https://rsshub.app/okx/announcement',
   'https://rsshub.app/bybit/announcement'
 ];
-const cexFeedUrls = (process.env.NEWS_CEX_RSS_URLS || defaultCexFeeds.join(',')).split(',').map((item) => item.trim()).filter(Boolean);
-const feedUrls = [...(remoteNewsOnly ? [] : (process.env.NEWS_RSS_URLS || defaultNewsFeeds.join(',')).split(',')), ...cexFeedUrls].map((item) => item.trim()).filter(Boolean);
-const cexApiSources = [
-  { name: 'Binance 官方公告', url: 'https://www.binance.com/bapi/composite/v1/public/cms/article/list/query?type=1&pageNo=1&pageSize=30', parse: (payload) => parseBinanceAnnouncements(payload, 'Binance 官方公告') },
-  { name: 'OKX 官方公告', url: 'https://www.okx.com/api/v5/support/announcements?limit=30', parse: (payload) => parseOkxAnnouncements(payload, 'OKX 官方公告') },
-];
-const apiSources = [...cexApiSources, ...(externalNewsEnabled && !remoteNewsOnly ? [{ name: 'cryptocurrency.cv', url: process.env.CRYPTO_NEWS_URL || 'https://cryptocurrency.cv/api/news?limit=30' }] : [])];
+const feedUrls = remoteNewsOnly ? [] : [...(process.env.NEWS_RSS_URLS || defaultNewsFeeds.join(',')).split(','), ...(process.env.NEWS_CEX_RSS_URLS || defaultCexFeeds.join(',')).split(',')].map((item) => item.trim()).filter(Boolean);
+const apiSources = externalNewsEnabled && !remoteNewsOnly ? [{ name: 'cryptocurrency.cv', url: process.env.CRYPTO_NEWS_URL || 'https://cryptocurrency.cv/api/news?limit=30' }] : [];
 if (process.env.OPENNEWS_TOKEN) {
   for (const keyword of socialKeywords) {
     apiSources.push({ name: `X · ${keyword}`, url: 'https://ai.6551.io/open/twitter_search', method: 'POST', headers: { Authorization: `Bearer ${process.env.OPENNEWS_TOKEN}`, 'Content-Type': 'application/json' }, body: { keywords: keyword, maxResults: 20, product: 'Latest', excludeReplies: true } });

@@ -29,16 +29,6 @@ export function parseNewsJson(payload, source) {
   }).filter((item) => item.title && item.url);
 }
 
-export function parseBinanceAnnouncements(payload, source = 'Binance') {
-  const articles = payload?.data?.catalogs?.flatMap((catalog) => catalog.articles || []) || [];
-  return parseNewsJson({ items: articles.map((item) => ({ title: item.title, id: item.code || item.id, url: item.url || `https://www.binance.com/en/support/announcement/${item.code || item.id}`, publishedAt: item.releaseDate })) }, source);
-}
-
-export function parseOkxAnnouncements(payload, source = 'OKX') {
-  const details = payload?.data?.flatMap((group) => group.details || []) || [];
-  return parseNewsJson({ items: details.map((item) => ({ title: item.title, url: item.url, publishedAt: item.pTime })) }, source);
-}
-
 export function parseFeed(xml, source) {
   const blocks = [...xml.matchAll(/<(?:item|entry)\b[^>]*>([\s\S]*?)<\/(?:item|entry)>/gi)].map((match) => match[1]);
   return blocks.map((block) => {
@@ -68,9 +58,7 @@ export class NewsService {
       try {
         const response = await this.fetchImpl(source.url, { method: source.method || 'GET', headers: { Accept: 'application/json', 'User-Agent': 'CryptoAgent/0.1 news connector', ...(source.headers || {}) }, body: source.body ? JSON.stringify(source.body) : undefined, signal: AbortSignal.timeout(12_000) });
         if (!response.ok) continue;
-        const payload = await response.json();
-        const items = source.parse ? source.parse(payload) : parseNewsJson(payload, source.name);
-        for (const item of items) if (!this.items.has(item.id)) { this.items.set(item.id, item); fresh.push(item); }
+        for (const item of parseNewsJson(await response.json(), source.name)) if (!this.items.has(item.id)) { this.items.set(item.id, item); fresh.push(item); }
       } catch { /* optional API sources must not stop RSS collection */ }
     }
     if (this.items.size > 500) this.items = new Map([...this.items.entries()].slice(-500));
