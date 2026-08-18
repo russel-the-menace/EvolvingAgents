@@ -34,6 +34,21 @@ test('USD-M Futures client uses the Futures time and account endpoints', async (
   assert.match(calls[1], /\/fapi\/v2\/account\?/);
 });
 
+test('asset clients use the official signed wallet, earn, funding, and Futures endpoints', async () => {
+  const spotCalls = [];
+  const spot = createBinanceSpotClient({ apiKey: 'public', secretKey: 'private', now: () => 1_000, fetchImpl: async (url) => { spotCalls.push(url); return new Response(JSON.stringify(url.endsWith('/api/v3/time') ? { serverTime: 2_000 } : [])); } });
+  await spot.fundingAsset();
+  await spot.walletBalance('USDT');
+  await spot.earnFlexible();
+  assert.match(spotCalls[1], /\/sapi\/v1\/asset\/get-funding-asset/);
+  assert.match(spotCalls[2], /\/sapi\/v1\/asset\/wallet\/balance\?quoteAsset=USDT/);
+  assert.match(spotCalls[3], /\/sapi\/v1\/simple-earn\/flexible\/position\?size=100/);
+  const futuresCalls = [];
+  const futuresClient = createBinanceUsdMClient({ apiKey: 'public', secretKey: 'private', now: () => 1_000, fetchImpl: async (url) => { futuresCalls.push(url); return new Response(JSON.stringify(url.endsWith('/fapi/v1/time') ? { serverTime: 2_000 } : {})); } });
+  await futuresClient.assetAccount();
+  assert.match(futuresCalls[1], /\/fapi\/v3\/account/);
+});
+
 test('Margin client uses signed margin account and order endpoints', async () => {
   const calls = [];
   const fetchImpl = async (url) => { calls.push(url); return new Response(JSON.stringify(url.endsWith('/api/v3/time') ? { serverTime: 2_000 } : { userAssets: [] }), { status: 200 }); };

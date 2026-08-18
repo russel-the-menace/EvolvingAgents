@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type CSSProperties } from 'react';
-import { ArrowDownLeft, ArrowLeftRight, ArrowUpRight, Bot, Check, ChevronDown, CircleDollarSign, Eye, FileText, Home, LineChart, MessageSquare, Monitor, Moon, PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen, Plus, RefreshCw, Search, SendHorizontal, Settings2, ShieldCheck, Sun, Wallet, WalletCards, X } from 'lucide-react';
+import { ArrowDownLeft, ArrowLeftRight, ArrowUpRight, Bot, Check, ChevronDown, CircleDollarSign, Eye, FileText, Home, LineChart, MessageSquare, Monitor, Moon, PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen, Plus, RefreshCw, Search, SendHorizontal, Settings2, ShieldCheck, Sun, WalletCards, X } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 
@@ -148,8 +148,9 @@ function AssetWorkspace() {
   const [assetTab, setAssetTab] = useState<AssetTab>('overview');
   const [data, setData] = useState<AssetSnapshot | null>(null);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
   const [hidden, setHidden] = useState(false);
-  async function load() { setLoading(true); try { setData(await api<AssetSnapshot>('/assets')); } finally { setLoading(false); } }
+  async function load() { setLoading(true); setLoadError(''); try { setData(await api<AssetSnapshot>('/assets')); } catch (caught) { setLoadError(caught instanceof Error ? caught.message : '无法读取 Binance 资产'); } finally { setLoading(false); } }
   useEffect(() => { void load(); }, []);
   const spot = data?.spot?.balances || [];
   const funding = data?.funding || [];
@@ -161,7 +162,7 @@ function AssetWorkspace() {
   const tabs: Array<[AssetTab, string]> = [['overview', '总览'], ['earn', '理财'], ['spot', '现货'], ['funding', '资金'], ['futures', '合约']];
   const nav = [[Home, '首页', 'home'], [LineChart, '行情', 'markets'], [ArrowLeftRight, '交易', 'trade'], [FileText, '合约', 'contracts'], [WalletCards, '资产', 'assets']] as const;
   return <section className="asset-app">
-    <div className="asset-content">{bottomTab === 'assets' ? <><div className="asset-tabs" role="tablist">{tabs.map(([id, label]) => <button className={assetTab === id ? 'active' : ''} key={id} onClick={() => setAssetTab(id)}>{label}</button>)}</div><div className="asset-summary"><div><span>{assetTab === 'overview' ? '预估总资产' : `${tabs.find(([id]) => id === assetTab)?.[1]}资产`}</span><button title={hidden ? '显示余额' : '隐藏余额'} aria-label={hidden ? '显示余额' : '隐藏余额'} onClick={() => setHidden((value) => !value)}><Eye size={15} /></button></div><strong>{amount(assetTab === 'overview' ? walletTotal : assetTab === 'futures' ? data?.futures?.totalWalletBalance : rows.reduce((sum, item) => sum + Number(item.primary || 0), 0))} <small>USDT</small></strong><div className="asset-actions"><button>添加资金</button><button>转出</button><button>划转</button></div></div>{assetTab === 'overview' ? <div className="wallet-overview"><div className="asset-list-heading"><strong>钱包</strong><button title="刷新资产" aria-label="刷新资产" onClick={() => void load()}><RefreshCw className={loading ? 'spin' : ''} size={15} /></button></div>{data?.wallets?.filter((item) => item.activate).map((item) => <div className="asset-row" key={item.walletName}><div><span className="asset-symbol">{item.walletName.slice(0, 1)}</span><strong>{item.walletName}</strong></div><b>{amount(item.balance)} USDT</b></div>)}</div> : <div className="asset-list"><div className="asset-list-heading"><strong>{tabs.find(([id]) => id === assetTab)?.[1]}资产</strong><Search size={17} /></div>{rows.length ? rows.map((item) => <div className="asset-row" key={item.asset}><div><span className="asset-symbol">{item.asset.slice(0, 1)}</span><span><strong>{item.asset}</strong><small>{item.secondary}</small></span></div><b>{amount(item.primary)}</b></div>) : <p className="asset-empty">{loading ? '正在读取 Binance 账户…' : data?.errors.find((item) => item.startsWith(assetTab)) || '该账户暂无非零资产'}</p>}</div>}{data?.errors.length ? <details className="asset-errors"><summary>部分账户不可用</summary>{data.errors.map((item) => <p key={item}>{item}</p>)}</details> : null}</> : <div className="asset-placeholder"><strong>{nav.find(([, , id]) => id === bottomTab)?.[1]}</strong><span>此导航将在后续视图中实现</span></div>}</div>
+    <div className="asset-content">{bottomTab === 'assets' ? <><div className="asset-tabs" role="tablist">{tabs.map(([id, label]) => <button className={assetTab === id ? 'active' : ''} key={id} onClick={() => setAssetTab(id)}>{label}</button>)}</div><div className="asset-summary"><div><span>{assetTab === 'overview' ? '预估总资产' : `${tabs.find(([id]) => id === assetTab)?.[1]}资产`}</span><button title={hidden ? '显示余额' : '隐藏余额'} aria-label={hidden ? '显示余额' : '隐藏余额'} onClick={() => setHidden((value) => !value)}><Eye size={15} /></button></div><strong>{amount(assetTab === 'overview' ? walletTotal : assetTab === 'futures' ? data?.futures?.totalWalletBalance : rows.reduce((sum, item) => sum + Number(item.primary || 0), 0))} <small>USDT</small></strong><div className="asset-actions"><button disabled title="资金操作尚未启用">添加资金</button><button disabled title="资金操作尚未启用">转出</button><button disabled title="资金操作尚未启用">划转</button></div></div>{assetTab === 'overview' ? <div className="wallet-overview"><div className="asset-list-heading"><strong>钱包</strong><button title="刷新资产" aria-label="刷新资产" onClick={() => void load()}><RefreshCw className={loading ? 'spin' : ''} size={15} /></button></div>{data?.wallets?.filter((item) => item.activate).map((item) => <div className="asset-row" key={item.walletName}><div><span className="asset-symbol">{item.walletName.slice(0, 1)}</span><strong>{item.walletName}</strong></div><b>{amount(item.balance)} USDT</b></div>)}</div> : <div className="asset-list"><div className="asset-list-heading"><strong>{tabs.find(([id]) => id === assetTab)?.[1]}资产</strong><Search size={17} /></div>{rows.length ? rows.map((item) => <div className="asset-row" key={item.asset}><div><span className="asset-symbol">{item.asset.slice(0, 1)}</span><span><strong>{item.asset}</strong><small>{item.secondary}</small></span></div><b>{amount(item.primary)}</b></div>) : <p className="asset-empty">{loading ? '正在读取 Binance 账户…' : data?.errors.find((item) => item.startsWith(assetTab)) || '该账户暂无非零资产'}</p>}</div>}{data?.errors.length ? <details className="asset-errors"><summary>部分账户不可用</summary>{data.errors.map((item) => <p key={item}>{item}</p>)}</details> : null}</> : <div className="asset-placeholder"><strong>{nav.find(([, , id]) => id === bottomTab)?.[1]}</strong><span>此导航将在后续视图中实现</span></div>}{loadError && <p className="asset-load-error">{loadError}</p>}</div>
     <nav className="asset-bottom-nav" aria-label="Binance workspace navigation">{nav.map(([Icon, label, id]) => <button className={bottomTab === id ? 'active' : ''} key={id} onClick={() => setBottomTab(id)}><Icon size={19} /><span>{label}</span></button>)}</nav>
   </section>;
 }
@@ -187,9 +188,6 @@ export function App() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [news, setNews] = useState<NewsItem[]>([]);
-  const [emergency, setEmergency] = useState<EmergencyState>({});
-  const [futuresPositions, setFuturesPositions] = useState<FuturesPosition[]>([]);
-  const [marginAccount, setMarginAccount] = useState<MarginAccount | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [leftWidth, setLeftWidth] = useState(() => Math.min(window.innerWidth * .2, Math.max(window.innerWidth * .1, Number(window.localStorage.getItem('crypto-agent-left-width')) || window.innerWidth * .14)));
   const [rightWidth, setRightWidth] = useState(() => Math.min(window.innerWidth * .6, Math.max(window.innerWidth * .3, Number(window.localStorage.getItem('crypto-agent-right-width')) || window.innerWidth * .36)));
@@ -204,11 +202,6 @@ export function App() {
     try {
       const next = await api<Status>('/status'); setStatus(next);
       if (next.model) { setModelId((current) => next.model?.models.includes(current) ? current : next.model!.defaultModel); setReasoningEffort((current) => next.model?.reasoning.includes(current) ? current : next.model!.defaultReasoning); }
-      if (next.configured) {
-        const [positions, margin] = await Promise.allSettled([api<FuturesPosition[]>('/futures/positions'), api<MarginAccount>('/margin/account')]);
-        if (positions.status === 'fulfilled') setFuturesPositions(positions.value.filter((item) => Number(item.positionAmt) !== 0));
-        if (margin.status === 'fulfilled') setMarginAccount(margin.value);
-      }
     } catch (caught) { setError(caught instanceof Error ? caught.message : 'Unable to connect.'); }
   }
   useEffect(() => { void refresh(); }, []);
@@ -228,7 +221,7 @@ export function App() {
     stream.addEventListener('breaking', add);
     stream.addEventListener('digest', (event) => { add(event); const payload = JSON.parse(event.data) as { items?: NewsItem[] }; if (payload.items?.length) notify('CryptoAgent 两小时新闻', `${payload.items.length} 条新新闻`); });
     stream.addEventListener('ready', add);
-    stream.addEventListener('emergency', (event) => { const next = JSON.parse(event.data) as EmergencyState; setEmergency(next); notify('CryptoAgent 紧急授权待确认', next.pending?.title || '检测到爆炸性新闻'); });
+    stream.addEventListener('emergency', (event) => { const next = JSON.parse(event.data) as EmergencyState; notify('CryptoAgent 紧急授权待确认', next.pending?.title || '检测到爆炸性新闻'); });
     const onBreaking = (event: MessageEvent<string>) => { const item = (JSON.parse(event.data) as { item: NewsItem }).item; notify('CryptoAgent 爆炸性新闻', item.title); };
     stream.addEventListener('breaking', onBreaking);
     if (!window.cryptoAgent && typeof Notification !== 'undefined' && Notification.permission === 'default') void Notification.requestPermission().catch(() => {});
@@ -301,8 +294,10 @@ export function App() {
   const shellStyle = { '--left-width': leftCollapsed ? '0px' : `${leftWidth}px`, '--right-width': rightCollapsed ? '0px' : `${rightWidth}px` } as CSSProperties;
   return <main ref={shellRef} className={`terminal-shell ${leftCollapsed ? 'left-collapsed' : ''} ${rightCollapsed ? 'right-collapsed' : ''} ${resizing ? 'is-resizing' : ''}`} style={shellStyle}>
     <aside className="portfolio">
-      <header><CircleDollarSign size={23} /><div><strong>CryptoAgent</strong><span>Binance workspace</span></div><button className="sidebar-toggle" title="隐藏左侧栏" aria-label="隐藏左侧栏" onClick={() => setLeftCollapsed(true)}><PanelLeftClose size={17} /></button></header>
-      <nav className="recents" aria-label="最近对话"><div className="section-title"><span>Recents</span><button title="新对话" aria-label="新对话" onClick={newChat}><Plus size={15} /></button></div>{sessions.length ? sessions.map((session) => <button className={activeSessionId === session.id ? 'active' : ''} key={session.id} onClick={() => openSession(session)}><MessageSquare size={14} /><span>{session.title}</span></button>) : <p>暂无最近对话</p>}</nav>
+      <header><CircleDollarSign size={23} /><div><strong>CryptoAgent</strong><span>Binance workspace</span></div><button className="sidebar-toggle left-panel-toggle" title="隐藏左侧栏" aria-label="隐藏左侧栏" onClick={() => setLeftCollapsed(true)}><PanelLeftClose size={17} /></button></header>
+      <button className="new-chat" onClick={newChat}><Plus size={17} />New chat</button>
+      <nav className="recents" aria-label="最近对话"><div className="section-title"><span>Recents</span></div>{sessions.length ? sessions.map((session) => <button className={activeSessionId === session.id ? 'active' : ''} key={session.id} onClick={() => openSession(session)}><MessageSquare size={14} /><span>{session.title}</span></button>) : <p>暂无最近对话</p>}</nav>
+      <button className="settings-entry" onClick={() => setSettingsOpen(true)}><Settings2 size={16} />设置与外观</button>
       <button className="resize-handle left-resize" title="调整左侧栏宽度" aria-label="调整左侧栏宽度" onPointerDown={(event) => { event.currentTarget.setPointerCapture(event.pointerId); setResizing('left'); }} />
     </aside>
     {leftCollapsed && <button className="sidebar-reopen left-reopen" title="显示左侧栏" aria-label="显示左侧栏" onClick={() => setLeftCollapsed(false)}><PanelLeftOpen size={18} /></button>}
