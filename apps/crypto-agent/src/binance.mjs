@@ -90,6 +90,7 @@ export function createBinanceUsdMClient({ apiKey, secretKey, environment = 'test
     account: () => request('GET', '/fapi/v2/account', {}, true),
     assetAccount: () => request('GET', '/fapi/v3/account', {}, true),
     positionRisk: (symbol) => request('GET', '/fapi/v2/positionRisk', symbol ? { symbol } : {}, true),
+    userTrades: (symbol, limit = 50) => request('GET', '/fapi/v1/userTrades', { symbol, limit }, true),
     leverage: (symbol, leverage) => request('POST', '/fapi/v1/leverage', { symbol, leverage }, true),
     marginType: (symbol, marginType) => request('POST', '/fapi/v1/marginType', { symbol, marginType }, true),
     testOrder: (order) => request('POST', '/fapi/v1/order/test', order, true),
