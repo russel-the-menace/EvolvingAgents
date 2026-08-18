@@ -14,6 +14,8 @@ const environment = process.env.BINANCE_ENV === 'live' ? 'live' : 'testnet';
 const liveTradingEnabled = environment === 'live' && process.env.BINANCE_LIVE_TRADING === 'true';
 const symbolConfig = (process.env.BINANCE_SYMBOLS || 'BTCUSDT,ETHUSDT').trim();
 const allowedSymbols = symbolConfig === '*' ? null : symbolConfig.split(',').map((item) => item.trim().toUpperCase()).filter(Boolean);
+const externalNewsEnabled = process.env.NEWS_EXTERNAL_SOURCES !== 'off';
+const socialKeywords = (process.env.NEWS_SOCIAL_KEYWORDS || '').split(',').map((item) => item.trim()).filter(Boolean);
 const maxOrderUsdt = Number(process.env.MAX_ORDER_USDT || 100);
 const configured = Boolean(process.env.BINANCE_API_KEY && process.env.BINANCE_SECRET_KEY);
 const gatewayProvider = process.env.GATEWAY_PROVIDER || 'openai';
@@ -35,7 +37,21 @@ const symbolAllowed = (symbol) => !allowedSymbols || allowedSymbols.includes(sym
 const defaultNewsState = process.platform === 'darwin' && process.env.HOME ? `${process.env.HOME}/Library/Application Support/CryptoAgent/news-state.json` : '';
 const defaultNewsKnowledge = process.platform === 'darwin' && process.env.HOME ? `${process.env.HOME}/Library/Application Support/CryptoAgent/news-knowledge.sqlite` : '';
 const newsLearner = createNewsLearner(process.env.NEWS_LEARNING_DB_FILE || defaultNewsKnowledge);
-const news = new NewsService({ feedUrls: (process.env.NEWS_RSS_URLS || '').split(',').map((item) => item.trim()).filter(Boolean), stateFile: process.env.NEWS_STATE_FILE || defaultNewsState, pollMs: Number(process.env.NEWS_POLL_MS || 300_000), learnItem: newsLearner?.learn });
+const defaultNewsFeeds = [
+  'https://www.coindesk.com/arc/outboundfeeds/rss/',
+  'https://cointelegraph.com/rss',
+  'https://decrypt.co/feed',
+  'https://bitcoinmagazine.com/.rss/full/'
+];
+const feedUrls = (process.env.NEWS_RSS_URLS || defaultNewsFeeds.join(',')).split(',').map((item) => item.trim()).filter(Boolean);
+const apiSources = externalNewsEnabled ? [{ name: 'cryptocurrency.cv', url: process.env.CRYPTO_NEWS_URL || 'https://cryptocurrency.cv/api/news?limit=30' }] : [];
+if (process.env.OPENNEWS_TOKEN) {
+  for (const keyword of socialKeywords) {
+    apiSources.push({ name: `X · ${keyword}`, url: 'https://ai.6551.io/open/twitter_search', method: 'POST', headers: { Authorization: `Bearer ${process.env.OPENNEWS_TOKEN}`, 'Content-Type': 'application/json' }, body: { keywords: keyword, maxResults: 20, product: 'Latest', excludeReplies: true } });
+    apiSources.push({ name: `OpenNews · ${keyword}`, url: 'https://ai.6551.io/open/news_search', method: 'POST', headers: { Authorization: `Bearer ${process.env.OPENNEWS_TOKEN}`, 'Content-Type': 'application/json' }, body: { q: keyword, limit: 20, page: 1 } });
+  }
+}
+const news = new NewsService({ feedUrls, apiSources, stateFile: process.env.NEWS_STATE_FILE || defaultNewsState, pollMs: Number(process.env.NEWS_POLL_MS || 300_000), learnItem: newsLearner?.learn });
 const newsClients = new Set();
 const emergency = new EmergencyPolicy({ budgetFraction: Number(process.env.EMERGENCY_BUDGET_FRACTION || 0.2), grantMs: Number(process.env.EMERGENCY_GRANT_MS || 30 * 60_000), cooldownMs: Number(process.env.EMERGENCY_COOLDOWN_MS || 15 * 60_000) });
 void news.load().then(() => news.start());
@@ -115,11 +131,11 @@ export function createCryptoServer() {
   return createServer(async (request, response) => {
     try {
       if (request.method === 'GET' && request.url === '/api/status') {
-        return sendJson(response, 200, { configured, environment, liveTradingEnabled, allowedSymbols, maxOrderUsdt, futures: { configured, maxLeverage: 125, confirmationRequired: true }, margin: { configured, confirmationRequired: true, borrowRepayEnabled: false }, news: { configured: news.feedUrls.length > 0, learningEnabled: Boolean(newsLearner), pollMs: news.pollMs }, model: { provider: gatewayProvider, models: modelOptions, reasoning: reasoningOptions, defaultModel, defaultReasoning } });
+        return sendJson(response, 200, { configured, environment, liveTradingEnabled, allowedSymbols, maxOrderUsdt, futures: { configured, maxLeverage: 125, confirmationRequired: true }, margin: { configured, confirmationRequired: true, borrowRepayEnabled: false }, news: { configured: news.feedUrls.length > 0 || news.apiSources.length > 0, sources: [...news.feedUrls.map((url) => new URL(url).hostname), ...news.apiSources.map((source) => source.name)], learningEnabled: Boolean(newsLearner), pollMs: news.pollMs }, model: { provider: gatewayProvider, models: modelOptions, reasoning: reasoningOptions, defaultModel, defaultReasoning } });
       }
       if (request.method === 'GET' && request.url === '/api/news') {
         const mode = new URL(request.url, 'http://localhost').searchParams.get('mode');
-        if (mode === 'startup' && news.feedUrls.length) await news.poll();
+        if (mode === 'startup' && (news.feedUrls.length || news.apiSources.length)) await news.poll();
         return sendJson(response, 200, { items: mode === 'startup' ? await news.startupDigest() : news.recent() });
       }
       if (request.method === 'GET' && request.url === '/api/news/stream') {

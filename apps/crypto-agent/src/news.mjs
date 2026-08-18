@@ -9,6 +9,26 @@ function tag(block, name) { return text(block.match(new RegExp(`<${name}(?:\\s[^
 function link(block) { return text(block.match(/<link[^>]+href=["']([^"']+)["'][^>]*>/i)?.[1] || tag(block, 'link') || tag(block, 'guid')); }
 function hash(value) { return createHash('sha256').update(value).digest('hex').slice(0, 20); }
 
+function jsonItems(payload) {
+  if (Array.isArray(payload)) return payload;
+  for (const key of ['articles', 'items', 'data', 'results', 'news']) if (Array.isArray(payload?.[key])) return payload[key];
+  return [];
+}
+
+export function parseNewsJson(payload, source) {
+  return jsonItems(payload).map((item) => {
+    const title = text(item.title || item.headline || item.text || item.content || item.description);
+    const rawUrl = text(item.url || item.link || item.news_url || item.sourceUrl || item.tweetUrl);
+    const id = text(item.id || item.tweetId || item.statusId);
+    const url = rawUrl || (source.startsWith('X · ') && id ? `https://x.com/i/web/status/${id}` : id);
+    const summary = text(item.summary || item.description || item.text || item.content || title);
+    const publishedAt = item.publishedAt || item.published_at || item.createdAt || item.created_at || item.timestamp || item.ts || item.date;
+    const timestamp = typeof publishedAt === 'number' ? (publishedAt < 1e12 ? publishedAt * 1000 : publishedAt) : Date.parse(publishedAt || '') || Date.now();
+    const publisher = text(item.source || item.source_name || item.publisher || item.author?.name || source);
+    return { id: hash(`${url}|${title}`), title: title.slice(0, 500), url, source: publisher || source, summary: summary.slice(0, 500), publishedAt: new Date(timestamp).toISOString(), urgency: URGENT.test(`${title} ${summary}`) ? 'breaking' : 'normal' };
+  }).filter((item) => item.title && item.url);
+}
+
 export function parseFeed(xml, source) {
   const blocks = [...xml.matchAll(/<(?:item|entry)\b[^>]*>([\s\S]*?)<\/(?:item|entry)>/gi)].map((match) => match[1]);
   return blocks.map((block) => {
@@ -20,8 +40,8 @@ export function parseFeed(xml, source) {
 }
 
 export class NewsService {
-  constructor({ feedUrls = [], stateFile = '', pollMs = 300_000, fetchImpl = fetch, learnItem } = {}) {
-    this.feedUrls = feedUrls; this.stateFile = stateFile; this.pollMs = pollMs; this.fetchImpl = fetchImpl; this.learnItem = learnItem; this.items = new Map(); this.listeners = new Set(); this.timer = null; this.lastDigestAt = 0; this.startupDate = '';
+  constructor({ feedUrls = [], apiSources = [], stateFile = '', pollMs = 300_000, fetchImpl = fetch, learnItem } = {}) {
+    this.feedUrls = feedUrls; this.apiSources = apiSources; this.stateFile = stateFile; this.pollMs = pollMs; this.fetchImpl = fetchImpl; this.learnItem = learnItem; this.items = new Map(); this.listeners = new Set(); this.timer = null; this.lastDigestAt = 0; this.startupDate = '';
   }
   async load() { if (!this.stateFile) return; try { const saved = JSON.parse(await readFile(this.stateFile, 'utf8')); for (const item of saved.items || []) this.items.set(item.id, item); this.startupDate = saved.startupDate || ''; this.lastDigestAt = saved.lastDigestAt || 0; } catch { /* first run */ } }
   async save() { if (!this.stateFile) return; await mkdir(dirname(this.stateFile), { recursive: true }); await writeFile(this.stateFile, JSON.stringify({ items: [...this.items.values()].slice(-500), startupDate: this.startupDate, lastDigestAt: this.lastDigestAt })); }
@@ -32,6 +52,13 @@ export class NewsService {
     for (const url of this.feedUrls) {
       try { const response = await this.fetchImpl(url, { signal: AbortSignal.timeout(10_000), headers: { Accept: 'application/rss+xml, application/atom+xml, application/xml, text/xml', 'User-Agent': 'CryptoAgent/0.1 RSS reader' } }); if (!response.ok) continue; const source = new URL(url).hostname; for (const item of parseFeed(await response.text(), source)) if (!this.items.has(item.id)) { this.items.set(item.id, item); fresh.push(item); } } catch { /* one source failing must not stop other feeds */ }
     }
+    for (const source of this.apiSources) {
+      try {
+        const response = await this.fetchImpl(source.url, { method: source.method || 'GET', headers: { Accept: 'application/json', 'User-Agent': 'CryptoAgent/0.1 news connector', ...(source.headers || {}) }, body: source.body ? JSON.stringify(source.body) : undefined, signal: AbortSignal.timeout(12_000) });
+        if (!response.ok) continue;
+        for (const item of parseNewsJson(await response.json(), source.name)) if (!this.items.has(item.id)) { this.items.set(item.id, item); fresh.push(item); }
+      } catch { /* optional API sources must not stop RSS collection */ }
+    }
     if (this.items.size > 500) this.items = new Map([...this.items.entries()].slice(-500));
     for (const item of fresh) {
       if (this.learnItem) void Promise.resolve(this.learnItem(item)).catch(() => {});
@@ -40,7 +67,7 @@ export class NewsService {
     if (fresh.length) await this.save();
     return fresh;
   }
-  start() { if (this.timer || !this.feedUrls.length) return; void this.poll(); this.timer = setInterval(() => void this.poll(), this.pollMs); this.timer.unref?.(); }
+  start() { if (this.timer || (!this.feedUrls.length && !this.apiSources.length)) return; void this.poll(); this.timer = setInterval(() => void this.poll(), this.pollMs); this.timer.unref?.(); }
   stop() { if (this.timer) clearInterval(this.timer); this.timer = null; }
   recent(limit = 30) { return [...this.items.values()].sort((a, b) => Date.parse(b.publishedAt) - Date.parse(a.publishedAt)).slice(0, limit); }
   async startupDigest() {
