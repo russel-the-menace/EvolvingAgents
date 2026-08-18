@@ -121,7 +121,7 @@ button { cursor: pointer; }
 .theme-options button:hover, .theme-options button.selected { border-color: var(--action); color: var(--action-ink); background: var(--action); }
 .asset-app { display: grid; height: 100%; min-height: 0; grid-template-rows: minmax(0, 1fr) 64px; color: var(--ink); background: var(--panel); }
 .asset-content { min-height: 0; overflow-y: auto; padding-bottom: 24px; }
-.asset-tabs { position: sticky; top: 0; z-index: 5; display: grid; height: 52px; grid-template-columns: repeat(5, minmax(0, 1fr)); border-bottom: 1px solid var(--border); padding-right: 44px; background: color-mix(in srgb, var(--panel) 96%, transparent); }
+.asset-tabs { position: sticky; top: 0; z-index: 5; display: grid; height: 52px; grid-template-columns: repeat(5, minmax(0, 1fr)); border-bottom: 1px solid var(--border); padding-right: 0; background: color-mix(in srgb, var(--panel) 96%, transparent); }
 .asset-tabs button { position: relative; border: 0; padding: 0 4px; color: var(--muted); background: transparent; font-size: 12px; font-weight: 650; }
 .asset-tabs button.active { color: var(--ink); }
 .asset-tabs button.active::after { position: absolute; right: 22%; bottom: -1px; left: 22%; height: 2px; background: #f0b90b; content: ''; }
