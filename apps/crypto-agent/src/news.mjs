@@ -30,7 +30,7 @@ export class NewsService {
   async poll() {
     const fresh = [];
     for (const url of this.feedUrls) {
-      try { const response = await this.fetchImpl(url, { signal: AbortSignal.timeout(10_000), headers: { Accept: 'application/rss+xml, application/atom+xml, application/xml, text/xml' } }); if (!response.ok) continue; const source = new URL(url).hostname; for (const item of parseFeed(await response.text(), source)) if (!this.items.has(item.id)) { this.items.set(item.id, item); fresh.push(item); } } catch { /* one source failing must not stop other feeds */ }
+      try { const response = await this.fetchImpl(url, { signal: AbortSignal.timeout(10_000), headers: { Accept: 'application/rss+xml, application/atom+xml, application/xml, text/xml', 'User-Agent': 'CryptoAgent/0.1 RSS reader' } }); if (!response.ok) continue; const source = new URL(url).hostname; for (const item of parseFeed(await response.text(), source)) if (!this.items.has(item.id)) { this.items.set(item.id, item); fresh.push(item); } } catch { /* one source failing must not stop other feeds */ }
     }
     if (this.items.size > 500) this.items = new Map([...this.items.entries()].slice(-500));
     for (const item of fresh) {

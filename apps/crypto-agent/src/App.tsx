@@ -18,6 +18,8 @@ type MarginAccount = { marginLevel?: string; totalAssetOfBtc?: string; totalLiab
 
 declare global { interface Window { cryptoAgent?: { notify: (title: string, body: string) => void } } }
 
+if (window.cryptoAgent && new URLSearchParams(window.location.search).get('widget') !== '1') document.documentElement.dataset.desktop = 'true';
+
 function formatNumber(value: number | string) {
   const number = Number(value);
   return Number.isFinite(number) ? number.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '-';
