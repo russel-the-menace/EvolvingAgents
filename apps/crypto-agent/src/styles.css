@@ -6,7 +6,8 @@
 body { min-height: 100vh; margin: 0; color: var(--ink); background: var(--bg); }
 button, textarea { font: inherit; }
 button { cursor: pointer; }
-.terminal-shell { display: grid; height: 100vh; min-height: 100vh; grid-template-columns: var(--left-width, 256px) minmax(460px, 1fr) var(--right-width, 360px); overflow: hidden; transition: grid-template-columns .18s ease; }
+.terminal-shell { display: grid; height: 100vh; min-height: 100vh; grid-template-columns: var(--left-width, 256px) minmax(460px, 1fr) var(--right-width, 360px); overflow: hidden; will-change: grid-template-columns; }
+.terminal-shell.is-resizing { cursor: col-resize; }
 .portfolio { position: relative; display: flex; min-width: 0; min-height: 100vh; overflow: hidden; flex-direction: column; border-right: 1px solid var(--border); padding: 20px 18px; background: var(--panel); }
 .left-collapsed .portfolio, .right-collapsed .market-rail { visibility: hidden; border: 0; padding: 0; }
 .portfolio header { display: flex; align-items: center; gap: 10px; padding: 0 4px 20px; }

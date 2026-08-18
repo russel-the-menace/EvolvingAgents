@@ -1,4 +1,4 @@
-import { useEffect, useState, type CSSProperties } from 'react';
+import { useEffect, useRef, useState, type CSSProperties } from 'react';
 import { ArrowDownLeft, ArrowUpRight, Bot, Check, ChevronDown, ChevronRight, CircleDollarSign, MessageSquare, Monitor, Moon, PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen, Plus, RefreshCw, SendHorizontal, Settings2, ShieldCheck, Sun, Wallet, X } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -171,6 +171,9 @@ export function App() {
   const [leftCollapsed, setLeftCollapsed] = useState(false);
   const [rightCollapsed, setRightCollapsed] = useState(false);
   const [resizing, setResizing] = useState<'left' | 'right' | null>(null);
+  const shellRef = useRef<HTMLElement | null>(null);
+  const dragValue = useRef<number | null>(null);
+  const dragFrame = useRef<number | null>(null);
 
   async function refresh() {
     try {
@@ -213,10 +216,20 @@ export function App() {
   useEffect(() => {
     if (!resizing) return;
     const move = (event: PointerEvent) => {
-      if (resizing === 'left') setLeftWidth(Math.min(360, Math.max(220, event.clientX)));
-      else setRightWidth(Math.min(460, Math.max(280, window.innerWidth - event.clientX)));
+      dragValue.current = resizing === 'left' ? Math.min(360, Math.max(220, event.clientX)) : Math.min(460, Math.max(280, window.innerWidth - event.clientX));
+      if (dragFrame.current !== null) return;
+      dragFrame.current = window.requestAnimationFrame(() => {
+        if (dragValue.current !== null) shellRef.current?.style.setProperty(resizing === 'left' ? '--left-width' : '--right-width', `${dragValue.current}px`);
+        dragFrame.current = null;
+      });
     };
-    const stop = () => setResizing(null);
+    const stop = () => {
+      if (dragFrame.current !== null) { window.cancelAnimationFrame(dragFrame.current); dragFrame.current = null; }
+      const value = dragValue.current;
+      if (value !== null) { if (resizing === 'left') setLeftWidth(value); else setRightWidth(value); }
+      dragValue.current = null;
+      setResizing(null);
+    };
     document.body.style.cursor = 'col-resize';
     document.body.style.userSelect = 'none';
     window.addEventListener('pointermove', move);
@@ -256,7 +269,7 @@ export function App() {
   }
 
   const shellStyle = { '--left-width': leftCollapsed ? '0px' : `${leftWidth}px`, '--right-width': rightCollapsed ? '0px' : `${rightWidth}px` } as CSSProperties;
-  return <main className={`terminal-shell ${leftCollapsed ? 'left-collapsed' : ''} ${rightCollapsed ? 'right-collapsed' : ''}`} style={shellStyle}>
+  return <main ref={shellRef} className={`terminal-shell ${leftCollapsed ? 'left-collapsed' : ''} ${rightCollapsed ? 'right-collapsed' : ''} ${resizing ? 'is-resizing' : ''}`} style={shellStyle}>
     <aside className="portfolio">
       <header><CircleDollarSign size={23} /><div><strong>CryptoAgent</strong><span>Binance workspace</span></div><button className="sidebar-toggle" title="隐藏左侧栏" aria-label="隐藏左侧栏" onClick={() => setLeftCollapsed(true)}><PanelLeftClose size={17} /></button></header>
       <button className="new-chat" onClick={newChat}><Plus size={17} />新对话</button>
