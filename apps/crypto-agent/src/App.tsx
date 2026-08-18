@@ -13,6 +13,8 @@ type ChartPoint = { time: number; close: number };
 type Theme = 'light' | 'dark' | 'system';
 type NewsItem = { id: string; title: string; url: string; source: string; summary: string; publishedAt: string; urgency: 'normal' | 'breaking' };
 type EmergencyState = { pending?: { id: string; title: string; budget: number }; grant?: { id: string; remaining: number; expiresAt: number } | null };
+type FuturesPosition = { symbol: string; positionAmt: string; entryPrice: string; markPrice: string; liquidationPrice: string; leverage: string; marginType: string; unRealizedProfit: string };
+type MarginAccount = { marginLevel?: string; totalAssetOfBtc?: string; totalLiabilityOfBtc?: string; userAssets?: Array<{ asset: string; borrowed: string; interest: string; free: string }> };
 
 declare global { interface Window { cryptoAgent?: { notify: (title: string, body: string) => void } } }
 
@@ -39,6 +41,12 @@ function EmergencyPanel({ state, onChange }: { state: EmergencyState; onChange: 
     finally { setBusy(false); }
   }
   return <section className="emergency-panel" aria-label="紧急授权">{state.pending && <><strong>紧急新闻待确认</strong><span>{state.pending.title}</span><small>预授权预算 {formatNumber(state.pending.budget, 2)} USDT，仅限现货</small><button disabled={busy} onClick={() => void confirm()}>{busy ? '授权中' : '确认紧急授权'}</button></>}{state.grant && <><strong>紧急授权已启用</strong><span>剩余预算 {formatNumber(state.grant.remaining, 2)} USDT</span><button onClick={() => void api('/emergency/revoke', { method: 'POST', body: JSON.stringify({ reason: 'manual' }) }).then(() => onChange({}))}>撤销授权</button></>}</section>;
+}
+
+function DerivativesPanel({ positions, margin }: { positions: FuturesPosition[]; margin: MarginAccount | null }) {
+  const active = positions.filter((item) => Number(item.positionAmt) !== 0);
+  if (!active.length && !margin) return null;
+  return <section className="derivatives-panel" aria-label="杠杆与合约状态"><div className="news-heading"><strong>杠杆与合约</strong><span>只读风险摘要</span></div>{active.map((position) => <div className="derivative-row" key={position.symbol}><b>{position.symbol} {Number(position.positionAmt) > 0 ? '多' : '空'} {position.leverage}x</b><span>强平 {formatNumber(position.liquidationPrice)}</span><span>未实现 {formatNumber(position.unRealizedProfit, 2)} USDT</span></div>)}{margin && <div className="derivative-row"><b>Margin</b><span>保证金率 {margin.marginLevel || '-'}</span><span>负债 {margin.totalLiabilityOfBtc || '-'} BTC</span></div>}</section>;
 }
 
 async function api<T>(path: string, init?: RequestInit): Promise<T> {
@@ -126,12 +134,19 @@ export function App() {
   const [error, setError] = useState('');
   const [news, setNews] = useState<NewsItem[]>([]);
   const [emergency, setEmergency] = useState<EmergencyState>({});
+  const [futuresPositions, setFuturesPositions] = useState<FuturesPosition[]>([]);
+  const [marginAccount, setMarginAccount] = useState<MarginAccount | null>(null);
 
   async function refresh() {
     try {
       const next = await api<Status>('/status'); setStatus(next);
       if (next.model) { setModelId((current) => next.model?.models.includes(current) ? current : next.model!.defaultModel); setReasoningEffort((current) => next.model?.reasoning.includes(current) ? current : next.model!.defaultReasoning); }
       if (next.configured) setBalances((await api<{ balances: Balance[] }>('/account')).balances);
+      if (next.configured) {
+        const [positions, margin] = await Promise.allSettled([api<FuturesPosition[]>('/futures/positions'), api<MarginAccount>('/margin/account')]);
+        if (positions.status === 'fulfilled') setFuturesPositions(positions.value.filter((item) => Number(item.positionAmt) !== 0));
+        if (margin.status === 'fulfilled') setMarginAccount(margin.value);
+      }
     } catch (caught) { setError(caught instanceof Error ? caught.message : 'Unable to connect.'); }
   }
   useEffect(() => { void refresh(); }, []);
@@ -182,6 +197,7 @@ export function App() {
       <div className="conversation-top"><div><Bot size={18} /><strong>交易对话</strong></div><div className="top-actions"><div className="model-picker"><button className="model-trigger" aria-haspopup="menu" aria-expanded={modelOpen} onClick={() => setModelOpen((open) => !open)}>5.6 {modelId.split('-').at(-1)![0].toUpperCase() + modelId.split('-').at(-1)!.slice(1)} · {({ low: 'Light', medium: 'Medium', high: 'High', xhigh: 'Extra High', max: 'Ultra' } as Record<ReasoningId, string>)[reasoningEffort]}<ChevronDown size={15} /></button>{modelOpen && <div className="model-menu" role="menu"><div className="model-menu-label">Reasoning</div>{(status?.model?.reasoning || ['low', 'medium', 'high', 'xhigh', 'max']).map((option) => <button key={option} className={reasoningEffort === option ? 'selected' : ''} onClick={() => { setReasoningEffort(option); setModelOpen(false); }}>{({ low: 'Light', medium: 'Medium', high: 'High', xhigh: 'Extra High', max: 'Ultra' } as Record<ReasoningId, string>)[option]}{reasoningEffort === option && <Check size={17} />}</button>)}<div className="model-menu-divider" /><div className="model-menu-label">Model</div>{(status?.model?.models || ['gpt-5.6-luna', 'gpt-5.6-sol', 'gpt-5.6-terra']).map((option) => <button key={option} className={modelId === option ? 'selected' : ''} onClick={() => { setModelId(option); setModelOpen(false); }}>{modelLabel(option)}<ChevronRight size={17} /></button>)}</div>}</div><div className="theme-control" role="group" aria-label="主题">{([['light', Sun, '浅色'], ['dark', Moon, '深色'], ['system', Monitor, '跟随系统']] as const).map(([value, Icon, label]) => <button key={value} className={theme === value ? 'selected' : ''} title={label} aria-label={label} onClick={() => setTheme(value)}><Icon size={14} /></button>)}</div><span>{status?.environment === 'live' ? 'LIVE' : 'TESTNET'}</span></div></div>
       <PriceChart symbol="BTCUSDT" environment={status?.environment || 'testnet'} />
       <NewsPanel items={news} />
+      <DerivativesPanel positions={futuresPositions} margin={marginAccount} />
       <EmergencyPanel state={emergency} onChange={setEmergency} />
       <div className="messages">
         {!messages.length && <div className="empty"><Bot size={35} /><h1>说出你想执行的现货交易</h1><p>例如：用 50 USDT 市价买入 BTC。信息不完整时，我会先追问，不会猜测金额。</p><div className="examples"><button onClick={() => setInput('用 50 USDT 市价买入 BTC')}>买入 50 USDT 的 BTC</button><button onClick={() => setInput('卖出 0.001 BTC')}>卖出 0.001 BTC</button></div></div>}
