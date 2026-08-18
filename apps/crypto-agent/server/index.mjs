@@ -109,6 +109,22 @@ async function assetSnapshot() {
   return result;
 }
 
+async function coinMMarket(symbol, interval) {
+  const base = environment === 'testnet' ? 'https://testnet.binancefuture.com' : 'https://dapi.binance.com';
+  const get = async (path, params) => {
+    const response = await fetch(`${base}${path}?${new URLSearchParams(params)}`, { signal: AbortSignal.timeout(10_000) });
+    const result = await response.json();
+    if (!response.ok) throw new BinanceApiError(result.msg || `Binance Coin-M request failed (${response.status}).`, { status: response.status, code: result.code });
+    return result;
+  };
+  const [klines, depth, premium] = await Promise.all([
+    get('/dapi/v1/klines', { symbol, interval, limit: '120' }),
+    get('/dapi/v1/depth', { symbol, limit: '10' }),
+    get('/dapi/v1/premiumIndex', { symbol }),
+  ]);
+  return { symbol, interval, klines, depth, premium };
+}
+
 async function createDraft(rawIntent) {
   const intent = normalizeOrderIntent(rawIntent, { allowedSymbols });
   const [exchange, ticker, account] = await Promise.all([binance.exchangeInfo(intent.symbol), binance.ticker(intent.symbol), accountSnapshot()]);
@@ -271,6 +287,14 @@ export function createCryptoServer() {
         if (!symbol || !symbolAllowed(symbol)) return sendJson(response, 400, { error: 'Symbol is not allowed.' });
         if (!['1m', '5m', '15m', '1h', '4h', '1d'].includes(interval)) return sendJson(response, 400, { error: 'Interval is not allowed.' });
         return sendJson(response, 200, { symbol, interval, klines: await binance.klines(symbol, interval, 120) });
+      }
+      if (request.method === 'GET' && request.url?.startsWith('/api/coinm-market?')) {
+        const query = new URL(request.url, 'http://localhost').searchParams;
+        const symbol = query.get('symbol')?.toUpperCase() || 'BTCUSD_PERP';
+        const interval = query.get('interval') || '5m';
+        if (symbol !== 'BTCUSD_PERP') return sendJson(response, 400, { error: 'Only BTCUSD_PERP is available in this first Coin-M view.' });
+        if (!['1m', '3m', '5m', '15m', '30m', '1h'].includes(interval)) return sendJson(response, 400, { error: 'Interval is not allowed.' });
+        return sendJson(response, 200, await coinMMarket(symbol, interval));
       }
       if (request.method === 'POST' && request.url === '/api/chat') {
         if (!configured) return sendJson(response, 503, { error: 'Configure Binance credentials before preparing an order.' });
