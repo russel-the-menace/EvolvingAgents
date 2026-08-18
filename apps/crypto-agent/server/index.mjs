@@ -122,7 +122,7 @@ async function coinMMarket(symbol, interval) {
     get('/dapi/v1/depth', { symbol, limit: '10' }),
     get('/dapi/v1/premiumIndex', { symbol }),
   ]);
-  return { symbol, interval, klines, depth, premium };
+  return { symbol, interval, klines, depth, premium: Array.isArray(premium) ? premium[0] : premium };
 }
 
 async function createDraft(rawIntent) {
