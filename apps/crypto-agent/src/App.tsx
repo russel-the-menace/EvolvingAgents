@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { ArrowDownLeft, ArrowUpRight, Bot, Check, ChevronDown, ChevronRight, CircleDollarSign, Monitor, Moon, RefreshCw, SendHorizontal, ShieldCheck, Sun, Wallet } from 'lucide-react';
+import { ArrowDownLeft, ArrowUpRight, Bot, Check, ChevronDown, ChevronRight, CircleDollarSign, MessageSquare, Monitor, Moon, Plus, RefreshCw, SendHorizontal, Settings2, ShieldCheck, Sun, Wallet, X } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 
@@ -9,6 +9,7 @@ type Status = { configured: boolean; environment: 'testnet' | 'live'; liveTradin
 type Balance = { asset: string; free: string; locked: string };
 type Draft = { id: string; confirmationToken: string; intent: { symbol: string; side: 'BUY' | 'SELL'; type: string; quantity?: string; quoteOrderQty?: string; price?: string; leverage?: number; marginType?: string }; estimate?: { estimatedPrice: number; estimatedNotional: number; baseQuantity: number; baseAsset: string; quoteAsset: string }; environment: string };
 type Message = { id: string; role: 'user' | 'assistant'; content: string; product?: 'spot' | 'margin' | 'futures'; draft?: Draft; order?: Record<string, unknown> };
+type ChatSession = { id: string; title: string; messages: Message[]; updatedAt: number };
 type ChartPoint = { time: number; close: number };
 type Theme = 'light' | 'dark' | 'system';
 type NewsItem = { id: string; title: string; url: string; source: string; summary: string; publishedAt: string; urgency: 'normal' | 'breaking' };
@@ -28,6 +29,12 @@ function formatNumber(value: number | string) {
 function modelLabel(model: ModelId, prefix = 'GPT-') {
   const family = model.replace('gpt-', '').replace('-', ' ');
   return `${prefix}${family[0].toUpperCase()}${family.slice(1)}`;
+}
+
+function recentNewsWelcome(items: NewsItem[]) {
+  const text = (items[0]?.summary || items[0]?.title || '市场新闻正在同步，随时可以开始对话').replace(/\s+/g, ' ').trim();
+  const sentence = text.split(/(?<=[。！？.!?])\s*/)[0];
+  return sentence.length > 120 ? `${sentence.slice(0, 117)}...` : sentence;
 }
 
 function NewsPanel({ items }: { items: NewsItem[] }) {
@@ -146,6 +153,11 @@ export function App() {
   const [status, setStatus] = useState<Status | null>(null);
   const [balances, setBalances] = useState<Balance[]>([]);
   const [messages, setMessages] = useState<Message[]>([]);
+  const [sessions, setSessions] = useState<ChatSession[]>(() => {
+    try { return JSON.parse(window.localStorage.getItem('crypto-agent-recents') || '[]') as ChatSession[]; }
+    catch { return []; }
+  });
+  const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [input, setInput] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
@@ -153,6 +165,7 @@ export function App() {
   const [emergency, setEmergency] = useState<EmergencyState>({});
   const [futuresPositions, setFuturesPositions] = useState<FuturesPosition[]>([]);
   const [marginAccount, setMarginAccount] = useState<MarginAccount | null>(null);
+  const [settingsOpen, setSettingsOpen] = useState(false);
 
   async function refresh() {
     try {
@@ -190,41 +203,58 @@ export function App() {
     return () => { active = false; stream.close(); };
   }, []);
   useEffect(() => { document.documentElement.dataset.theme = theme; window.localStorage.setItem('crypto-agent-theme', theme); }, [theme]);
+  useEffect(() => {
+    const safeSessions = sessions.slice(0, 20).map((session) => ({ ...session, messages: session.messages.map(({ id, role, content, product }) => ({ id, role, content, product })) }));
+    window.localStorage.setItem('crypto-agent-recents', JSON.stringify(safeSessions));
+  }, [sessions]);
+
+  function newChat() { setActiveSessionId(null); setMessages([]); setInput(''); setError(''); }
+  function openSession(session: ChatSession) { setActiveSessionId(session.id); setMessages(session.messages); setInput(''); setError(''); }
 
   async function send() {
     const content = input.trim();
     if (!content || busy) return;
     const user: Message = { id: crypto.randomUUID(), role: 'user', content };
-    setMessages((current) => [...current, user]); setInput(''); setBusy(true); setError('');
+    const sessionId = activeSessionId || crypto.randomUUID();
+    const title = content.length > 32 ? `${content.slice(0, 32)}...` : content;
+    const baseMessages = [...messages, user];
+    setActiveSessionId(sessionId);
+    setMessages(baseMessages); setInput(''); setBusy(true); setError('');
     try {
       const result = await api<{ reply: string; product?: Message['product']; draft?: Draft }>('/chat', { method: 'POST', body: JSON.stringify({ message: content, model: modelId, reasoning_effort: reasoningEffort }) });
-      setMessages((current) => [...current, { id: crypto.randomUUID(), role: 'assistant', content: result.reply, product: result.product, draft: result.draft }]);
+      const assistant: Message = { id: crypto.randomUUID(), role: 'assistant', content: '', product: result.product, draft: result.draft };
+      setMessages((current) => [...current, assistant]);
+      for (const chunk of result.reply.match(/.{1,4}/gs) || []) {
+        await new Promise((resolve) => window.setTimeout(resolve, 12));
+        setMessages((current) => current.map((message) => message.id === assistant.id ? { ...message, content: message.content + chunk } : message));
+      }
+      const nextMessages = [...baseMessages, { ...assistant, content: result.reply }];
+      setMessages(nextMessages);
+      setSessions((existing) => [{ id: sessionId, title: existing.find((item) => item.id === sessionId)?.title || title, messages: nextMessages, updatedAt: Date.now() }, ...existing.filter((item) => item.id !== sessionId)]);
     } catch (caught) { setError(caught instanceof Error ? caught.message : 'Unable to prepare the order.'); }
     finally { setBusy(false); }
   }
 
   return <main className="terminal-shell">
     <aside className="portfolio">
-      <header><CircleDollarSign size={23} /><div><strong>CryptoAgent</strong><span>Binance Spot</span></div></header>
+      <header><CircleDollarSign size={23} /><div><strong>CryptoAgent</strong><span>Binance workspace</span></div></header>
+      <button className="new-chat" onClick={newChat}><Plus size={17} />新对话</button>
+      <nav className="recents" aria-label="最近对话"><div className="section-title">Recents</div>{sessions.length ? sessions.map((session) => <button className={activeSessionId === session.id ? 'active' : ''} key={session.id} onClick={() => openSession(session)}><MessageSquare size={14} /><span>{session.title}</span></button>) : <p>暂无最近对话</p>}</nav>
       <section className="connection"><div><span className={status?.configured ? 'status-dot online' : 'status-dot'} />{status?.configured ? '已连接' : '未配置'}</div><small>{status?.environment === 'live' ? (status.liveTradingEnabled ? '实盘下单已开启' : '实盘只读') : 'Spot Testnet'}</small></section>
       <section className="balance-section"><div className="section-title"><span><Wallet size={15} />可用余额</span><button title="刷新账户" aria-label="刷新账户" onClick={() => void refresh()}><RefreshCw size={15} /></button></div>{balances.length ? balances.slice(0, 12).map((balance) => <div className="balance" key={balance.asset}><strong>{balance.asset}</strong><span>{formatNumber(balance.free)}</span></div>) : <p>{status?.configured ? '没有非零余额' : '在 .env 中配置 API key 后显示'}</p>}</section>
-      <section className="limits"><ShieldCheck size={16} /><div><strong>交易边界</strong><span>现货 · 无杠杆 · 单笔 {status?.maxOrderUsdt ? `≤ ${formatNumber(status.maxOrderUsdt)} USDT` : '不设客户端上限'}</span><span>{status?.allowedSymbols?.join(' / ') || '全部已交易 USDT 现货对'}</span></div></section>
+      <button className="settings-entry" onClick={() => setSettingsOpen(true)}><Settings2 size={16} />设置</button>
     </aside>
     <section className="conversation">
-      <div className="conversation-top"><div><Bot size={18} /><strong>交易对话</strong></div><div className="top-actions"><div className="model-picker"><button className="model-trigger" aria-haspopup="menu" aria-expanded={modelOpen} onClick={() => setModelOpen((open) => !open)}>5.6 {modelId.split('-').at(-1)![0].toUpperCase() + modelId.split('-').at(-1)!.slice(1)} · {({ low: 'Light', medium: 'Medium', high: 'High', xhigh: 'Extra High', max: 'Ultra' } as Record<ReasoningId, string>)[reasoningEffort]}<ChevronDown size={15} /></button>{modelOpen && <div className="model-menu" role="menu"><div className="model-menu-label">Reasoning</div>{(status?.model?.reasoning || ['low', 'medium', 'high', 'xhigh', 'max']).map((option) => <button key={option} className={reasoningEffort === option ? 'selected' : ''} onClick={() => { setReasoningEffort(option); setModelOpen(false); }}>{({ low: 'Light', medium: 'Medium', high: 'High', xhigh: 'Extra High', max: 'Ultra' } as Record<ReasoningId, string>)[option]}{reasoningEffort === option && <Check size={17} />}</button>)}<div className="model-menu-divider" /><div className="model-menu-label">Model</div>{(status?.model?.models || ['gpt-5.6-luna', 'gpt-5.6-sol', 'gpt-5.6-terra']).map((option) => <button key={option} className={modelId === option ? 'selected' : ''} onClick={() => { setModelId(option); setModelOpen(false); }}>{modelLabel(option)}<ChevronRight size={17} /></button>)}</div>}</div><div className="theme-control" role="group" aria-label="主题">{([['light', Sun, '浅色'], ['dark', Moon, '深色'], ['system', Monitor, '跟随系统']] as const).map(([value, Icon, label]) => <button key={value} className={theme === value ? 'selected' : ''} title={label} aria-label={label} onClick={() => setTheme(value)}><Icon size={14} /></button>)}</div><span>{status?.environment === 'live' ? 'LIVE' : 'TESTNET'}</span></div></div>
-      <PriceChart symbol="BTCUSDT" environment={status?.environment || 'testnet'} />
-      <NewsPanel items={news} />
-      <DerivativesPanel positions={futuresPositions} margin={marginAccount} />
-      <ProductDraftPanel onDone={() => void refresh()} />
-      <MarginActionPanel onDone={() => void refresh()} />
-      <EmergencyPanel state={emergency} onChange={setEmergency} />
+      <div className="conversation-top"><div><Bot size={18} /><strong>{activeSessionId ? sessions.find((item) => item.id === activeSessionId)?.title || '交易对话' : '新对话'}</strong></div><div className="top-actions"><div className="model-picker"><button className="model-trigger" aria-haspopup="menu" aria-expanded={modelOpen} onClick={() => setModelOpen((open) => !open)}>5.6 {modelId.split('-').at(-1)![0].toUpperCase() + modelId.split('-').at(-1)!.slice(1)} · {({ low: 'Light', medium: 'Medium', high: 'High', xhigh: 'Extra High', max: 'Ultra' } as Record<ReasoningId, string>)[reasoningEffort]}<ChevronDown size={15} /></button>{modelOpen && <div className="model-menu" role="menu"><div className="model-menu-label">Reasoning</div>{(status?.model?.reasoning || ['low', 'medium', 'high', 'xhigh', 'max']).map((option) => <button key={option} className={reasoningEffort === option ? 'selected' : ''} onClick={() => { setReasoningEffort(option); setModelOpen(false); }}>{({ low: 'Light', medium: 'Medium', high: 'High', xhigh: 'Extra High', max: 'Ultra' } as Record<ReasoningId, string>)[option]}{reasoningEffort === option && <Check size={17} />}</button>)}<div className="model-menu-divider" /><div className="model-menu-label">Model</div>{(status?.model?.models || ['gpt-5.6-luna', 'gpt-5.6-sol', 'gpt-5.6-terra']).map((option) => <button key={option} className={modelId === option ? 'selected' : ''} onClick={() => { setModelId(option); setModelOpen(false); }}>{modelLabel(option)}<ChevronRight size={17} /></button>)}</div>}</div><span>{status?.environment === 'live' ? 'LIVE' : 'TESTNET'}</span></div></div>
       <div className="messages">
-        {!messages.length && <div className="empty"><Bot size={35} /><h1>说出你想执行的现货交易</h1><p>例如：用 50 USDT 市价买入 BTC。信息不完整时，我会先追问，不会猜测金额。</p><div className="examples"><button onClick={() => setInput('用 50 USDT 市价买入 BTC')}>买入 50 USDT 的 BTC</button><button onClick={() => setInput('卖出 0.001 BTC')}>卖出 0.001 BTC</button></div></div>}
+        {!messages.length && <div className="empty"><Bot size={32} /><h1>{recentNewsWelcome(news)}</h1></div>}
         {messages.map((message) => <article className={`message ${message.role}`} key={message.id}><div className="bubble"><ReactMarkdown remarkPlugins={[remarkGfm]}>{message.content}</ReactMarkdown>{message.draft && <OrderDraft draft={message.draft} product={message.product} onConfirmed={(order) => { setMessages((current) => current.map((item) => item.id === message.id ? { ...item, order } : item)); void refresh(); }} />}{message.order && <div className="order-success"><Check size={16} />订单已提交 · ID {String(message.order.orderId || message.order.clientOrderId || 'accepted')}</div>}</div></article>)}
         {busy && <article className="message assistant"><div className="bubble thinking"><i /><i /><i /></div></article>}
         {error && <div className="global-error">{error}</div>}
       </div>
       <div className="composer-wrap"><div className="composer"><textarea rows={1} value={input} onChange={(event) => setInput(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); void send(); } }} placeholder="输入交易指令或询问账户状态" /><button title="发送" aria-label="发送" disabled={!input.trim() || busy} onClick={() => void send()}><SendHorizontal size={19} /></button></div><small>模型只生成订单草案。所有订单都需要你明确确认。</small></div>
     </section>
+    <aside className="market-rail"><PriceChart symbol="BTCUSDT" environment={status?.environment || 'testnet'} /><NewsPanel items={news} /><DerivativesPanel positions={futuresPositions} margin={marginAccount} /><ProductDraftPanel onDone={() => void refresh()} /><MarginActionPanel onDone={() => void refresh()} /><EmergencyPanel state={emergency} onChange={setEmergency} /></aside>
+    {settingsOpen && <div className="dialog-backdrop" role="presentation" onMouseDown={(event) => { if (event.currentTarget === event.target) setSettingsOpen(false); }}><section className="settings-dialog" role="dialog" aria-modal="true" aria-labelledby="settings-title"><button className="dialog-close" title="关闭" aria-label="关闭" onClick={() => setSettingsOpen(false)}><X size={18} /></button><h2 id="settings-title">设置</h2><label>外观</label><div className="theme-options">{([['light', Sun, '浅色'], ['dark', Moon, '深色'], ['system', Monitor, '跟随系统']] as const).map(([value, Icon, label]) => <button key={value} className={theme === value ? 'selected' : ''} onClick={() => setTheme(value)}><Icon size={16} />{label}</button>)}</div></section></div>}
   </main>;
 }
