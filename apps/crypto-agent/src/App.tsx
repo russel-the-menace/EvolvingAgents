@@ -193,7 +193,7 @@ function CoinMWorkspace() {
       if (fallbackStarted || !active) return;
       fallbackStarted = true;
       const stream = new WebSocket(`wss://dstream.binance.com/ws/btcusd_perp@kline_${sourceInterval}`);
-      stream.onmessage = (event) => { let payload; try { payload = JSON.parse(event.data); } catch { return; } const item = payload.k; if (!active || !item) return; const next = [item.t, item.o, item.h, item.l, item.c, item.v, item.T, item.q]; setMarket((current) => { if (!current) return current; const klines = [...current.klines]; if (Number(klines.at(-1)?.[0]) === Number(item.t)) klines[klines.length - 1] = next; else klines.push(next); return { ...current, klines: klines.slice(-240) }; }); };
+      stream.onmessage = (event) => { let payload; try { payload = JSON.parse(event.data); } catch { return; } const item = payload.k; if (!active || !item) return; const next = [item.t, item.o, item.h, item.l, item.c, item.v, item.T, item.q]; setMarket((current) => { if (!current) return current; const klines = [...current.klines]; const existing = klines.findIndex((row) => Number(row[0]) === Number(item.t)); if (existing >= 0) klines[existing] = next; else klines.push(next); return { ...current, klines: klines.slice(-240) }; }); };
       const tradeStream = new WebSocket('wss://dstream.binance.com/ws/btcusd_perp@aggTrade');
       tradeStream.onmessage = (event) => { let payload; try { payload = JSON.parse(event.data); } catch { return; } const price = Number(payload?.p); if (active && Number.isFinite(price)) pendingPrice.current = price; };
       const depthStream = new WebSocket('wss://dstream.binance.com/ws/btcusd_perp@depth@100ms');
@@ -221,14 +221,14 @@ function CoinMWorkspace() {
       setMarket((current) => {
         if (!next.partial || !current || !next.klines[0]) return next;
         const klines = [...current.klines];
-        if (Number(klines.at(-1)?.[0]) === Number(next.klines[0][0])) klines[klines.length - 1] = next.klines[0];
-        else klines.push(next.klines[0]);
+        const existing = klines.findIndex((row) => Number(row[0]) === Number(next.klines[0][0]));
+        if (existing >= 0) klines[existing] = next.klines[0]; else klines.push(next.klines[0]);
         return { ...next, klines: klines.slice(-240) };
       });
     }, 300);
     return () => { active = false; window.clearInterval(timer); window.clearInterval(bookTimer); window.clearInterval(relayTimer); serverStream.close(); directSockets.forEach((socket) => socket.close()); };
   }, [interval]);
-  const allCandles = (market?.klines || []).map((item) => ({ time: Number(item[0]), open: Number(item[1]), high: Number(item[2]), low: Number(item[3]), close: Number(item[4]), volume: Number(item[5]), quoteVolume: Number(item[7]) }));
+  const allCandles = [...new Map((market?.klines || []).map((item) => [Number(item[0]), { time: Number(item[0]), open: Number(item[1]), high: Number(item[2]), low: Number(item[3]), close: Number(item[4]), volume: Number(item[5]), quoteVolume: Number(item[7]) }])).values()];
   const candles = allCandles.slice(-120);
   const width = 900; const height = 330; const pad = 36;
   const low = candles.length ? Math.min(...candles.map((item) => item.low)) : 0;
