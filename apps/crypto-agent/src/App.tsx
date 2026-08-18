@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react';
-import { ArrowDownLeft, ArrowUpRight, Bot, Check, ChevronDown, ChevronRight, CircleDollarSign, MessageSquare, Monitor, Moon, Plus, RefreshCw, SendHorizontal, Settings2, ShieldCheck, Sun, Wallet, X } from 'lucide-react';
+import { useEffect, useState, type CSSProperties } from 'react';
+import { ArrowDownLeft, ArrowUpRight, Bot, Check, ChevronDown, ChevronRight, CircleDollarSign, MessageSquare, Monitor, Moon, PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen, Plus, RefreshCw, SendHorizontal, Settings2, ShieldCheck, Sun, Wallet, X } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 
@@ -166,6 +166,11 @@ export function App() {
   const [futuresPositions, setFuturesPositions] = useState<FuturesPosition[]>([]);
   const [marginAccount, setMarginAccount] = useState<MarginAccount | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [leftWidth, setLeftWidth] = useState(() => Math.min(360, Math.max(220, Number(window.localStorage.getItem('crypto-agent-left-width')) || 256)));
+  const [rightWidth, setRightWidth] = useState(() => Math.min(460, Math.max(280, Number(window.localStorage.getItem('crypto-agent-right-width')) || 360)));
+  const [leftCollapsed, setLeftCollapsed] = useState(false);
+  const [rightCollapsed, setRightCollapsed] = useState(false);
+  const [resizing, setResizing] = useState<'left' | 'right' | null>(null);
 
   async function refresh() {
     try {
@@ -203,6 +208,21 @@ export function App() {
     return () => { active = false; stream.close(); };
   }, []);
   useEffect(() => { document.documentElement.dataset.theme = theme; window.localStorage.setItem('crypto-agent-theme', theme); }, [theme]);
+  useEffect(() => { window.localStorage.setItem('crypto-agent-left-width', String(leftWidth)); }, [leftWidth]);
+  useEffect(() => { window.localStorage.setItem('crypto-agent-right-width', String(rightWidth)); }, [rightWidth]);
+  useEffect(() => {
+    if (!resizing) return;
+    const move = (event: PointerEvent) => {
+      if (resizing === 'left') setLeftWidth(Math.min(360, Math.max(220, event.clientX)));
+      else setRightWidth(Math.min(460, Math.max(280, window.innerWidth - event.clientX)));
+    };
+    const stop = () => setResizing(null);
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', stop, { once: true });
+    return () => { document.body.style.cursor = ''; document.body.style.userSelect = ''; window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', stop); };
+  }, [resizing]);
   useEffect(() => {
     const safeSessions = sessions.slice(0, 20).map((session) => ({ ...session, messages: session.messages.map(({ id, role, content, product }) => ({ id, role, content, product })) }));
     window.localStorage.setItem('crypto-agent-recents', JSON.stringify(safeSessions));
@@ -235,15 +255,18 @@ export function App() {
     finally { setBusy(false); }
   }
 
-  return <main className="terminal-shell">
+  const shellStyle = { '--left-width': leftCollapsed ? '0px' : `${leftWidth}px`, '--right-width': rightCollapsed ? '0px' : `${rightWidth}px` } as CSSProperties;
+  return <main className={`terminal-shell ${leftCollapsed ? 'left-collapsed' : ''} ${rightCollapsed ? 'right-collapsed' : ''}`} style={shellStyle}>
     <aside className="portfolio">
-      <header><CircleDollarSign size={23} /><div><strong>CryptoAgent</strong><span>Binance workspace</span></div></header>
+      <header><CircleDollarSign size={23} /><div><strong>CryptoAgent</strong><span>Binance workspace</span></div><button className="sidebar-toggle" title="隐藏左侧栏" aria-label="隐藏左侧栏" onClick={() => setLeftCollapsed(true)}><PanelLeftClose size={17} /></button></header>
       <button className="new-chat" onClick={newChat}><Plus size={17} />新对话</button>
       <nav className="recents" aria-label="最近对话"><div className="section-title">Recents</div>{sessions.length ? sessions.map((session) => <button className={activeSessionId === session.id ? 'active' : ''} key={session.id} onClick={() => openSession(session)}><MessageSquare size={14} /><span>{session.title}</span></button>) : <p>暂无最近对话</p>}</nav>
       <section className="connection"><div><span className={status?.configured ? 'status-dot online' : 'status-dot'} />{status?.configured ? '已连接' : '未配置'}</div><small>{status?.environment === 'live' ? (status.liveTradingEnabled ? '实盘下单已开启' : '实盘只读') : 'Spot Testnet'}</small></section>
       <section className="balance-section"><div className="section-title"><span><Wallet size={15} />可用余额</span><button title="刷新账户" aria-label="刷新账户" onClick={() => void refresh()}><RefreshCw size={15} /></button></div>{balances.length ? balances.slice(0, 12).map((balance) => <div className="balance" key={balance.asset}><strong>{balance.asset}</strong><span>{formatNumber(balance.free)}</span></div>) : <p>{status?.configured ? '没有非零余额' : '在 .env 中配置 API key 后显示'}</p>}</section>
       <button className="settings-entry" onClick={() => setSettingsOpen(true)}><Settings2 size={16} />设置</button>
+      <button className="resize-handle left-resize" title="调整左侧栏宽度" aria-label="调整左侧栏宽度" onPointerDown={(event) => { event.currentTarget.setPointerCapture(event.pointerId); setResizing('left'); }} />
     </aside>
+    {leftCollapsed && <button className="sidebar-reopen left-reopen" title="显示左侧栏" aria-label="显示左侧栏" onClick={() => setLeftCollapsed(false)}><PanelLeftOpen size={18} /></button>}
     <section className="conversation">
       <div className="conversation-top"><div><Bot size={18} /><strong>{activeSessionId ? sessions.find((item) => item.id === activeSessionId)?.title || '交易对话' : '新对话'}</strong></div><div className="top-actions"><span>{status?.environment === 'live' ? 'LIVE' : 'TESTNET'}</span></div></div>
       <div className="messages">
@@ -254,7 +277,8 @@ export function App() {
       </div>
       <div className="composer-wrap"><div className="composer"><textarea rows={1} value={input} onChange={(event) => setInput(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); void send(); } }} placeholder="输入交易指令或询问账户状态" /><div className="model-picker"><button className="model-trigger" aria-haspopup="menu" aria-expanded={modelOpen} onClick={() => setModelOpen((open) => !open)}>5.6 {modelId.split('-').at(-1)![0].toUpperCase() + modelId.split('-').at(-1)!.slice(1)} · {({ low: 'Light', medium: 'Medium', high: 'High', xhigh: 'Extra High', max: 'Ultra' } as Record<ReasoningId, string>)[reasoningEffort]}<ChevronDown size={15} /></button>{modelOpen && <div className="model-menu" role="menu"><div className="model-menu-label">Reasoning</div>{(status?.model?.reasoning || ['low', 'medium', 'high', 'xhigh', 'max']).map((option) => <button key={option} className={reasoningEffort === option ? 'selected' : ''} onClick={() => { setReasoningEffort(option); setModelOpen(false); }}>{({ low: 'Light', medium: 'Medium', high: 'High', xhigh: 'Extra High', max: 'Ultra' } as Record<ReasoningId, string>)[option]}{reasoningEffort === option && <Check size={17} />}</button>)}<div className="model-menu-divider" /><div className="model-menu-label">Model</div>{(status?.model?.models || ['gpt-5.6-luna', 'gpt-5.6-sol', 'gpt-5.6-terra']).map((option) => <button key={option} className={modelId === option ? 'selected' : ''} onClick={() => { setModelId(option); setModelOpen(false); }}>{modelLabel(option)}<ChevronRight size={17} /></button>)}</div>}</div><button className="composer-send" title="发送" aria-label="发送" disabled={!input.trim() || busy} onClick={() => void send()}><SendHorizontal size={19} /></button></div><small>模型只生成订单草案。所有订单都需要你明确确认。</small></div>
     </section>
-    <aside className="market-rail"><PriceChart symbol="BTCUSDT" environment={status?.environment || 'testnet'} /><NewsPanel items={news} /><DerivativesPanel positions={futuresPositions} margin={marginAccount} /><ProductDraftPanel onDone={() => void refresh()} /><MarginActionPanel onDone={() => void refresh()} /><EmergencyPanel state={emergency} onChange={setEmergency} /></aside>
+    <aside className="market-rail"><div className="rail-header"><strong>市场上下文</strong><button className="sidebar-toggle" title="隐藏右侧栏" aria-label="隐藏右侧栏" onClick={() => setRightCollapsed(true)}><PanelRightClose size={17} /></button></div><PriceChart symbol="BTCUSDT" environment={status?.environment || 'testnet'} /><NewsPanel items={news} /><DerivativesPanel positions={futuresPositions} margin={marginAccount} /><ProductDraftPanel onDone={() => void refresh()} /><MarginActionPanel onDone={() => void refresh()} /><EmergencyPanel state={emergency} onChange={setEmergency} /><button className="resize-handle right-resize" title="调整右侧栏宽度" aria-label="调整右侧栏宽度" onPointerDown={(event) => { event.currentTarget.setPointerCapture(event.pointerId); setResizing('right'); }} /></aside>
+    {rightCollapsed && <button className="sidebar-reopen right-reopen" title="显示右侧栏" aria-label="显示右侧栏" onClick={() => setRightCollapsed(false)}><PanelRightOpen size={18} /></button>}
     {settingsOpen && <div className="dialog-backdrop" role="presentation" onMouseDown={(event) => { if (event.currentTarget === event.target) setSettingsOpen(false); }}><section className="settings-dialog" role="dialog" aria-modal="true" aria-labelledby="settings-title"><button className="dialog-close" title="关闭" aria-label="关闭" onClick={() => setSettingsOpen(false)}><X size={18} /></button><h2 id="settings-title">设置</h2><label>外观</label><div className="theme-options">{([['light', Sun, '浅色'], ['dark', Moon, '深色'], ['system', Monitor, '跟随系统']] as const).map(([value, Icon, label]) => <button key={value} className={theme === value ? 'selected' : ''} onClick={() => setTheme(value)}><Icon size={16} />{label}</button>)}</div></section></div>}
   </main>;
 }
