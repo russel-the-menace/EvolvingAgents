@@ -7,8 +7,8 @@ type ModelId = 'gpt-5.6-luna' | 'gpt-5.6-sol' | 'gpt-5.6-terra';
 type ReasoningId = 'low' | 'medium' | 'high' | 'xhigh' | 'max';
 type Status = { configured: boolean; environment: 'testnet' | 'live'; liveTradingEnabled: boolean; allowedSymbols: string[] | null; maxOrderUsdt: number; model?: { provider: string; models: ModelId[]; reasoning: ReasoningId[]; defaultModel: ModelId; defaultReasoning: ReasoningId } };
 type Balance = { asset: string; free: string; locked: string };
-type Draft = { id: string; confirmationToken: string; intent: { symbol: string; side: 'BUY' | 'SELL'; type: string; quantity?: string; quoteOrderQty?: string; price?: string }; estimate: { estimatedPrice: number; estimatedNotional: number; baseQuantity: number; baseAsset: string; quoteAsset: string }; environment: string };
-type Message = { id: string; role: 'user' | 'assistant'; content: string; draft?: Draft; order?: Record<string, unknown> };
+type Draft = { id: string; confirmationToken: string; intent: { symbol: string; side: 'BUY' | 'SELL'; type: string; quantity?: string; quoteOrderQty?: string; price?: string; leverage?: number; marginType?: string }; estimate?: { estimatedPrice: number; estimatedNotional: number; baseQuantity: number; baseAsset: string; quoteAsset: string }; environment: string };
+type Message = { id: string; role: 'user' | 'assistant'; content: string; product?: 'spot' | 'margin' | 'futures'; draft?: Draft; order?: Record<string, unknown> };
 type ChartPoint = { time: number; close: number };
 type Theme = 'light' | 'dark' | 'system';
 type NewsItem = { id: string; title: string; url: string; source: string; summary: string; publishedAt: string; urgency: 'normal' | 'breaking' };
@@ -56,6 +56,12 @@ function ProductDraftPanel({ onDone }: { onDone: () => void }) {
   return <section className="product-draft-panel" aria-label="产品交易草案"><div className="news-heading"><strong>产品交易草案</strong><span>所有产品都需要人工确认</span></div><div className="draft-controls"><select value={product} onChange={(event) => { setProduct(event.target.value as typeof product); setDraft(null); }}><option value="spot">现货 Spot</option><option value="margin">杠杆现货 Margin</option><option value="futures">合约 Futures</option></select><input value={symbol} onChange={(event) => setSymbol(event.target.value.toUpperCase())} aria-label="交易对" placeholder="BTCUSDT" /><select value={side} onChange={(event) => setSide(event.target.value as 'BUY' | 'SELL')}><option value="BUY">买入 / 做多</option><option value="SELL">卖出 / 做空</option></select><input value={quantity} onChange={(event) => setQuantity(event.target.value)} aria-label="数量" placeholder="数量" />{product !== 'spot' && <select value={marginType} onChange={(event) => setMarginType(event.target.value)}><option value="ISOLATED">逐仓</option><option value="CROSSED">全仓</option></select>}{product === 'futures' && <input value={leverage} onChange={(event) => setLeverage(event.target.value)} aria-label="杠杆" placeholder="杠杆 1-125x" />}<button disabled={busy || !quantity} onClick={() => void (draft ? confirm() : create())}>{busy ? '处理中' : draft ? '确认并提交' : '生成草案'}</button></div>{draft && <div className="draft-preview">{product.toUpperCase()} · {draft.intent.symbol} · {draft.intent.side} {draft.intent.leverage ? `${draft.intent.leverage}x` : ''} · {draft.intent.marginType || ''}<small>请核对产品、方向、数量、杠杆和保证金模式后确认。</small></div>}{error && <div className="inline-error">{error}</div>}</section>;
 }
 
+function MarginActionPanel({ onDone }: { onDone: () => void }) {
+  const [action, setAction] = useState<'BORROW' | 'REPAY'>('BORROW'); const [asset, setAsset] = useState('USDT'); const [amount, setAmount] = useState(''); const [draft, setDraft] = useState<any>(null); const [error, setError] = useState('');
+  async function submit() { setError(''); try { if (!draft) { const result = await api<any>('/margin/actions/drafts', { method: 'POST', body: JSON.stringify({ action, asset, amount }) }); setDraft(result.draft); return; } await api(`/margin/actions/drafts/${draft.id}/confirm`, { method: 'POST', body: JSON.stringify({ confirmation: 'CONFIRM', confirmationToken: draft.confirmationToken }) }); setDraft(null); setAmount(''); onDone(); } catch (caught) { setError(caught instanceof Error ? caught.message : 'Margin 操作失败'); } }
+  return <section className="product-draft-panel" aria-label="Margin 借贷草案"><div className="news-heading"><strong>Margin 借贷</strong><span>借币与还款均需确认</span></div><div className="draft-controls"><select value={action} onChange={(event) => { setAction(event.target.value as typeof action); setDraft(null); }}><option value="BORROW">借币</option><option value="REPAY">还款</option></select><input value={asset} onChange={(event) => setAsset(event.target.value.toUpperCase())} aria-label="资产" /><input value={amount} onChange={(event) => setAmount(event.target.value)} aria-label="金额" placeholder="金额" /><button disabled={!amount} onClick={() => void submit()}>{draft ? `确认${action === 'BORROW' ? '借币' : '还款'}` : '生成草案'}</button></div>{draft && <div className="draft-preview">{draft.action} · {draft.params.amount} {draft.params.asset}<small>确认后将调用 Binance Margin {draft.action === 'BORROW' ? '借币' : '还款'}接口。</small></div>}{error && <div className="inline-error">{error}</div>}</section>;
+}
+
 async function api<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`/api${path}`, { ...init, headers: { 'Content-Type': 'application/json', ...init?.headers } });
   const result = await response.json().catch(() => ({}));
@@ -63,21 +69,22 @@ async function api<T>(path: string, init?: RequestInit): Promise<T> {
   return result;
 }
 
-function OrderDraft({ draft, onConfirmed }: { draft: Draft; onConfirmed: (order: Record<string, unknown>) => void }) {
+function OrderDraft({ draft, product = 'spot', onConfirmed }: { draft: Draft; product?: 'spot' | 'margin' | 'futures'; onConfirmed: (order: Record<string, unknown>) => void }) {
   const [state, setState] = useState<'ready' | 'busy' | 'done'>('ready');
   const [error, setError] = useState('');
   const side = draft.intent.side;
   async function confirm() {
     setState('busy'); setError('');
     try {
-      const result = await api<{ order: Record<string, unknown> }>(`/orders/${draft.id}/confirm`, { method: 'POST', body: JSON.stringify({ confirmation: 'CONFIRM', confirmationToken: draft.confirmationToken }) });
+      const path = product === 'spot' ? `/orders/${draft.id}/confirm` : `/${product}/drafts/${draft.id}/confirm`;
+      const result = await api<{ order: Record<string, unknown> }>(path, { method: 'POST', body: JSON.stringify({ confirmation: 'CONFIRM', confirmationToken: draft.confirmationToken }) });
       setState('done'); onConfirmed(result.order);
     } catch (caught) { setState('ready'); setError(caught instanceof Error ? caught.message : 'Order failed.'); }
   }
   return <section className={`order-draft ${side.toLowerCase()}`} aria-label="Order preview">
-    <div className="order-heading"><span>{side === 'BUY' ? <ArrowDownLeft size={17} /> : <ArrowUpRight size={17} />}{side === 'BUY' ? '买入' : '卖出'} {draft.estimate.baseAsset}</span><small>{draft.environment === 'testnet' ? '测试网' : '实盘'}</small></div>
-    <dl><div><dt>订单类型</dt><dd>{draft.intent.type}</dd></div><div><dt>预估价格</dt><dd>{formatNumber(draft.estimate.estimatedPrice)} {draft.estimate.quoteAsset}</dd></div><div><dt>预估数量</dt><dd>{formatNumber(draft.estimate.baseQuantity)} {draft.estimate.baseAsset}</dd></div><div><dt>预估金额</dt><dd>{formatNumber(draft.estimate.estimatedNotional, 2)} {draft.estimate.quoteAsset}</dd></div></dl>
-    <p><ShieldCheck size={15} /> 已通过本地风控和币安测试单校验。市价单最终成交价可能不同。</p>
+    <div className="order-heading"><span>{side === 'BUY' ? <ArrowDownLeft size={17} /> : <ArrowUpRight size={17} />}{side === 'BUY' ? '买入 / 做多' : '卖出 / 做空'} {draft.intent.symbol}</span><small>{product.toUpperCase()} · {draft.environment === 'testnet' ? '测试网' : '实盘'}</small></div>
+    <dl><div><dt>订单类型</dt><dd>{draft.intent.type}</dd></div><div><dt>数量</dt><dd>{draft.intent.quantity || draft.intent.quoteOrderQty}</dd></div>{draft.intent.leverage && <div><dt>杠杆</dt><dd>{draft.intent.leverage}x</dd></div>}{draft.intent.marginType && <div><dt>保证金模式</dt><dd>{draft.intent.marginType}</dd></div>}{draft.estimate && <div><dt>预估金额</dt><dd>{formatNumber(draft.estimate.estimatedNotional, 2)} {draft.estimate.quoteAsset}</dd></div>}</dl>
+    <p><ShieldCheck size={15} /> 草案已通过本地格式校验。确认后仍需通过 Binance 产品规则；市价单最终成交价可能不同。</p>
     {error && <div className="inline-error">{error}</div>}
     <button className="confirm-order" disabled={state !== 'ready'} onClick={confirm}>{state === 'busy' ? <RefreshCw className="spin" size={17} /> : <Check size={17} />}{state === 'done' ? '已提交' : state === 'busy' ? '提交中' : `确认${draft.environment === 'testnet' ? '测试网' : '实盘'}订单`}</button>
   </section>;
@@ -187,8 +194,8 @@ export function App() {
     const user: Message = { id: crypto.randomUUID(), role: 'user', content };
     setMessages((current) => [...current, user]); setInput(''); setBusy(true); setError('');
     try {
-      const result = await api<{ reply: string; draft?: Draft }>('/chat', { method: 'POST', body: JSON.stringify({ message: content, model: modelId, reasoning_effort: reasoningEffort }) });
-      setMessages((current) => [...current, { id: crypto.randomUUID(), role: 'assistant', content: result.reply, draft: result.draft }]);
+      const result = await api<{ reply: string; product?: Message['product']; draft?: Draft }>('/chat', { method: 'POST', body: JSON.stringify({ message: content, model: modelId, reasoning_effort: reasoningEffort }) });
+      setMessages((current) => [...current, { id: crypto.randomUUID(), role: 'assistant', content: result.reply, product: result.product, draft: result.draft }]);
     } catch (caught) { setError(caught instanceof Error ? caught.message : 'Unable to prepare the order.'); }
     finally { setBusy(false); }
   }
@@ -206,10 +213,11 @@ export function App() {
       <NewsPanel items={news} />
       <DerivativesPanel positions={futuresPositions} margin={marginAccount} />
       <ProductDraftPanel onDone={() => void refresh()} />
+      <MarginActionPanel onDone={() => void refresh()} />
       <EmergencyPanel state={emergency} onChange={setEmergency} />
       <div className="messages">
         {!messages.length && <div className="empty"><Bot size={35} /><h1>说出你想执行的现货交易</h1><p>例如：用 50 USDT 市价买入 BTC。信息不完整时，我会先追问，不会猜测金额。</p><div className="examples"><button onClick={() => setInput('用 50 USDT 市价买入 BTC')}>买入 50 USDT 的 BTC</button><button onClick={() => setInput('卖出 0.001 BTC')}>卖出 0.001 BTC</button></div></div>}
-        {messages.map((message) => <article className={`message ${message.role}`} key={message.id}><div className="bubble"><ReactMarkdown remarkPlugins={[remarkGfm]}>{message.content}</ReactMarkdown>{message.draft && <OrderDraft draft={message.draft} onConfirmed={(order) => { setMessages((current) => current.map((item) => item.id === message.id ? { ...item, order } : item)); void refresh(); }} />}{message.order && <div className="order-success"><Check size={16} />订单已提交 · ID {String(message.order.orderId || message.order.clientOrderId || 'accepted')}</div>}</div></article>)}
+        {messages.map((message) => <article className={`message ${message.role}`} key={message.id}><div className="bubble"><ReactMarkdown remarkPlugins={[remarkGfm]}>{message.content}</ReactMarkdown>{message.draft && <OrderDraft draft={message.draft} product={message.product} onConfirmed={(order) => { setMessages((current) => current.map((item) => item.id === message.id ? { ...item, order } : item)); void refresh(); }} />}{message.order && <div className="order-success"><Check size={16} />订单已提交 · ID {String(message.order.orderId || message.order.clientOrderId || 'accepted')}</div>}</div></article>)}
         {busy && <article className="message assistant"><div className="bubble thinking"><i /><i /><i /></div></article>}
         {error && <div className="global-error">{error}</div>}
       </div>

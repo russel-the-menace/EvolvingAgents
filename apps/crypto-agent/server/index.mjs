@@ -4,7 +4,7 @@ import { createModelGateway } from '@evolving-agents/model-gateway';
 import { parseModelJson } from '@evolving-agents/learning-engine';
 import { BinanceApiError, createBinanceMarginClient, createBinanceSpotClient, createBinanceUsdMClient } from '../src/binance.mjs';
 import { auditBinancePermissions } from '../src/permissions.mjs';
-import { fallbackIntent, hasUnsupportedRiskInstruction, normalizeOrderIntent, tradePrompt, validateOrder } from '../src/trading.mjs';
+import { fallbackIntent, inferProduct, multiProductTradePrompt, normalizeOrderIntent, tradePrompt, validateOrder } from '../src/trading.mjs';
 import { NewsService } from '../src/news.mjs';
 import { createNewsLearner } from '../src/news-learning.mjs';
 import { EmergencyPolicy } from '../src/emergency-policy.mjs';
@@ -30,6 +30,7 @@ const gateway = process.env.GATEWAY_BASE_URL && process.env.GATEWAY_API_KEY
 const drafts = new Map();
 const futuresDrafts = new Map();
 const marginDrafts = new Map();
+const marginActionDrafts = new Map();
 const symbolAllowed = (symbol) => !allowedSymbols || allowedSymbols.includes(symbol);
 const defaultNewsState = process.platform === 'darwin' && process.env.HOME ? `${process.env.HOME}/Library/Application Support/CryptoAgent/news-state.json` : '';
 const defaultNewsKnowledge = process.platform === 'darwin' && process.env.HOME ? `${process.env.HOME}/Library/Application Support/CryptoAgent/news-knowledge.sqlite` : '';
@@ -162,6 +163,21 @@ export function createCryptoServer() {
         if (!configured) return sendJson(response, 503, { error: 'Configure Binance credentials before preparing a Margin order.' });
         return sendJson(response, 200, { draft: createMarginDraft(await body(request)) });
       }
+      if (request.method === 'POST' && request.url === '/api/margin/actions/drafts') {
+        const payload = await body(request); const action = String(payload.action || '').toUpperCase(); const asset = String(payload.asset || '').toUpperCase(); const amount = String(payload.amount || '');
+        if (!['BORROW', 'REPAY'].includes(action) || !asset || !/^\d+(?:\.\d+)?$/.test(amount) || Number(amount) <= 0) return sendJson(response, 400, { error: 'Margin action requires BORROW/REPAY, asset, and a positive amount.' });
+        const draft = { id: randomUUID(), confirmationToken: randomUUID(), action, params: { asset, amount, isIsolated: String(Boolean(payload.isIsolated)), symbol: payload.symbol ? String(payload.symbol).toUpperCase() : undefined }, createdAt: Date.now(), state: 'pending' };
+        marginActionDrafts.set(draft.id, draft); return sendJson(response, 200, { draft });
+      }
+      const marginActionConfirm = request.url?.match(/^\/api\/margin\/actions\/drafts\/([^/]+)\/confirm$/);
+      if (request.method === 'POST' && marginActionConfirm) {
+        const payload = await body(request); const draft = marginActionDrafts.get(marginActionConfirm[1]);
+        if (!draft || Date.now() - draft.createdAt > 5 * 60_000) return sendJson(response, 404, { error: 'Margin action draft expired or was not found.' });
+        if (draft.state !== 'pending') return sendJson(response, 409, { error: 'This Margin action draft was already handled.' });
+        if (payload.confirmation !== 'CONFIRM' || payload.confirmationToken !== draft.confirmationToken) return sendJson(response, 400, { error: 'Explicit confirmation for this exact Margin action is required.' });
+        if (!liveTradingEnabled) return sendJson(response, 403, { error: 'Live trading is locked; Margin actions are disabled.' });
+        draft.state = 'submitting'; const result = draft.action === 'BORROW' ? await margin.borrow(draft.params) : await margin.repay(draft.params); draft.state = 'submitted'; return sendJson(response, 200, { result });
+      }
       const marginConfirm = request.url?.match(/^\/api\/margin\/drafts\/([^/]+)\/confirm$/);
       if (request.method === 'POST' && marginConfirm) {
         const payload = await body(request); const draft = marginDrafts.get(marginConfirm[1]);
@@ -222,15 +238,16 @@ export function createCryptoServer() {
         const payload = await body(request);
         const message = String(payload.message || '').trim();
         if (!message) return sendJson(response, 400, { error: 'A message is required.' });
-        if (hasUnsupportedRiskInstruction(message)) return sendJson(response, 200, { reply: '这条指令包含杠杆、合约或全仓风险。当前聊天执行器只支持现货，不能把它静默转换成现货订单。请先使用受控的风险策略流程。' });
         let parsed;
         const model = modelOptions.includes(payload.model) ? payload.model : defaultModel;
         const reasoningEffort = reasoningOptions.includes(payload.reasoning_effort) ? payload.reasoning_effort : defaultReasoning;
-        if (gateway) parsed = parseModelJson(await gateway.complete([{ role: 'system', content: tradePrompt(message, allowedSymbols || ['any USDT spot symbol']) }], { model, reasoningEffort }));
+        const product = inferProduct(message);
+        if (gateway) parsed = parseModelJson(await gateway.complete([{ role: 'system', content: product === 'spot' ? tradePrompt(message, allowedSymbols || ['any USDT spot symbol']) : multiProductTradePrompt(message, allowedSymbols || ['any USDT symbol']) }], { model, reasoningEffort }));
         else parsed = { reply: '', intent: fallbackIntent(message) };
         if (!parsed?.intent) return sendJson(response, 200, { reply: parsed?.reply || '请明确交易方向、交易对和数量，例如“用 50 USDT 市价买入 BTC”。' });
-        const draft = await createDraft(parsed.intent);
-        return sendJson(response, 200, { reply: parsed.reply || '订单草案已通过余额、限额和币安测试单校验。请核对后确认。', draft });
+        const resolvedProduct = parsed.product || product;
+        const draft = resolvedProduct === 'futures' ? createFuturesDraft(parsed.intent) : resolvedProduct === 'margin' ? createMarginDraft(parsed.intent) : await createDraft(parsed.intent);
+        return sendJson(response, 200, { reply: parsed.reply || '订单草案已准备好。请核对产品、方向、数量、杠杆和保证金模式后确认。', product: resolvedProduct, draft });
       }
       const confirm = request.url?.match(/^\/api\/orders\/([^/]+)\/confirm$/);
       if (request.method === 'POST' && confirm) {

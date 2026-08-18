@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { fallbackIntent, hasUnsupportedRiskInstruction, normalizeOrderIntent, validateOrder } from '../src/trading.mjs';
+import { fallbackIntent, hasUnsupportedRiskInstruction, inferProduct, normalizeOrderIntent, validateOrder } from '../src/trading.mjs';
 
 const symbolInfo = {
   symbol: 'BTCUSDT', status: 'TRADING', isSpotTradingAllowed: true, baseAsset: 'BTC', quoteAsset: 'USDT',
@@ -40,4 +40,10 @@ test('fallback parser handles explicit Chinese spot instructions only', () => {
 test('high-risk leverage instructions never fall through to spot execution', () => {
   assert.equal(hasUnsupportedRiskInstruction('开20x全仓 BTC'), true);
   assert.equal(hasUnsupportedRiskInstruction('用 50 USDT 市价买入 BTC'), false);
+});
+
+test('routes chat instructions to the correct Binance product', () => {
+  assert.equal(inferProduct('开20x全仓 BTC 永续多单'), 'futures');
+  assert.equal(inferProduct('Margin 借币买 BTC'), 'margin');
+  assert.equal(inferProduct('现货买入 BTC'), 'spot');
 });

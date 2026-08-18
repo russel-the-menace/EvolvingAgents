@@ -3,6 +3,13 @@ const UNSUPPORTED_RISK = /杠杆|全仓|逐仓|合约|永续|期货|融资|借�
 
 export function hasUnsupportedRiskInstruction(message) { return UNSUPPORTED_RISK.test(String(message || '')); }
 
+export function inferProduct(message) {
+  const text = String(message || '');
+  if (/合约|永续|期货|futures|perpetual|\b\d+x\b/i.test(text)) return 'futures';
+  if (/杠杆现货|借币|还款|margin/i.test(text)) return 'margin';
+  return 'spot';
+}
+
 function decimal(value, name) {
   const text = String(value ?? '');
   if (!DECIMAL.test(text) || Number(text) <= 0) throw new Error(`${name} must be a positive decimal.`);
@@ -79,4 +86,8 @@ function symbolInfoBase(symbol) { return symbol.replace(/USDT$/, ''); }
 
 export function tradePrompt(message, symbols) {
   return `You are a spot-order intent parser, not an investment adviser. Interpret the user's latest message. Never invent an amount, symbol, side, or price. Only support ${symbols.join(', ')} and MARKET/LIMIT spot orders. If any required field is missing, set intent to null and ask one concise clarification question in the user's language. Return JSON only: {"reply":"...","intent":null} or {"reply":"...","intent":{"symbol":"BTCUSDT","side":"BUY","type":"MARKET","quoteOrderQty":"100"}}. MARKET BUY requires quoteOrderQty in USDT; MARKET SELL requires base-asset quantity; LIMIT requires quantity and price. User message: ${JSON.stringify(String(message).slice(0, 2000))}`;
+}
+
+export function multiProductTradePrompt(message, symbols) {
+  return `Parse one Binance trade request into JSON. Products: spot, margin, futures. Never invent missing values. Supported symbols: ${symbols.join(', ')}. Futures requires symbol, BUY/SELL, MARKET, quantity, integer leverage 1-125, and marginType ISOLATED or CROSSED. Margin requires symbol, BUY/SELL, MARKET, quantity or quoteOrderQty, and marginType. Spot uses the normal MARKET/LIMIT schema. Return {"reply":"...","product":"spot|margin|futures","intent":null} when incomplete, otherwise return the same object with intent. The user must confirm later; never claim an order was executed. User message: ${JSON.stringify(String(message).slice(0, 2000))}`;
 }
