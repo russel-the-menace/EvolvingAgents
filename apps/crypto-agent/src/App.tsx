@@ -151,20 +151,23 @@ function PriceChart({ symbol, environment }: { symbol: string; environment: 'tes
 
 type CoinMCandle = { time: number; open: number; high: number; low: number; close: number; volume: number; quoteVolume: number };
 
-function mergeKlineRows(current: Array<Array<string | number>>, incoming: Array<Array<string | number>>, limit = 1200) {
-  return [...new Map([...current, ...incoming].map((row) => [Number(row[0]), row])).values()].sort((a, b) => Number(a[0]) - Number(b[0])).slice(-limit);
+function mergeKlineRows(current: Array<Array<string | number>>, incoming: Array<Array<string | number>>) {
+  // ponytail: History stays in memory; move pages to IndexedDB if multi-year minute browsing becomes a normal workflow.
+  return [...new Map([...current, ...incoming].map((row) => [Number(row[0]), row])).values()].sort((a, b) => Number(a[0]) - Number(b[0]));
 }
 
 function TimeShareChart({ candles, selectedIndex, onSelect, onLoadOlder, last }: { candles: CoinMCandle[]; selectedIndex: number | null; onSelect: (index: number) => void; onLoadOlder: () => void; last: number }) {
   const [historyOffset, setHistoryOffset] = useState(0);
   const dragStart = useRef<number | null>(null);
   const dragAnchor = useRef(0);
-  const requestedOlder = useRef(false);
   const dragged = useRef(false);
   const previousLength = useRef(candles.length);
   useEffect(() => {
     const added = candles.length - previousLength.current;
-    if (added > 0) setHistoryOffset((current) => current > 0 ? current + added : 0);
+    if (added > 0) {
+      setHistoryOffset((current) => current > 0 ? current + added : 0);
+      if (dragStart.current !== null) dragAnchor.current += added;
+    }
     previousLength.current = candles.length;
   }, [candles.length]);
   const width = 900; const height = 330; const pad = 36;
@@ -183,8 +186,8 @@ function TimeShareChart({ candles, selectedIndex, onSelect, onLoadOlder, last }:
   const dateIndices = visibleCandles.length ? [0, Math.floor((visibleCandles.length - 1) / 2), visibleCandles.length - 1] : [];
   const formatTime = (time: number) => new Date(time).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
   const handlePointerDown = (event: React.PointerEvent<SVGSVGElement>) => { dragStart.current = event.clientX; dragAnchor.current = historyOffset; dragged.current = false; event.currentTarget.setPointerCapture(event.pointerId); };
-  const handlePointerMove = (event: React.PointerEvent<SVGSVGElement>) => { if (dragStart.current === null) return; const delta = event.clientX - dragStart.current; if (Math.abs(delta) > 3) dragged.current = true; const maximum = Math.max(0, candles.length - 120); const nextOffset = Math.max(0, Math.min(maximum, dragAnchor.current + Math.round(delta / Math.max(step, 1)))); setHistoryOffset(nextOffset); if (delta > step && nextOffset === maximum && !requestedOlder.current && candles.length) { requestedOlder.current = true; onLoadOlder(); } };
-  const handlePointerUp = (event: React.PointerEvent<SVGSVGElement>) => { dragStart.current = null; requestedOlder.current = false; event.currentTarget.releasePointerCapture(event.pointerId); };
+  const handlePointerMove = (event: React.PointerEvent<SVGSVGElement>) => { if (dragStart.current === null) return; const delta = event.clientX - dragStart.current; if (Math.abs(delta) > 3) dragged.current = true; const maximum = Math.max(0, candles.length - 120); const nextOffset = Math.max(0, Math.min(maximum, dragAnchor.current + Math.round(delta / Math.max(step, 1)))); setHistoryOffset(nextOffset); if (delta > step && nextOffset === maximum && candles.length) onLoadOlder(); };
+  const handlePointerUp = (event: React.PointerEvent<SVGSVGElement>) => { dragStart.current = null; event.currentTarget.releasePointerCapture(event.pointerId); };
   const handleClick = (event: React.MouseEvent<SVGSVGElement>) => { if (dragged.current) { dragged.current = false; return; } const bounds = event.currentTarget.getBoundingClientRect(); const chartX = (event.clientX - bounds.left) / bounds.width * width; onSelect(start + Math.max(0, Math.min(visibleCandles.length - 1, Math.round((chartX - pad - step / 2) / step)))); };
   return <section className="coinm-time-share"><div className="coinm-ma-legend"><span className="time-ma-legend">MA(60): {average.at(-1)?.toLocaleString(undefined, { maximumFractionDigits: 1 }) || '-'}</span></div><div className="coinm-chart-canvas"><svg viewBox={`0 0 ${width} ${height}`} role="img" aria-label="BTCUSD coin-m time-sharing chart" onClick={handleClick} onPointerDown={handlePointerDown} onPointerMove={handlePointerMove} onPointerUp={handlePointerUp} onPointerCancel={handlePointerUp}><g className="chart-grid">{axisPoints.map((line) => <line key={line} x1={pad} x2={width - pad} y1={pad + line * (height - pad * 2) / 5} y2={pad + line * (height - pad * 2) / 5} />)}{dateIndices.map((index) => <line className="time-date-guide" key={index} x1={pad + index * step + step / 2} x2={pad + index * step + step / 2} y1={pad} y2={height - pad} />)}<path className="time-area" d={areaPath} /><path className="time-line" d={linePath} /><path className="time-ma" d={pathFor(average)} />{selected && selectedLocalIndex !== null && selectedLocalIndex >= 0 && selectedLocalIndex < visibleCandles.length && <g className="chart-crosshair"><line x1={pad + selectedLocalIndex * step + step / 2} x2={pad + selectedLocalIndex * step + step / 2} y1={pad} y2={height - pad} /><line x1={pad} x2={width - pad} y1={y(selected.close)} y2={y(selected.close)} /><circle cx={pad + selectedLocalIndex * step + step / 2} cy={y(selected.close)} r="4" /></g>}</g><line className="time-price-guide" x1={lastX} x2={width - pad} y1={lastY} y2={lastY} /></svg><div className="coinm-axis">{axisPoints.map((line) => <span key={line} style={{ top: `${line * 20}%` }}>{(high - line * range / 5).toLocaleString(undefined, { minimumFractionDigits: 1, maximumFractionDigits: 1 })}</span>)}</div>{visibleCandles.length > 0 && <div className="time-price-overlay" style={{ top: `${lastY / height * 100}%` }}>{priceLabel}</div>}<div className="time-x-axis">{datePoints.map((item) => <span key={item.time}>{formatTime(item.time)}</span>)}</div>{selected && <div className="coinm-tooltip"><b>{formatTime(selected.time)}</b><span>价格 <em>{selected.close.toLocaleString()}</em></span><span>涨跌 <em className={selected.close >= selected.open ? 'positive' : 'negative'}>{(selected.close - selected.open).toFixed(1)}</em></span><span>涨跌幅 <em>{((selected.close - selected.open) / selected.open * 100).toFixed(2)}%</em></span><span>量 <em>{selected.volume.toLocaleString()}</em></span></div>}</div></section>;
 }
@@ -201,6 +204,7 @@ function CoinMWorkspace() {
   const pendingDepth = useRef<{ bids: string[][]; asks: string[][] } | null>(null);
   const pendingRelay = useRef<CoinMMarket | null>(null);
   const loadingOlder = useRef(false);
+  const oldestReached = useRef(false);
   const orderBook = useRef({ bids: new Map<string, string>(), asks: new Map<string, string>() });
   useEffect(() => {
     const dismiss = (event: PointerEvent) => { if (!(event.target as Element).closest?.('.coinm-chart-canvas svg')) setSelectedIndex(null); };
@@ -209,6 +213,7 @@ function CoinMWorkspace() {
   }, []);
   useEffect(() => {
     let active = true;
+    oldestReached.current = false;
     const sourceInterval = interval === 'time' ? '1m' : interval;
     const load = () => api<CoinMMarket>(`/coinm-market?symbol=BTCUSD_PERP&interval=${sourceInterval}`).then((result) => { if (active) { orderBook.current = { bids: new Map(result.depth.bids.map(([price, quantity]) => [price, quantity] as const)), asks: new Map(result.depth.asks.map(([price, quantity]) => [price, quantity] as const)) }; setMarket((current) => current?.interval === result.interval ? { ...result, klines: mergeKlineRows(current.klines, result.klines) } : result); setError(''); } }).catch((caught) => { if (active) setError(caught instanceof Error ? caught.message : '币本位行情不可用'); });
     void load();
@@ -294,9 +299,9 @@ function CoinMWorkspace() {
   const selectTimeShare = (index: number) => setSelectedIndex(index);
   const loadOlderTimeShare = () => {
     const before = allCandles[0]?.time;
-    if (!before || loadingOlder.current) return;
+    if (!before || loadingOlder.current || oldestReached.current) return;
     loadingOlder.current = true;
-    void api<CoinMMarket>(`/coinm-market?symbol=BTCUSD_PERP&interval=1m&endTime=${before - 1}`).then((result) => { setSelectedIndex(null); setMarket((current) => current ? { ...current, klines: mergeKlineRows(current.klines, result.klines) } : current); }).catch(() => setError('历史分时数据暂时不可用')).finally(() => { loadingOlder.current = false; });
+    void api<CoinMMarket>(`/coinm-market?symbol=BTCUSD_PERP&interval=1m&endTime=${before - 1}`).then((result) => { const older = result.klines.filter((row) => Number(row[0]) < before); oldestReached.current = older.length === 0; if (older.length) { setSelectedIndex(null); setMarket((current) => current ? { ...current, klines: mergeKlineRows(current.klines, older) } : current); } }).catch(() => setError('历史分时数据暂时不可用')).finally(() => { loadingOlder.current = false; });
   };
   return <div className={`coinm-page${interval === 'time' ? ' time-mode' : ''}`}>
     <div className="coinm-products"><button>U本位</button><button className="active">币本位</button><button>期权</button><button>涨跌</button><button>聪明钱</button></div>
