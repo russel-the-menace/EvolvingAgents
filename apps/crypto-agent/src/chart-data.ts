@@ -1,5 +1,10 @@
 export type KlineRow = Array<string | number>;
 
+export function klineWindow<T>(rows: T[], offset: number, limit = 120) {
+  const end = rows.length - Math.min(Math.max(0, rows.length - limit), Math.max(0, offset));
+  return rows.slice(Math.max(0, end - limit), end);
+}
+
 export function mergeKlineRows(current: KlineRow[], incoming: KlineRow[]) {
   // ponytail: History stays in memory; move pages to IndexedDB if multi-year minute browsing becomes a normal workflow.
   if (!current.length) return [...incoming].sort((a, b) => Number(a[0]) - Number(b[0]));

@@ -227,6 +227,7 @@ button { cursor: pointer; }
 .spin { animation: spin .8s linear infinite; }
 .news-list { scrollbar-width: none; }
 .news-list::-webkit-scrollbar, .coinm-intervals::-webkit-scrollbar { display: none; }
+.news-page-loading, .news-page-end { display: flex; align-items: center; justify-content: center; gap: 5px; min-height: 28px; color: var(--muted); font-size: 10px; }
 .news-pull-indicator { display: flex; align-items: center; justify-content: center; gap: 5px; overflow: hidden; color: var(--muted); font-size: 10px; transition: height .22s ease, opacity .22s ease; }
 .coinm-intervals { scrollbar-width: none; cursor: grab; }
 .coinm-intervals:active { cursor: grabbing; }

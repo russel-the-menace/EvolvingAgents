@@ -2,7 +2,7 @@ import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from
 import { ArrowDownLeft, ArrowLeft, ArrowLeftRight, ArrowUpRight, Bot, Check, ChevronDown, ChevronRight, CircleDollarSign, Eye, FileText, History, Home, LineChart, MessageSquare, Monitor, Moon, MoreHorizontal, PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen, Plus, RefreshCw, Search, SendHorizontal, Settings2, ShieldCheck, Sun, WalletCards, X } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { mergeKlineRows, mergeTradeIntoSecondRows, type KlineRow } from './chart-data';
+import { klineWindow, mergeKlineRows, mergeTradeIntoSecondRows, type KlineRow } from './chart-data';
 import { aggregateAssetBalances } from './asset-summary';
 
 type ModelId = 'gpt-5.6-luna' | 'gpt-5.6-sol' | 'gpt-5.6-terra';
@@ -48,11 +48,11 @@ function recentNewsWelcome(items: NewsItem[]) {
   return sentence.length > 120 ? `${sentence.slice(0, 117)}...` : sentence;
 }
 
-function NewsPanel({ items, onRefresh, loading }: { items: NewsItem[]; onRefresh: () => void; loading: boolean }) {
+function NewsPanel({ items, onRefresh, onLoadMore, loading, hasMore }: { items: NewsItem[]; onRefresh: () => void; onLoadMore: () => void; loading: boolean; hasMore: boolean }) {
   const list = useRef<HTMLDivElement>(null); const pullStart = useRef<number | null>(null); const known = useRef<Set<string> | null>(null); const [pullDistance, setPullDistance] = useState(0); const pullThreshold = 44;
   useEffect(() => { if (!known.current) known.current = new Set(items.map((item) => item.id)); else for (const item of items) known.current.add(item.id); }, [items]);
   const finishPull = (clientY: number) => { const distance = pullStart.current === null ? 0 : clientY - pullStart.current; if (distance >= pullThreshold && !loading) onRefresh(); pullStart.current = null; setPullDistance(0); };
-  return <section className="news-panel" aria-label="市场新闻"><div className="section-title"><span>News</span></div><div className="news-list" ref={list} onPointerDown={(event) => { if (list.current?.scrollTop === 0 && !loading) { pullStart.current = event.clientY; event.currentTarget.setPointerCapture(event.pointerId); } }} onPointerMove={(event) => { if (pullStart.current !== null) setPullDistance(Math.min(76, Math.max(0, event.clientY - pullStart.current))); }} onPointerUp={(event) => { finishPull(event.clientY); if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId); }} onPointerCancel={() => { pullStart.current = null; setPullDistance(0); }}><div className={`news-pull-indicator${loading ? ' loading' : ''}`} style={{ height: loading ? 28 : pullDistance, opacity: loading || pullDistance > 0 ? 1 : 0 }}>{loading ? <><RefreshCw size={13} className="spin" />加载中</> : pullDistance >= pullThreshold ? '释放加载' : '下拉加载'}</div>{items.length ? items.map((item) => <article className={`news-item${item.urgency === 'breaking' ? ' breaking' : ''}${known.current && !known.current.has(item.id) ? ' entering' : ''}`} key={item.id}><div><span>{item.source}</span><time>{new Date(item.publishedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</time></div><a href={item.url} target="_blank" rel="noreferrer">{item.title}</a></article>) : <p className="news-empty">新闻正在同步</p>}</div></section>;
+  return <section className="news-panel" aria-label="市场新闻"><div className="section-title"><span>News</span></div><div className="news-list" ref={list} onScroll={(event) => { const target = event.currentTarget; if (target.scrollHeight - target.scrollTop - target.clientHeight < 80 && hasMore && !loading) onLoadMore(); }} onPointerDown={(event) => { if (list.current?.scrollTop === 0 && !loading) { pullStart.current = event.clientY; event.currentTarget.setPointerCapture(event.pointerId); } }} onPointerMove={(event) => { if (pullStart.current !== null) setPullDistance(Math.min(76, Math.max(0, event.clientY - pullStart.current))); }} onPointerUp={(event) => { finishPull(event.clientY); if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId); }} onPointerCancel={() => { pullStart.current = null; setPullDistance(0); }}><div className={`news-pull-indicator${loading ? ' loading' : ''}`} style={{ height: loading ? 28 : pullDistance, opacity: loading || pullDistance > 0 ? 1 : 0 }}>{loading ? <><RefreshCw size={13} className="spin" />加载中</> : pullDistance >= pullThreshold ? '释放加载' : '下拉加载'}</div>{items.length ? items.map((item) => <article className={`news-item${item.urgency === 'breaking' ? ' breaking' : ''}${known.current && !known.current.has(item.id) ? ' entering' : ''}`} key={item.id}><div><span>{item.source}</span><time>{new Date(item.publishedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</time></div><a href={item.url} target="_blank" rel="noreferrer">{item.title}</a></article>) : <p className="news-empty">新闻正在同步</p>}{loading && items.length > 0 && <div className="news-page-loading"><RefreshCw size={12} className="spin" />加载更多</div>}{!hasMore && items.length > 0 && <div className="news-page-end">已到最早新闻</div>}</div></section>;
 }
 
 function EmergencyPanel({ state, onChange }: { state: EmergencyState; onChange: (next: EmergencyState) => void }) {
@@ -240,11 +240,19 @@ function CoinMWorkspace({ onMarketContext }: { onMarketContext: (context: Market
   const [tickDirection, setTickDirection] = useState<'up' | 'down' | ''>('');
   const [priceGrouping, setPriceGrouping] = useState('0.1');
   const [secondRows, setSecondRows] = useState<KlineRow[]>([]);
+  const [klineOffset, setKlineOffset] = useState(0);
+  const klineOffsetValue = useRef(0);
   const previousPrice = useRef(0);
   const pendingPrice = useRef<number | null>(null);
   const pendingDepth = useRef<{ bids: string[][]; asks: string[][] } | null>(null);
   const pendingRelay = useRef<CoinMMarket | null>(null);
   const pendingSecondRows = useRef<KlineRow[]>([]);
+  const klineDragStart = useRef<number | null>(null);
+  const klineDragAnchor = useRef(0);
+  const klinePointerX = useRef<number | null>(null);
+  const klineDragFrame = useRef<number | null>(null);
+  const klineDragged = useRef(false);
+  const previousKlineLength = useRef(0);
   const loadingOlder = useRef(false);
   const oldestReached = useRef(false);
   const timeVisibleCandles = useRef<CoinMCandle[]>([]);
@@ -261,6 +269,7 @@ function CoinMWorkspace({ onMarketContext }: { onMarketContext: (context: Market
   useEffect(() => {
     let active = true;
     if (interval === '1s') { pendingSecondRows.current = []; setSecondRows([]); }
+    klineOffsetValue.current = 0; setKlineOffset(0);
     oldestReached.current = false;
     const sourceInterval = interval === 'time' || interval === '1s' ? '1m' : interval;
     const load = () => api<CoinMMarket>(`/${marketPath}?symbol=${marketSymbol}&interval=${sourceInterval}`).then((result) => { if (active) { orderBook.current = { bids: new Map(result.depth.bids.map(([price, quantity]) => [price, quantity] as const)), asks: new Map(result.depth.asks.map(([price, quantity]) => [price, quantity] as const)) }; setMarket((current) => current?.symbol === result.symbol && current.interval === result.interval ? { ...result, klines: mergeKlineRows(current.klines, result.klines) } : result); setError(''); } }).catch((caught) => { if (active) setError(caught instanceof Error ? caught.message : `${marketType === 'usdm' ? 'U 本位' : '币本位'}行情不可用`); });
@@ -313,7 +322,15 @@ function CoinMWorkspace({ onMarketContext }: { onMarketContext: (context: Market
   }, [interval, marketType]);
   const chartRows = interval === '1s' ? (marketType === 'coinm' ? market?.interval === '1s' ? market.klines : [] : secondRows) : market?.klines || [];
   const allCandles = [...new Map(chartRows.map((item) => [Number(item[0]), { time: Number(item[0]), open: Number(item[1]), high: Number(item[2]), low: Number(item[3]), close: Number(item[4]), volume: Number(item[5]), quoteVolume: Number(item[7]) }])).values()];
-  const candles = allCandles.slice(-120);
+  useEffect(() => {
+    const added = allCandles.length - previousKlineLength.current;
+    if (added > 0 && klineOffsetValue.current > 0) {
+      klineOffsetValue.current += added; setKlineOffset(klineOffsetValue.current);
+      if (klineDragStart.current !== null) klineDragAnchor.current += added;
+    }
+    previousKlineLength.current = allCandles.length;
+  }, [allCandles.length]);
+  const candles = klineWindow(allCandles, klineOffset);
   const width = 900; const height = 330; const pad = 36;
   const livePrice = Number(market?.premium.markPrice || candles.at(-1)?.close || 0);
   const low = candles.length ? Math.min(...candles.map((item) => item.low), livePrice || Infinity) : 0;
@@ -348,6 +365,7 @@ function CoinMWorkspace({ onMarketContext }: { onMarketContext: (context: Market
   const selected = selectedIndex === null ? null : candles[selectedIndex];
   const axisValues = [0, 1, 2, 3, 4].map((line) => high - line * range / 4);
   const selectCandle = (event: React.MouseEvent<SVGSVGElement>) => {
+    if (klineDragged.current) { klineDragged.current = false; return; }
     const bounds = event.currentTarget.getBoundingClientRect();
     const chartX = (event.clientX - bounds.left) / bounds.width * width;
     setSelectedIndex(Math.max(0, Math.min(candles.length - 1, Math.round((chartX - pad - step / 2) / step))));
@@ -359,6 +377,42 @@ function CoinMWorkspace({ onMarketContext }: { onMarketContext: (context: Market
     loadingOlder.current = true;
     void api<CoinMMarket>(`/${marketPath}?symbol=${marketSymbol}&interval=1m&endTime=${before - 1}`).then((result) => { const older = result.klines.filter((row) => Number(row[0]) < before); oldestReached.current = older.length === 0; if (older.length) { setSelectedIndex(null); setMarket((current) => current ? { ...current, klines: mergeKlineRows(current.klines, older) } : current); } }).catch(() => setError('历史分时数据暂时不可用')).finally(() => { loadingOlder.current = false; });
   };
+  const loadOlderKlines = () => {
+    const before = allCandles[0]?.time;
+    if (!before || interval === '1s' || interval === 'time' || loadingOlder.current || oldestReached.current) return;
+    loadingOlder.current = true;
+    void api<CoinMMarket>(`/${marketPath}?symbol=${marketSymbol}&interval=${interval}&endTime=${before - 1}`).then((result) => {
+      const older = result.klines.filter((row) => Number(row[0]) < before);
+      oldestReached.current = older.length === 0;
+      if (older.length) {
+        setMarket((current) => current ? { ...current, klines: mergeKlineRows(current.klines, older) } : current);
+      }
+    }).catch(() => setError('历史 K 线暂时不可用')).finally(() => { loadingOlder.current = false; });
+  };
+  useEffect(() => {
+    const down = (event: PointerEvent) => {
+      if (!(event.target as Element).closest?.('svg[aria-label="BTCUSD coin-m candlestick chart"]')) return;
+      klineDragStart.current = event.clientX; klineDragAnchor.current = klineOffsetValue.current; klineDragged.current = false;
+    };
+    const move = (event: PointerEvent) => {
+      if (klineDragStart.current === null) return;
+      klinePointerX.current = event.clientX;
+      if (klineDragFrame.current !== null) return;
+      klineDragFrame.current = window.requestAnimationFrame(() => {
+        klineDragFrame.current = null;
+        if (klineDragStart.current === null || klinePointerX.current === null) return;
+        const delta = klinePointerX.current - klineDragStart.current;
+        if (Math.abs(delta) > 3) { klineDragged.current = true; setSelectedIndex(null); }
+        const maximum = Math.max(0, allCandles.length - 120);
+        const nextOffset = Math.max(0, Math.min(maximum, klineDragAnchor.current + Math.round(delta / Math.max(step, 1))));
+        klineOffsetValue.current = nextOffset; setKlineOffset(nextOffset);
+        if (delta > step && nextOffset === maximum) loadOlderKlines();
+      });
+    };
+    const up = () => { if (klineDragFrame.current !== null) window.cancelAnimationFrame(klineDragFrame.current); klineDragFrame.current = null; klinePointerX.current = null; klineDragStart.current = null; };
+    document.addEventListener('pointerdown', down); window.addEventListener('pointermove', move); window.addEventListener('pointerup', up);
+    return () => { document.removeEventListener('pointerdown', down); window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up); };
+  }, [interval, marketType, allCandles.length, step]);
   const contextDepth = (levels: string[][]) => levels.slice(0, 20).reduce((sum, [, quantity]) => sum + Number(quantity), 0);
   const publishMarketContext = (visible: CoinMCandle[], displayInterval = interval) => {
     const bids = market?.depth.bids || []; const asks = market?.depth.asks || []; const bid = Number(bids[0]?.[0] || 0); const ask = Number(asks[0]?.[0] || 0); const mid = bid && ask ? (bid + ask) / 2 : last;
@@ -471,6 +525,8 @@ export function App() {
   const [error, setError] = useState('');
   const [news, setNews] = useState<NewsItem[]>([]);
   const [newsLoading, setNewsLoading] = useState(false);
+  const newsCursor = useRef<string | null>(null);
+  const [newsHasMore, setNewsHasMore] = useState(true);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [leftWidth, setLeftWidth] = useState(() => Math.min(window.innerWidth * .2, Math.max(LEFT_SIDEBAR_MIN, Number(window.localStorage.getItem('crypto-agent-left-width')) || window.innerWidth * .14)));
   const [rightWidth, setRightWidth] = useState(() => Math.min(window.innerWidth * .6, Math.max(window.innerWidth * .3, Number(window.localStorage.getItem('crypto-agent-right-width')) || window.innerWidth * .36)));
@@ -492,9 +548,21 @@ export function App() {
     setNewsLoading(true);
     try {
       await new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve()));
-      const result = await api<{ items: NewsItem[] }>('/news?limit=30');
+      const result = await api<{ items: NewsItem[]; nextCursor: string | null }>('/news?limit=30');
       setNews((current) => [...result.items, ...current.filter((item) => !result.items.some((next) => next.id === item.id))]);
+      newsCursor.current = result.nextCursor;
+      setNewsHasMore(Boolean(result.nextCursor));
     } catch { /* The next pull can retry the refresh. */ } finally { setNewsLoading(false); }
+  }
+  async function loadMoreNews() {
+    if (newsLoading || !newsCursor.current) return;
+    setNewsLoading(true);
+    try {
+      const result = await api<{ items: NewsItem[]; nextCursor: string | null }>(`/news?limit=30&before=${encodeURIComponent(newsCursor.current)}`);
+      setNews((current) => [...current, ...result.items.filter((item) => !current.some((existing) => existing.id === item.id))]);
+      newsCursor.current = result.nextCursor;
+      setNewsHasMore(Boolean(result.nextCursor));
+    } catch { /* The next scroll can retry the page. */ } finally { setNewsLoading(false); }
   }
   useEffect(() => { void refresh(); }, []);
   useEffect(() => {
@@ -506,6 +574,8 @@ export function App() {
     void api<{ items: NewsItem[]; nextCursor: string | null }>('/news?mode=startup&limit=30').then((result) => {
       if (!active) return;
       setNews(result.items);
+      newsCursor.current = result.nextCursor;
+      setNewsHasMore(Boolean(result.nextCursor));
       if (result.items.length) notify('CryptoAgent 今日新闻', `${result.items.length} 条重要新闻已准备好`);
     }).catch(() => {});
     const stream = new EventSource('/api/news/stream');
@@ -518,7 +588,7 @@ export function App() {
     const onBreaking = (event: MessageEvent<string>) => { const item = (JSON.parse(event.data) as { item: NewsItem }).item; notify('CryptoAgent 爆炸性新闻', item.title); };
     stream.addEventListener('breaking', onBreaking);
     const latestTimer = window.setInterval(() => {
-      void api<{ items: NewsItem[] }>('/news?limit=30').then((result) => {
+      void api<{ items: NewsItem[]; nextCursor: string | null }>('/news?limit=30').then((result) => {
         if (!active || !result.items.length) return;
         setNews((current) => [...result.items, ...current.filter((item) => !result.items.some((next) => next.id === item.id))]);
       }).catch(() => {});
@@ -599,7 +669,7 @@ export function App() {
       <button className="new-chat" onClick={newChat}><Plus size={17} />New chat</button>
       <div className="sidebar-lists">
       <nav className="recents" aria-label="最近对话"><div className="section-title"><span>Recents</span></div><div className="recents-list">{sessions.length ? sessions.map((session) => <button className={activeSessionId === session.id ? 'active' : ''} key={session.id} onClick={() => openSession(session)}><MessageSquare size={14} /><span>{session.title}</span></button>) : <p>暂无最近对话</p>}</div></nav>
-      <NewsPanel items={news} onRefresh={() => void refreshNews()} loading={newsLoading} />
+      <NewsPanel items={news} onRefresh={() => void refreshNews()} onLoadMore={() => void loadMoreNews()} loading={newsLoading} hasMore={newsHasMore} />
       </div>
       <button className="settings-entry" onClick={() => setSettingsOpen(true)}><Settings2 size={16} />设置与外观</button>
       <button className="resize-handle left-resize" title="调整左侧栏宽度" aria-label="调整左侧栏宽度" onPointerDown={(event) => { event.currentTarget.setPointerCapture(event.pointerId); setResizing('left'); }} />
