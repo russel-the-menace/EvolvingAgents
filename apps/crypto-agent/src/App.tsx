@@ -2598,9 +2598,9 @@ function CoinMWorkspace({
                   >
                     <line x1={x} x2={x} y1={y(item.high)} y2={y(item.low)} />
                     <rect
-                      x={x - Math.max(1, step * 0.28)}
+                      x={x - step / 2}
                       y={Math.min(y(item.open), y(item.close))}
-                      width={Math.max(2, step * 0.56)}
+                      width={step}
                       height={Math.max(
                         1,
                         Math.abs(y(item.open) - y(item.close)),
