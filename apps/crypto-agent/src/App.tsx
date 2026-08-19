@@ -1282,7 +1282,6 @@ function TimeShareChart({
   const width = 900;
   const height = 330;
   const pad = 20;
-  const plotRight = width - 100;
   const visibleEnd = Math.max(0, candles.length - 1 - historyOffset);
   const start = Math.max(0, visibleEnd - visibleCount + 1);
   const visibleCandles = candles.slice(start, visibleEnd + 1);
@@ -1293,7 +1292,7 @@ function TimeShareChart({
     ? Math.max(...visibleCandles.map((item) => item.high))
     : 1;
   const range = high - low || 1;
-  const step = (plotRight - pad) / Math.max(visibleCandles.length, 1);
+  const step = (width - pad) / Math.max(visibleCandles.length, 1);
   const navigation = useChartNavigation({
     times: candleTimes,
     visibleCount,
@@ -2038,7 +2037,6 @@ function CoinMWorkspace({
   const width = 900;
   const height = 330;
   const pad = 20;
-  const plotRight = width - 100;
   const currentMarketPrice =
     market?.symbol === marketSymbol
       ? Number(market.premium.markPrice || candles.at(-1)?.close || 0)
@@ -2054,7 +2052,7 @@ function CoinMWorkspace({
     ? Math.max(...candles.map((item) => item.high), livePrice || -Infinity)
     : 1;
   const range = high - low || 1;
-  const step = (plotRight - pad) / Math.max(candles.length, 1);
+  const step = (width - pad) / Math.max(candles.length, 1);
   const y = (price: number) =>
     pad + ((high - price) / range) * (height - pad * 2);
   const maValues = (period: number) =>
