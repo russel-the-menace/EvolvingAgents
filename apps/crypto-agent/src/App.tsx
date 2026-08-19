@@ -1714,6 +1714,10 @@ function CoinMWorkspace({
     bids: new Map<string, string>(),
     asks: new Map<string, string>(),
   });
+  const depthCache = useRef(
+    new Map<"usdm" | "coinm", { bids: string[][]; asks: string[][] }>(),
+  );
+  const marketPriceCache = useRef(new Map<"usdm" | "coinm", number>());
   const marketSymbol = marketType === "usdm" ? "BTCUSDT" : "BTCUSD_PERP";
   const marketPath = marketType === "usdm" ? "usdm-market" : "coinm-market";
   const streamHost =
@@ -2034,9 +2038,14 @@ function CoinMWorkspace({
   const width = 900;
   const height = 330;
   const pad = 20;
-  const livePrice = Number(
-    market?.premium.markPrice || candles.at(-1)?.close || 0,
-  );
+  const currentMarketPrice =
+    market?.symbol === marketSymbol
+      ? Number(market.premium.markPrice || candles.at(-1)?.close || 0)
+      : 0;
+  if (currentMarketPrice > 0)
+    marketPriceCache.current.set(marketType, currentMarketPrice);
+  const livePrice =
+    currentMarketPrice || marketPriceCache.current.get(marketType) || 0;
   const low = candles.length
     ? Math.min(...candles.map((item) => item.low), livePrice || Infinity)
     : 0;
@@ -2120,8 +2129,25 @@ function CoinMWorkspace({
       .slice(0, 6)
       .map(([price, quantity]) => [String(price), String(quantity)]);
   };
-  const displayAsks = groupDepth(market?.depth.asks || [], "ask");
-  const displayBids = groupDepth(market?.depth.bids || [], "bid");
+  if (
+    market?.symbol === marketSymbol &&
+    (market.depth.asks.length || market.depth.bids.length)
+  )
+    depthCache.current.set(marketType, market.depth);
+  const cachedDepth =
+    market?.symbol === marketSymbol &&
+    (market.depth.asks.length || market.depth.bids.length)
+      ? market.depth
+      : depthCache.current.get(marketType);
+  const padDepth = (levels: string[][], side: "ask" | "bid") => {
+    const grouped = groupDepth(levels, side);
+    return [
+      ...grouped,
+      ...Array.from({ length: 6 - grouped.length }, () => ["", ""]),
+    ];
+  };
+  const displayAsks = padDepth(cachedDepth?.asks || [], "ask");
+  const displayBids = padDepth(cachedDepth?.bids || [], "bid");
   const depthMax = Math.max(
     ...displayAsks.map(([, quantity]) => Number(quantity)),
     ...displayBids.map(([, quantity]) => Number(quantity)),
@@ -2472,15 +2498,15 @@ function CoinMWorkspace({
           {displayAsks
             .slice(0, 6)
             .reverse()
-            .map(([price, quantity]) => (
-              <div className="ask" key={price}>
+            .map(([price, quantity], index) => (
+              <div className="ask" key={`ask-${index}`}>
                 <i
                   style={{
                     width: `${Math.min(100, (Number(quantity) / depthMax) * 100)}%`,
                   }}
                 />
-                <span>{bookPrice(price)}</span>
-                <span>{Number(quantity).toLocaleString()}</span>
+                <span>{price ? bookPrice(price) : "-"}</span>
+                <span>{quantity ? Number(quantity).toLocaleString() : "-"}</span>
               </div>
             ))}
           <strong
@@ -2494,15 +2520,15 @@ function CoinMWorkspace({
           >
             {bookPrice(last)}
           </strong>
-          {displayBids.slice(0, 6).map(([price, quantity]) => (
-            <div className="bid" key={price}>
+          {displayBids.slice(0, 6).map(([price, quantity], index) => (
+            <div className="bid" key={`bid-${index}`}>
               <i
                 style={{
                   width: `${Math.min(100, (Number(quantity) / depthMax) * 100)}%`,
                 }}
               />
-              <span>{bookPrice(price)}</span>
-              <span>{Number(quantity).toLocaleString()}</span>
+              <span>{price ? bookPrice(price) : "-"}</span>
+              <span>{quantity ? Number(quantity).toLocaleString() : "-"}</span>
             </div>
           ))}
           <div className="depth-ratio">
