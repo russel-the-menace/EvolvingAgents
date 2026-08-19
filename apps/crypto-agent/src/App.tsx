@@ -1052,12 +1052,14 @@ function useChartNavigation({
   const timesLengthRef = useRef(times.length);
   const stepRef = useRef(step);
   const warmupPointsRef = useRef(warmupPoints);
+  const storageKeyRef = useRef(storageKey);
   visibleCountRef.current = visibleCount;
   historyOffsetRef.current = historyOffset;
   onLoadOlderRef.current = onLoadOlder;
   timesLengthRef.current = times.length;
   stepRef.current = step;
   warmupPointsRef.current = warmupPoints;
+  storageKeyRef.current = storageKey;
   const updateOffset = (next: number) => {
     historyOffsetRef.current = next;
     setHistoryOffset(next);
@@ -1090,7 +1092,10 @@ function useChartNavigation({
   };
   applyZoomRef.current = applyZoom;
   const saveZoom = () =>
-    window.localStorage.setItem(storageKey, String(visibleCountRef.current));
+    window.localStorage.setItem(
+      storageKeyRef.current,
+      String(visibleCountRef.current),
+    );
   const requestOlder = () => {
     if (prefetchRequested.current) return;
     prefetchRequested.current = true;
@@ -1741,7 +1746,7 @@ function CoinMWorkspace({
       Math.max(
         MIN_KLINE_POINTS,
         Number(
-          window.localStorage.getItem("crypto-agent-kline-visible-points"),
+          window.localStorage.getItem("crypto-agent-kline-visible-points:5m"),
         ) || 120,
       ),
     ),
@@ -1784,6 +1789,23 @@ function CoinMWorkspace({
     klineViewCache.current.set(marketCacheKey, {
       offset: klineOffset,
     });
+    window.localStorage.setItem(
+      `crypto-agent-kline-visible-points:${interval}`,
+      String(klineVisibleCount),
+    );
+    setKlineVisibleCount(
+      Math.min(
+        MAX_KLINE_POINTS,
+        Math.max(
+          MIN_KLINE_POINTS,
+          Number(
+            window.localStorage.getItem(
+              `crypto-agent-kline-visible-points:${next}`,
+            ),
+          ) || 120,
+        ),
+      ),
+    );
     setInterval(next);
     setSelectedIndex(null);
   };
@@ -2340,7 +2362,7 @@ function CoinMWorkspace({
     minPoints: MIN_KLINE_POINTS,
     maxPoints: MAX_KLINE_POINTS,
     warmupPoints: 99,
-    storageKey: "crypto-agent-kline-visible-points",
+    storageKey: `crypto-agent-kline-visible-points:${interval}`,
     onLoadOlder: loadOlderKlines,
     onDrag: () => setSelectedIndex(null),
   });
