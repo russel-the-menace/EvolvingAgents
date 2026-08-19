@@ -2832,6 +2832,23 @@ function AssetWorkspace({
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
   const [hidden, setHidden] = useState(false);
+  const contentRef = useRef<HTMLDivElement>(null);
+  const tabScroll = useRef(new Map<string, number>());
+  const changeBottomTab = (next: string) => {
+    if (next === bottomTab) return;
+    tabScroll.current.set(bottomTab, contentRef.current?.scrollTop || 0);
+    setBottomTab(next);
+  };
+  useLayoutEffect(() => {
+    const content = contentRef.current;
+    if (!content) return;
+    const top = tabScroll.current.get(bottomTab) || 0;
+    content.scrollTop = top;
+    const frame = window.requestAnimationFrame(() => {
+      content.scrollTop = top;
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [bottomTab]);
   async function load() {
     setLoading(true);
     setLoadError("");
@@ -2963,9 +2980,8 @@ function AssetWorkspace({
             : accountValues.funding;
   return (
     <section className="asset-app">
-      <div className="asset-content">
-        {bottomTab === "assets" ? (
-          <>
+      <div className="asset-content" ref={contentRef}>
+        <div hidden={bottomTab !== "assets"}>
             <div className="asset-tabs" role="tablist">
               {tabs.map(([id, label]) => (
                 <button
@@ -3136,16 +3152,19 @@ function AssetWorkspace({
                 ))}
               </details>
             ) : null}
-          </>
-        ) : bottomTab === "contracts" ? (
+        </div>
+        <div hidden={bottomTab !== "contracts"}>
           <CoinMWorkspace onMarketContext={onMarketContext} />
-        ) : (
+        </div>
+        {bottomTab !== "assets" && bottomTab !== "contracts" && (
           <div className="asset-placeholder">
             <strong>{nav.find(([, , id]) => id === bottomTab)?.[1]}</strong>
             <span>此导航将在后续视图中实现</span>
           </div>
         )}
-        {loadError && <p className="asset-load-error">{loadError}</p>}
+        {bottomTab === "assets" && loadError && (
+          <p className="asset-load-error">{loadError}</p>
+        )}
       </div>
       <nav
         className="asset-bottom-nav"
@@ -3155,7 +3174,7 @@ function AssetWorkspace({
           <button
             className={bottomTab === id ? "active" : ""}
             key={id}
-            onClick={() => setBottomTab(id)}
+            onClick={() => changeBottomTab(id)}
           >
             <Icon size={19} />
             <span>{label}</span>
