@@ -209,6 +209,8 @@ button { cursor: pointer; }
 .chart-crosshair line { stroke: #aeb4bf; stroke-width: 1; stroke-dasharray: 5 4; pointer-events: none; }.chart-crosshair circle { fill: #e8ebf0; stroke: var(--panel); stroke-width: 2; }
 .current-price-guide { stroke: var(--ink); stroke-width: 1; stroke-dasharray: 4 4; pointer-events: none; }.kline-date-guide { stroke: var(--border); stroke-width: 1; }
 .coinm-axis { position: absolute; top: 36px; right: 0; bottom: 36px; width: 50px; color: var(--muted); font-size: 9px; font-variant-numeric: tabular-nums; }.coinm-axis span { position: absolute; right: 0; transform: translateY(-50%); }
+.coinm-time-share .coinm-axis { top: 20px; bottom: 20px; }
+.coinm-chart .coinm-axis { top: 20px; bottom: 20px; }
 .current-price-overlay { position: absolute; z-index: 4; right: -6px; min-width: 50px; transform: translateY(-50%); border: 1px solid var(--ink); border-radius: 5px; padding: 3px 4px; color: var(--ink); background: var(--panel); font-size: 9px; line-height: 1; text-align: center; font-variant-numeric: tabular-nums; pointer-events: none; white-space: nowrap; }.kline-x-axis { position: relative; height: 18px; margin-right: 52px; color: var(--muted); font-size: 9px; font-variant-numeric: tabular-nums; white-space: nowrap; }.kline-x-axis span { position: absolute; top: 2px; transform: translateX(-50%); }
 .coinm-tooltip { position: absolute; z-index: 3; top: 30px; right: 58px; display: grid; min-width: 145px; grid-template-columns: 1fr 1fr; gap: 3px 12px; border: 1px solid var(--border); border-radius: 5px; padding: 9px 10px; background: color-mix(in srgb, var(--panel) 92%, transparent); box-shadow: 0 8px 24px rgb(0 0 0 / 18%); font-size: 10px; }.coinm-tooltip b { grid-column: 1 / -1; margin-bottom: 3px; }.coinm-tooltip span { display: contents; color: var(--muted); }.coinm-tooltip em { color: var(--ink); font-style: normal; text-align: right; font-variant-numeric: tabular-nums; }.coinm-tooltip em.positive { color: #2fc58a; }.coinm-tooltip em.negative { color: #f64d68; }
 .coinm-chart-price { color: var(--muted); font-size: 10px; text-align: right; }
@@ -232,9 +234,10 @@ button { cursor: pointer; }
 .coinm-intervals { scrollbar-width: none; cursor: grab; }
 .coinm-intervals:active { cursor: grabbing; }
 .coinm-chart > .coinm-intervals { display: none; }
-.coinm-full-intervals { border-bottom: 1px solid var(--border); padding: 7px 0; }
+.coinm-full-intervals { border-bottom: 1px solid var(--border); padding: 5px 0; }
+.coinm-full-intervals button { padding-block: 5px; }
 .time-mode .coinm-chart { display: none; }
-.coinm-time-share { margin-top: 6px; margin-bottom: 16px; }
+.coinm-time-share { margin-top: 4px; margin-bottom: 8px; }
 .coinm-time-share .coinm-ma-legend { justify-content: flex-start; }
 .time-ma-legend { color: #a5adb9 !important; line-height: 1; }
 .time-area { fill: rgb(240 185 11 / 20%); }
@@ -243,7 +246,7 @@ button { cursor: pointer; }
 .time-ma { stroke-linecap: round; stroke-linejoin: round; }
 .time-price-guide { stroke: var(--muted); stroke-width: 1; stroke-dasharray: 4 4; }
 .time-price-overlay { position: absolute; z-index: 4; right: -6px; min-width: 50px; transform: translateY(-50%); border: 1px solid var(--ink); border-radius: 6px; padding: 3px 4px; color: var(--ink); background: var(--panel); font-size: 9px; line-height: 1; text-align: center; font-variant-numeric: tabular-nums; pointer-events: none; white-space: nowrap; }
-.time-x-axis { position: absolute; right: 52px; bottom: -10px; left: 0; color: var(--muted); font-size: 9px; font-variant-numeric: tabular-nums; white-space: nowrap; }.time-x-axis span { position: absolute; transform: translateX(-50%); }
+.time-x-axis { position: absolute; right: 52px; bottom: 6px; left: 0; color: var(--muted); font-size: 9px; font-variant-numeric: tabular-nums; white-space: nowrap; }.time-x-axis span { position: absolute; transform: translateX(-50%); }
 @keyframes spin { to { transform: rotate(360deg); } }
 @keyframes pulse { 0%,100% { opacity: .3; } 50% { opacity: 1; } }
 @media (max-width: 1100px) { .terminal-shell { grid-template-columns: var(--left-width, 14vw) minmax(360px, 1fr) var(--right-width, 36vw); } }
