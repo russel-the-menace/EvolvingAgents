@@ -336,10 +336,16 @@ function MarketPanel({ items }: { items: MarketEvent[] }) {
                 </time>
               </div>
               <strong>
-                {item.direction === "up" ? "向上" : "向下"}
-                {item.threshold
+                {item.eventType === "market_update"
+                  ? "5 分钟行情"
+                  : item.direction === "up"
+                    ? "向上"
+                    : "向下"}
+                {item.eventType !== "market_update" && item.threshold
                   ? `突破 ${item.threshold.toLocaleString("en-US")}`
-                  : "异常波动"}
+                  : item.eventType !== "market_update"
+                    ? "异常波动"
+                    : ""}
               </strong>
               <p>
                 {item.price.toLocaleString("en-US", {

@@ -143,7 +143,26 @@ class Relay:
                 if len(rows) < 1500: break
             except Exception as error:
                 logging.warning("failed to load candle history: %s", type(error).__name__); return False
+        self._backfill_market_updates()
         return True
+
+    def _backfill_market_updates(self) -> None:
+        cutoff = int(time.time() * 1000) - 24 * 60 * 60_000
+        with closing(sqlite3.connect(self.feature_db)) as db, db:
+            rows = db.execute("SELECT open_time_ms,open,high,low,close,volume FROM market_candles WHERE symbol=? AND interval='1m' AND open_time_ms >= ? ORDER BY open_time_ms", (SYMBOL, cutoff)).fetchall()
+            records = []
+            for index in range(4, len(rows), 5):
+                window = rows[index - 4:index + 1]
+                if any(window[offset][0] - window[offset - 1][0] != 60_000 for offset in range(1, 5)): continue
+                start, end = float(window[0][1]), float(window[-1][4])
+                observed = int(window[-1][0]) + 60_000
+                evidence = json.dumps({"windowMs": 300000, "return": end / start - 1 if start else 0,
+                                       "high": max(float(row[2]) for row in window), "low": min(float(row[3]) for row in window),
+                                       "volume": sum(float(row[5]) for row in window)}, separators=(",", ":"))
+                records.append((f"{SYMBOL}:market_update:{observed}", observed, SYMBOL, "market_update", "normal",
+                                "up" if end >= start else "down", 0, end, start, "binance_coinm_1m", evidence))
+            db.executemany("INSERT OR IGNORE INTO market_events VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", records)
+            db.execute("DELETE FROM market_events WHERE event_type='market_update' AND observed_at_ms < ?", (int(time.time() * 1000) - HISTORY_RETENTION_MS,))
 
     def history(self, start_ms: int, end_ms: int) -> list[dict[str, Any]]:
         start = max(start_ms, int(time.time() * 1000) - HISTORY_RETENTION_MS); end = min(end_ms, int(time.time() * 1000))
@@ -350,6 +369,8 @@ class Relay:
                     else: rows.append(row)
                     self.klines[interval] = rows[-240:]
                     if interval == "1m": self._store_candle(interval, row)
+                    if interval == "1m" and item.get("x") and (int(item["t"]) // 60_000 + 1) % 5 == 0:
+                        self._backfill_market_updates()
                     self.price = float(item["c"])
                     self.revision += 1
                 elif event == "aggTrade":
