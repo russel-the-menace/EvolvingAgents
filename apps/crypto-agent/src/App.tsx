@@ -1193,7 +1193,23 @@ function useChartNavigation({
   useLayoutEffect(() => {
     const svg = chartRef.current;
     if (!svg) return;
+    const isInsideChart = (event: Event) => {
+      if (svg.contains(event.target as Node)) return true;
+      const gesture = event as Event & { clientX?: number; clientY?: number };
+      if (gesture.clientX === undefined || gesture.clientY === undefined)
+        return false;
+      const bounds = svg.getBoundingClientRect();
+      return (
+        bounds.width > 0 &&
+        bounds.height > 0 &&
+        gesture.clientX >= bounds.left &&
+        gesture.clientX <= bounds.right &&
+        gesture.clientY >= bounds.top &&
+        gesture.clientY <= bounds.bottom
+      );
+    };
     const wheel = (event: WheelEvent) => {
+      if (!isInsideChart(event)) return;
       event.preventDefault();
       const bounds = svg.getBoundingClientRect();
       if (!event.deltaY) return;
@@ -1208,11 +1224,13 @@ function useChartNavigation({
     };
     let startScale = 1;
     const start = (event: Event) => {
+      if (!isInsideChart(event)) return;
       startScale = (event as Event & { scale?: number }).scale || 1;
       pinchStartCount.current = visibleCountRef.current;
       event.preventDefault();
     };
     const change = (event: Event) => {
+      if (!isInsideChart(event)) return;
       const scale = (event as Event & { scale?: number }).scale || 1;
       applyZoomRef.current(
         Math.round(pinchStartCount.current / (scale / startScale)),
@@ -1220,16 +1238,27 @@ function useChartNavigation({
       );
       event.preventDefault();
     };
-    const end = () => saveZoom();
-    svg.addEventListener("wheel", wheel, { passive: false });
-    svg.addEventListener("gesturestart", start, { passive: false });
-    svg.addEventListener("gesturechange", change, { passive: false });
-    svg.addEventListener("gestureend", end);
+    const end = (event: Event) => {
+      if (isInsideChart(event)) saveZoom();
+    };
+    window.addEventListener("wheel", wheel, {
+      capture: true,
+      passive: false,
+    });
+    window.addEventListener("gesturestart", start, {
+      capture: true,
+      passive: false,
+    });
+    window.addEventListener("gesturechange", change, {
+      capture: true,
+      passive: false,
+    });
+    window.addEventListener("gestureend", end, true);
     return () => {
-      svg.removeEventListener("wheel", wheel);
-      svg.removeEventListener("gesturestart", start);
-      svg.removeEventListener("gesturechange", change);
-      svg.removeEventListener("gestureend", end);
+      window.removeEventListener("wheel", wheel, true);
+      window.removeEventListener("gesturestart", start, true);
+      window.removeEventListener("gesturechange", change, true);
+      window.removeEventListener("gestureend", end, true);
     };
   }, [Boolean(times.length)]);
   return {
