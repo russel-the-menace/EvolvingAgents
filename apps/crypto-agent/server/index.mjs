@@ -194,6 +194,51 @@ async function orderBookContext(range) {
   } catch { return null; }
 }
 
+function historicalMarketRequest(message, now = Date.now()) {
+  const text = String(message || '');
+  const price = Number(text.match(/(?:突破|穿越|站上|跌破|跌穿)\s*([0-9]+(?:\.[0-9]+)?)/)?.[1]);
+  if (!Number.isFinite(price) || !/(昨天|前天|今日|今天|突破|穿越|站上|跌破|历史)/u.test(text)) return null;
+  const chinaOffset = 8 * 60 * 60 * 1000;
+  const localDay = Math.floor((now + chinaOffset) / 86_400_000) * 86_400_000 - chinaOffset;
+  const start = /前天/u.test(text) ? localDay - 2 * 86_400_000 : /昨天/u.test(text) ? localDay - 86_400_000 : localDay;
+  return { startTime: start, endTime: start + 86_400_000, price, direction: /跌破|跌穿/u.test(text) ? 'down' : 'up' };
+}
+
+async function historicalMarketContext(message) {
+  const request = historicalMarketRequest(message);
+  if (!request || !marketDataBase || !marketDataKey) return null;
+  try {
+    const rows = await remoteMarketHistory(request.startTime, request.endTime);
+    const crossing = rows.find((row, index) => index > 0 && (request.direction === 'up' ? rows[index - 1].close < request.price && row.close >= request.price : rows[index - 1].close > request.price && row.close <= request.price));
+    if (!crossing) return { ...request, candles: rows.slice(-2_000), crossing: null };
+    const index = rows.indexOf(crossing);
+    return { ...request, crossing: { time: crossing.time, price: crossing.close }, candles: rows.slice(Math.max(0, index - 120), Math.min(rows.length, index + 120)) };
+  } catch { return null; }
+}
+
+async function remoteMarketHistory(startTime, endTime) {
+  if (!marketDataBase || !marketDataKey) return [];
+  const query = new URLSearchParams({ symbol: 'BTCUSD_PERP', startTime: String(startTime), endTime: String(endTime) });
+  const response = await fetch(`${marketDataBase}/v1/market/coinm/history?${query}`, { headers: { Authorization: `Bearer ${marketDataKey}` }, signal: AbortSignal.timeout(10_000) });
+  if (!response.ok) return [];
+  return (await response.json()).klines || [];
+}
+
+async function tradeContext(message) {
+  if (!/(交易历史|历史交易|我的交易|成交记录|交易记录|盈亏|胜率)/u.test(String(message || '')) || !configured) return null;
+  try {
+    const rows = await futures.userTrades('BTCUSDT', 100);
+    const pnl = rows.reduce((sum, row) => sum + Number(row.realizedPnl || 0), 0);
+    const commission = rows.reduce((sum, row) => sum + Number(row.commission || 0), 0);
+    const cutoff = Date.now() - 7 * 24 * 60 * 60_000;
+    const recent = rows.filter((row) => Number(row.time) >= cutoff);
+    const candles = recent.length ? await remoteMarketHistory(Math.min(...recent.map((row) => Number(row.time))) - 30 * 60_000, Math.max(...recent.map((row) => Number(row.time))) + 30 * 60_000) : [];
+    const byMinute = new Map(candles.map((row) => [Math.floor(row.time / 60_000), row]));
+    const trades = rows.map((row) => ({ ...row, marketAtTrade: byMinute.get(Math.floor(Number(row.time) / 60_000)) || null }));
+    return { product: 'USD-M Futures', symbol: 'BTCUSDT', marketProxy: 'Binance COIN-M BTCUSD_PERP 1m', count: rows.length, realizedPnl: pnl, commission, trades };
+  } catch { return null; }
+}
+
 async function pipeServerCoinMStream(request, response, interval) {
   if (!marketDataBase || !marketDataKey) return false;
   const controller = new AbortController();
@@ -439,7 +484,8 @@ export function createCryptoServer() {
           const range = requestedOrderBookRange(message);
           const bookWindow = await orderBookContext(range);
           const marketContext = bookWindow ? { ...(payload.marketContext || {}), orderBookWindow: { ...bookWindow, requestedRange: range } } : payload.marketContext;
-          const reply = await gateway.complete(analysisMessages({ message: message || '请分析这张图片。', history: payload.history, marketContext, image }), { model, reasoningEffort });
+          const [historicalMarket, tradeHistory] = await Promise.all([historicalMarketContext(message), tradeContext(message)]);
+          const reply = await gateway.complete(analysisMessages({ message: message || '请分析这张图片。', history: payload.history, marketContext, historicalMarket, tradeContext: tradeHistory, image }), { model, reasoningEffort });
           return sendJson(response, 200, { reply });
         }
         if (!configured) return sendJson(response, 503, { error: 'Configure Binance credentials before preparing an order.' });

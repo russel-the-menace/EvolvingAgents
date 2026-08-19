@@ -924,39 +924,10 @@ function PriceChart({
       }
     }
     void load();
-    const streamHost =
-      environment === "testnet"
-        ? "wss://stream.testnet.binance.vision/ws"
-        : "wss://stream.binance.com:9443/ws";
-    let socket: WebSocket | null = null;
-    let reconnectTimer: number | undefined;
-    const connect = () => {
-      if (!active) return;
-      socket = new WebSocket(`${streamHost}/${symbol.toLowerCase()}@trade`);
-      socket.onmessage = (event) => {
-        const trade = JSON.parse(event.data) as { p?: string; T?: number };
-        const close = Number(trade.p);
-        const time = Number(trade.T || Date.now());
-        if (!Number.isFinite(close)) return;
-        setPoints((current) => {
-          const next = current.length ? [...current] : [{ time, close }];
-          const candleTime = Math.floor(time / 60_000) * 60_000;
-          if (next.at(-1)?.time === candleTime)
-            next[next.length - 1] = { time: candleTime, close };
-          else next.push({ time: candleTime, close });
-          return next.slice(-120);
-        });
-      };
-      socket.onclose = () => {
-        if (active) reconnectTimer = window.setTimeout(connect, 1500);
-      };
-      socket.onerror = () => socket?.close();
-    };
-    connect();
+    const timer = window.setInterval(load, 5_000);
     return () => {
       active = false;
-      if (reconnectTimer) window.clearTimeout(reconnectTimer);
-      socket?.close();
+      window.clearInterval(timer);
     };
   }, [symbol, environment]);
   const width = 720;
@@ -1787,11 +1758,6 @@ function CoinMWorkspace({
   const marketPriceCache = useRef(new Map<"usdm" | "coinm", number>());
   const marketSymbol = marketType === "usdm" ? "BTCUSDT" : "BTCUSD_PERP";
   const marketPath = marketType === "usdm" ? "usdm-market" : "coinm-market";
-  const streamHost =
-    marketType === "usdm"
-      ? "wss://fstream.binance.com/ws"
-      : "wss://dstream.binance.com/ws";
-  const streamSymbol = marketSymbol.toLowerCase();
   const marketCacheKey = `${marketType}:${interval}`;
   const changeInterval = (next: string) => {
     if (next === interval) return;
@@ -1894,7 +1860,7 @@ function CoinMWorkspace({
             );
         });
     void load();
-    const timer = window.setInterval(load, 60_000);
+    const timer = window.setInterval(load, marketType === "usdm" ? 2_000 : 60_000);
     const loadSeconds = () =>
       api<CoinMMarket>(`/${marketType}-1s?symbol=${marketSymbol}`)
         .then((result) => {
@@ -1909,102 +1875,6 @@ function CoinMWorkspace({
     if (interval === "1s") void loadSeconds();
     const secondTimer =
       interval === "1s" ? window.setInterval(loadSeconds, 1_000) : null;
-    let fallbackStarted = false;
-    let directSockets: WebSocket[] = [];
-    const connectDirect = () => {
-      if (fallbackStarted || !active) return;
-      fallbackStarted = true;
-      const stream =
-        interval === "1s"
-          ? null
-          : new WebSocket(
-              `${streamHost}/${streamSymbol}@kline_${sourceInterval}`,
-            );
-      if (stream)
-        stream.onmessage = (event) => {
-          let payload;
-          try {
-            payload = JSON.parse(event.data);
-          } catch {
-            return;
-          }
-          const item = payload.k;
-          if (!active || !item) return;
-          const next = [
-            item.t,
-            item.o,
-            item.h,
-            item.l,
-            item.c,
-            item.v,
-            item.T,
-            item.q,
-          ];
-          setMarket((current) =>
-            current
-              ? { ...current, klines: mergeKlineRows(current.klines, [next]) }
-              : current,
-          );
-        };
-      const tradeStream = new WebSocket(
-        `${streamHost}/${streamSymbol}@aggTrade`,
-      );
-      tradeStream.onmessage = (event) => {
-        let payload;
-        try {
-          payload = JSON.parse(event.data);
-        } catch {
-          return;
-        }
-        const price = Number(payload?.p);
-        const quantity = Number(payload?.q);
-        if (active && Number.isFinite(price)) {
-          pendingPrice.current = price;
-          if (interval === "1s" && Number.isFinite(quantity))
-            pendingSecondRows.current = mergeTradeIntoSecondRows(
-              pendingSecondRows.current,
-              Number(payload.T || payload.E || Date.now()),
-              price,
-              quantity,
-            );
-        }
-      };
-      const depthStream = new WebSocket(
-        `${streamHost}/${streamSymbol}@depth@100ms`,
-      );
-      depthStream.onmessage = (event) => {
-        let payload;
-        try {
-          payload = JSON.parse(event.data);
-        } catch {
-          return;
-        }
-        if (!active || !payload?.b || !payload?.a) return;
-        for (const [price, quantity] of payload.b as string[][])
-          Number(quantity)
-            ? orderBook.current.bids.set(price, quantity)
-            : orderBook.current.bids.delete(price);
-        for (const [price, quantity] of payload.a as string[][])
-          Number(quantity)
-            ? orderBook.current.asks.set(price, quantity)
-            : orderBook.current.asks.delete(price);
-        pendingDepth.current = {
-          bids: [...orderBook.current.bids]
-            .sort(([left], [right]) => Number(right) - Number(left))
-            .slice(0, 1000),
-          asks: [...orderBook.current.asks]
-            .sort(([left], [right]) => Number(left) - Number(right))
-            .slice(0, 1000),
-        };
-      };
-      directSockets = [stream, tradeStream, depthStream].filter(
-        (socket): socket is WebSocket => Boolean(socket),
-      );
-      for (const socket of directSockets)
-        socket.onerror = () => {
-          if (active) setError("实时行情暂时中断");
-        };
-    };
     const serverStream =
       marketType === "coinm"
         ? new EventSource(
@@ -2023,10 +1893,9 @@ function CoinMWorkspace({
       });
       serverStream.onerror = () => {
         serverStream.close();
-        connectDirect();
-        if (active) setError("服务端行情暂时中断，已切换直连兜底");
+        if (active) setError("服务端行情暂时中断");
       };
-    } else connectDirect();
+    }
     const bookTimer = window.setInterval(() => {
       const price = pendingPrice.current;
       const depth = pendingDepth.current;
@@ -2093,7 +1962,6 @@ function CoinMWorkspace({
       window.clearInterval(bookTimer);
       window.clearInterval(relayTimer);
       serverStream?.close();
-      directSockets.forEach((socket) => socket.close());
       if (latestMarket.current)
         marketCache.current.set(marketCacheKey, latestMarket.current);
     };

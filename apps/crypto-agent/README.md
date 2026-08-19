@@ -45,7 +45,7 @@ The collector explicitly configures the proxy from `MIHOMO_PROXY` (default `http
 
 ### Server market relay
 
-The production server also runs [`deploy/market_relay.py`](deploy/market_relay.py). It owns the COIN-M `kline`, `aggTrade`, `markPrice`, and `depth@100ms` streams and serves a loopback SSE endpoint. Its `market_events` SQLite table stores generated market observations separately from the news archive. The gateway exposes the authenticated public routes `/v1/market/coinm/snapshot`, `/v1/market/coinm/stream`, and `/v1/market/coinm/events`; the desktop app connects to those routes through its local API. This avoids one Binance socket set per desktop and keeps the browser off the exchange route.
+The production server also runs [`deploy/market_relay.py`](deploy/market_relay.py). It owns the COIN-M `kline`, `aggTrade`, `markPrice`, and `depth@100ms` streams and serves a loopback SSE endpoint. Its SQLite database keeps seven days of one-minute candles and order-book features, while `market_events` stores generated observations separately from the news archive. The gateway exposes authenticated snapshot, stream, history, and event routes; the desktop app connects only through its local API and never opens a Binance WebSocket.
 
 Install the single WebSocket client dependency in the server venv and enable the service alongside the gateway:
 

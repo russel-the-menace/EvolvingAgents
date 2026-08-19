@@ -90,3 +90,35 @@ test('market analysis sends chart context, history, and pasted images to the mod
     if (originalEnv.key === undefined) delete process.env.GATEWAY_API_KEY; else process.env.GATEWAY_API_KEY = originalEnv.key;
   }
 });
+
+test('historical crossing and private trades are compiled with a chart image', async () => {
+  const originalFetch = globalThis.fetch;
+  const originalEnv = { base: process.env.GATEWAY_BASE_URL, gatewayKey: process.env.GATEWAY_API_KEY, binanceKey: process.env.BINANCE_API_KEY, secret: process.env.BINANCE_SECRET_KEY, mode: process.env.BINANCE_ENV };
+  process.env.GATEWAY_BASE_URL = 'https://gateway.example'; process.env.GATEWAY_API_KEY = 'gateway-key';
+  process.env.BINANCE_API_KEY = 'binance-key'; process.env.BINANCE_SECRET_KEY = 'binance-secret'; process.env.BINANCE_ENV = 'live';
+  let gatewayRequest; let historyRequested = false; let tradesRequested = false;
+  globalThis.fetch = async (url, options = {}) => {
+    const value = String(url); const path = new URL(value).pathname;
+    if (value.includes('/v1/market/coinm/history')) {
+      historyRequested = true;
+      return new Response(JSON.stringify({ klines: [{ time: 1, close: 64990 }, { time: 2, close: 65010 }] }), { status: 200 });
+    }
+    if (path === '/fapi/v1/time') return new Response(JSON.stringify({ serverTime: Date.now() }), { status: 200 });
+    if (path === '/fapi/v1/userTrades') { tradesRequested = true; return new Response(JSON.stringify([{ id: 1, price: '65000', qty: '.1', commission: '1', realizedPnl: '5', time: 2 }]), { status: 200 }); }
+    if (path === '/v1/chat/completions') { gatewayRequest = JSON.parse(options.body); return new Response(JSON.stringify({ choices: [{ message: { content: '联合分析' } }] }), { status: 200 }); }
+    return new Response('{}', { status: 200 });
+  };
+  const { createCryptoServer } = await import(`./index.mjs?combined=${Date.now()}`);
+  const server = createCryptoServer(); await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  try {
+    const result = await post(server.address().port, '/api/chat', { message: '分析昨天突破65000之前发生了什么，也分析我的交易历史', image: 'data:image/png;base64,aGVsbG8=' });
+    assert.equal(result.status, 200); assert.equal(result.body.reply, '联合分析');
+    assert.equal(historyRequested, true); assert.equal(tradesRequested, true);
+    assert.match(gatewayRequest.messages[0].content, /"crossing":\{"time":2,"price":65010\}/);
+    assert.match(gatewayRequest.messages[0].content, /"realizedPnl":5/);
+    assert.equal(gatewayRequest.messages.at(-1).content[1].image_url.url, 'data:image/png;base64,aGVsbG8=');
+  } finally {
+    await new Promise((resolve) => server.close(resolve)); globalThis.fetch = originalFetch;
+    for (const [name, value] of Object.entries({ GATEWAY_BASE_URL: originalEnv.base, GATEWAY_API_KEY: originalEnv.gatewayKey, BINANCE_API_KEY: originalEnv.binanceKey, BINANCE_SECRET_KEY: originalEnv.secret, BINANCE_ENV: originalEnv.mode })) { if (value === undefined) delete process.env[name]; else process.env[name] = value; }
+  }
+});

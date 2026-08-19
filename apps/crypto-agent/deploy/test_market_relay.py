@@ -1,6 +1,7 @@
 import unittest
 import tempfile
 import sqlite3
+import time
 from contextlib import closing
 
 from market_relay import Relay
@@ -83,10 +84,21 @@ class DepthSequenceTest(unittest.TestCase):
             relay._init_feature_db()
             relay.klines["1m"] = [[index * 60_000, "100", "100", "100", str(100 + index * .01), "10", 0, "0"] for index in range(16)]
             relay.klines["1m"][-1][4] = "103"
+            for row in relay.klines["1m"][-5:]: row[5] = "30"
             relay._record_market_anomaly(1_000_000, 1)
             event = relay.events()[0]
             self.assertEqual(event["eventType"], "market_anomaly")
             self.assertEqual(event["threshold"], 0)
+
+    def test_persists_and_queries_recent_one_minute_candles(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            relay = Relay(f"{directory}/features.sqlite")
+            relay._init_feature_db()
+            now = int(time.time() * 1000) // 60_000 * 60_000
+            relay._store_candle("1m", [now, "100", "102", "99", "101", "3", now + 59_999, "303"])
+            rows = relay.history(now - 60_000, now + 60_000)
+            self.assertEqual(len(rows), 1)
+            self.assertEqual(rows[0]["close"], 101)
 
 
 if __name__ == "__main__":

@@ -41,6 +41,7 @@ WS_URL = "wss://dstream.binance.com/stream?streams=" + "/".join(
      f"{SYMBOL.lower()}@aggTrade", f"{SYMBOL.lower()}@depth@100ms", f"{SYMBOL.lower()}@markPrice@1s"]
 )
 FEATURE_DB = os.getenv("MARKET_FEATURE_DB_PATH", "/var/lib/custom-api-gateway/market-features.sqlite")
+HISTORY_RETENTION_MS = int(os.getenv("MARKET_HISTORY_RETENTION_MS", str(7 * 24 * 60 * 60 * 1000)))
 THRESHOLDS = tuple(sorted({float(value) for value in os.getenv("MARKET_BREAKING_THRESHOLDS", "").split(",") if value.strip()}))
 THRESHOLD_COOLDOWN_MS = int(os.getenv("MARKET_THRESHOLD_COOLDOWN_MS", "300000"))
 ANOMALY_MIN_RETURN = float(os.getenv("MARKET_ANOMALY_MIN_RETURN", "0.01"))
@@ -82,9 +83,11 @@ class Relay:
         self.last_threshold_alert: dict[float, int] = {}
         self.last_anomaly_bucket = 0
         self.last_anomaly_at = 0
+        self.last_candle_cleanup = 0
 
     def start(self) -> None:
         self._init_feature_db()
+        threading.Thread(target=self._candle_history_loop, daemon=True, name="candle-history").start()
         threading.Thread(target=self._history_loop, daemon=True, name="market-history").start()
         threading.Thread(target=self._broadcast, daemon=True, name="market-broadcast").start()
         threading.Thread(target=self._socket_loop, daemon=True, name="market-websocket").start()
@@ -108,6 +111,47 @@ class Relay:
                 source TEXT NOT NULL, evidence_json TEXT NOT NULL
             )""")
             db.execute("CREATE INDEX IF NOT EXISTS market_events_observed_at ON market_events(observed_at_ms DESC)")
+            db.execute("""CREATE TABLE IF NOT EXISTS market_candles (
+                symbol TEXT NOT NULL, interval TEXT NOT NULL, open_time_ms INTEGER NOT NULL,
+                open REAL NOT NULL, high REAL NOT NULL, low REAL NOT NULL, close REAL NOT NULL,
+                volume REAL NOT NULL, close_time_ms INTEGER NOT NULL, quote_volume REAL NOT NULL,
+                PRIMARY KEY(symbol, interval, open_time_ms)
+            )""")
+            db.execute("CREATE INDEX IF NOT EXISTS market_candles_lookup ON market_candles(symbol, interval, open_time_ms)")
+
+    def _store_candle(self, interval: str, row: list[Any]) -> None:
+        now = int(time.time() * 1000)
+        with closing(sqlite3.connect(self.feature_db)) as db, db:
+            db.execute("INSERT OR REPLACE INTO market_candles VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", (SYMBOL, interval, int(row[0]), *[float(value) for value in row[1:6]], int(row[6]), float(row[7])))
+            if now - self.last_candle_cleanup >= 60 * 60_000:
+                db.execute("DELETE FROM market_candles WHERE open_time_ms < ?", (now - HISTORY_RETENTION_MS,))
+                self.last_candle_cleanup = now
+
+    def _candle_history_loop(self) -> None:
+        while True:
+            time.sleep(6 * 60 * 60 if self._load_candle_history() else 30)
+
+    def _load_candle_history(self) -> bool:
+        end = int(time.time() * 1000); cursor = end - HISTORY_RETENTION_MS
+        while cursor < end:
+            try:
+                rows = fetch_json("/dapi/v1/klines", {"symbol": SYMBOL, "interval": "1m", "startTime": str(cursor), "endTime": str(end), "limit": "1500"})
+                if not rows: break
+                with closing(sqlite3.connect(self.feature_db)) as db, db:
+                    db.executemany("INSERT OR REPLACE INTO market_candles VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", [(SYMBOL, "1m", int(row[0]), float(row[1]), float(row[2]), float(row[3]), float(row[4]), float(row[5]), int(row[6]), float(row[7])) for row in rows])
+                cursor = int(rows[-1][0]) + 60_000
+                if len(rows) < 1500: break
+            except Exception as error:
+                logging.warning("failed to load candle history: %s", type(error).__name__); return False
+        return True
+
+    def history(self, start_ms: int, end_ms: int) -> list[dict[str, Any]]:
+        start = max(start_ms, int(time.time() * 1000) - HISTORY_RETENTION_MS); end = min(end_ms, int(time.time() * 1000))
+        if start >= end: return []
+        with closing(sqlite3.connect(self.feature_db)) as db:
+            rows = db.execute("SELECT open_time_ms,open,high,low,close,volume,close_time_ms,quote_volume FROM market_candles WHERE symbol=? AND interval='1m' AND open_time_ms BETWEEN ? AND ? ORDER BY open_time_ms LIMIT 11000", (SYMBOL, start, end)).fetchall()
+        keys = ("time", "open", "high", "low", "close", "volume", "closeTime", "quoteVolume")
+        return [dict(zip(keys, row)) for row in rows]
 
     def _record_threshold_crossing(self, price: float, previous_price: float | None, timestamp_ms: int, trade_id: Any) -> None:
         if previous_price is None: return
@@ -183,7 +227,7 @@ class Relay:
         with closing(sqlite3.connect(self.feature_db)) as db, db:
             db.execute("INSERT OR REPLACE INTO order_book_features VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", row)
             self.feature_samples += 1
-            if self.feature_samples % 60 == 0: db.execute("DELETE FROM order_book_features WHERE timestamp_ms < ?", (row[0] - 24 * 60 * 60 * 1000,))
+            if self.feature_samples % 60 == 0: db.execute("DELETE FROM order_book_features WHERE timestamp_ms < ?", (row[0] - HISTORY_RETENTION_MS,))
         return True
 
     def feature_summary(self, now_ms: int | None = None) -> dict[str, Any] | None:
@@ -200,7 +244,7 @@ class Relay:
 
     def feature_window(self, start_ms: int, end_ms: int, now_ms: int | None = None) -> dict[str, Any] | None:
         now = now_ms or int(time.time() * 1000)
-        end = min(end_ms, now); start = max(start_ms, now - 24 * 60 * 60 * 1000)
+        end = min(end_ms, now); start = max(start_ms, now - HISTORY_RETENTION_MS)
         if start >= end: return None
         duration = end - start
         base_resolution = 1_000 if end >= now - 15 * 60_000 and duration <= 10 * 60_000 else 60_000 if duration <= 3 * 60 * 60_000 else 300_000
@@ -305,6 +349,7 @@ class Relay:
                     if rows and int(rows[-1][0]) == int(item["t"]): rows[-1] = row
                     else: rows.append(row)
                     self.klines[interval] = rows[-240:]
+                    if interval == "1m": self._store_candle(interval, row)
                     self.price = float(item["c"])
                     self.revision += 1
                 elif event == "aggTrade":
@@ -453,6 +498,15 @@ class Handler(BaseHTTPRequestHandler):
                 data = json.dumps({"items": relay.events(limit, int(before) if before else None)}, separators=(",", ":")).encode()
             except ValueError:
                 self.send_error(400, "invalid event cursor"); return
+            self.send_response(200); self.send_header("Content-Type", "application/json"); self.send_header("Content-Length", str(len(data))); self.end_headers(); self.wfile.write(data)
+            return
+        if parsed.path == "/history":
+            try:
+                start = int(query.get("startTime", [str(int(time.time() * 1000) - HISTORY_RETENTION_MS)])[0])
+                end = int(query.get("endTime", [str(int(time.time() * 1000))])[0])
+                data = json.dumps({"symbol": SYMBOL, "interval": "1m", "klines": relay.history(start, end)}, separators=(",", ":")).encode()
+            except ValueError:
+                self.send_error(400, "invalid history range"); return
             self.send_response(200); self.send_header("Content-Type", "application/json"); self.send_header("Content-Length", str(len(data))); self.end_headers(); self.wfile.write(data)
             return
         if parsed.path != "/stream":
