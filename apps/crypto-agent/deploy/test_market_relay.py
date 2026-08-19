@@ -61,6 +61,33 @@ class DepthSequenceTest(unittest.TestCase):
             self.assertEqual(historical["resolutionMs"], 60_000)
             self.assertLessEqual(len(historical["points"]), 61)
 
+    def test_records_an_upward_threshold_crossing_once_per_cooldown(self) -> None:
+        import market_relay
+        with tempfile.TemporaryDirectory() as directory:
+            original_thresholds = market_relay.THRESHOLDS
+            market_relay.THRESHOLDS = (65000,)
+            relay = Relay(f"{directory}/features.sqlite")
+            relay._init_feature_db()
+            relay._on_message(None, '{"data":{"e":"aggTrade","p":"64999","q":"1","T":1000,"a":1}}')
+            relay._on_message(None, '{"data":{"e":"aggTrade","p":"65001","q":"1","T":2000,"a":2}}')
+            event = relay.events()[0]
+            self.assertEqual(event["eventType"], "price_threshold_crossed")
+            self.assertEqual(event["direction"], "up")
+            self.assertEqual(event["threshold"], 65000)
+            self.assertEqual(event["previousPrice"], 64999)
+            market_relay.THRESHOLDS = original_thresholds
+
+    def test_records_adaptive_anomaly_without_an_absolute_price_threshold(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            relay = Relay(f"{directory}/features.sqlite")
+            relay._init_feature_db()
+            relay.klines["1m"] = [[index * 60_000, "100", "100", "100", str(100 + index * .01), "10", 0, "0"] for index in range(16)]
+            relay.klines["1m"][-1][4] = "103"
+            relay._record_market_anomaly(1_000_000, 1)
+            event = relay.events()[0]
+            self.assertEqual(event["eventType"], "market_anomaly")
+            self.assertEqual(event["threshold"], 0)
+
 
 if __name__ == "__main__":
     unittest.main()

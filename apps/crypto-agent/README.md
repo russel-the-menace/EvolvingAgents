@@ -39,13 +39,13 @@ The desktop and local API never contact publishers, RSS feeds, aggregators, or e
 
 ### Server news collector
 
-Production news collection belongs to the `custom-api-gateway` repository. Its `news_collector.py` polls the configured RSS publishers, `cryptocurrency.cv`, and the official Binance and OKX announcement endpoints every 60 seconds through Mihomo. It writes an unlimited, deduplicated history to `/var/lib/custom-api-gateway/news.sqlite`; `custom-api-news.service` keeps it running across logouts and server restarts.
+Production news collection belongs to the `custom-api-gateway` repository. Its `news_collector.py` polls the configured RSS publishers, `cryptocurrency.cv`, and the official Binance and OKX announcement endpoints every 60 seconds through Mihomo. It writes an unlimited, deduplicated history to `/var/lib/custom-api-gateway/news.sqlite`; `custom-api-news.service` keeps it running across logouts and server restarts. This is the learning source: it stores publisher material, not generated price alerts.
 
 The collector explicitly configures the proxy from `MIHOMO_PROXY` (default `http://127.0.0.1:7890`). CEX announcements use their exchange endpoints directly; no public RSSHub bridge is part of the production source list.
 
 ### Server market relay
 
-The production server also runs [`deploy/market_relay.py`](deploy/market_relay.py). It owns the COIN-M `kline`, `aggTrade`, `markPrice`, and `depth@100ms` streams and serves a loopback SSE endpoint. The gateway exposes the authenticated public routes `/v1/market/coinm/snapshot` and `/v1/market/coinm/stream`; the desktop app connects to those routes through its local API. This avoids one Binance socket set per desktop and keeps the browser off the exchange route.
+The production server also runs [`deploy/market_relay.py`](deploy/market_relay.py). It owns the COIN-M `kline`, `aggTrade`, `markPrice`, and `depth@100ms` streams and serves a loopback SSE endpoint. Its `market_events` SQLite table stores generated market observations separately from the news archive. The gateway exposes the authenticated public routes `/v1/market/coinm/snapshot`, `/v1/market/coinm/stream`, and `/v1/market/coinm/events`; the desktop app connects to those routes through its local API. This avoids one Binance socket set per desktop and keeps the browser off the exchange route.
 
 Install the single WebSocket client dependency in the server venv and enable the service alongside the gateway:
 
@@ -61,6 +61,7 @@ The push policy is:
 - the first app open of each local day receives up to 10 recent items;
 - normal items are delivered once per two-hour cursor window;
 - headlines matching the breaking-news rules are delivered immediately;
+- market events poll every three seconds; no absolute BTC price is configured by default. The relay scores five-minute price moves against recent volatility and volume, and delivers only adaptive `market_anomaly` events immediately. Absolute thresholds are optional via `MARKET_BREAKING_THRESHOLDS` and are disabled by default.
 
 Browser notifications require the user's normal Notification permission; the in-app news list remains available when notifications are disabled.
 

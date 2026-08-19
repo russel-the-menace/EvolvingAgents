@@ -124,6 +124,17 @@ type NewsItem = {
   publishedAt: string;
   urgency: "normal" | "breaking";
 };
+type MarketEvent = {
+  id: string;
+  observedAt: number;
+  symbol: string;
+  eventType: string;
+  severity: "normal" | "breaking";
+  direction: "up" | "down";
+  threshold: number;
+  price: number;
+  previousPrice: number;
+};
 type EmergencyState = {
   pending?: { id: string; title: string; budget: number };
   grant?: { id: string; remaining: number; expiresAt: number } | null;
@@ -3281,6 +3292,7 @@ export function App() {
     }
   });
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
+  const activeSessionIdRef = useRef<string | null>(null);
   const [input, setInput] = useState("");
   const [attachment, setAttachment] = useState<ImageAttachment | null>(null);
   const marketContext = useRef<MarketContext | null>(null);
@@ -3398,6 +3410,26 @@ export function App() {
     void refresh();
   }, []);
   useEffect(() => {
+    activeSessionIdRef.current = activeSessionId;
+  }, [activeSessionId]);
+  function appendAgentNotice(content: string, title: string) {
+    const message: Message = { id: crypto.randomUUID(), role: "assistant", content };
+    const sessionId = activeSessionIdRef.current || "market-alerts";
+    if (!activeSessionIdRef.current) {
+      activeSessionIdRef.current = sessionId;
+      setActiveSessionId(sessionId);
+    }
+    setMessages((current) => [...current, message]);
+    setSessions((existing) => {
+      const session = existing.find((item) => item.id === sessionId);
+      const nextMessages = [...(session?.messages || []), message];
+      return [
+        { id: sessionId, title: session?.title || title, messages: nextMessages, updatedAt: Date.now() },
+        ...existing.filter((item) => item.id !== sessionId),
+      ];
+    });
+  }
+  useEffect(() => {
     let active = true;
     const notify = (title: string, body: string) => {
       if (window.cryptoAgent) window.cryptoAgent.notify(title, body);
@@ -3441,9 +3473,11 @@ export function App() {
     stream.addEventListener("breaking", add);
     stream.addEventListener("digest", (event) => {
       add(event);
-      const payload = JSON.parse(event.data) as { items?: NewsItem[] };
-      if (payload.items?.length)
+      const payload = JSON.parse(event.data) as { items?: NewsItem[]; summary?: string };
+      if (payload.items?.length) {
         notify("CryptoAgent 两小时新闻", `${payload.items.length} 条新新闻`);
+        appendAgentNotice(`新闻汇总：${payload.summary || `过去两小时新增 ${payload.items.length} 条新闻。`}`, "市场提醒");
+      }
     });
     stream.addEventListener("ready", add);
     stream.addEventListener("emergency", (event) => {
@@ -3484,6 +3518,21 @@ export function App() {
       window.clearInterval(latestTimer);
       stream.close();
     };
+  }, []);
+  useEffect(() => {
+    const stream = new EventSource("/api/market-events/stream");
+    const onBreaking = (event: MessageEvent<string>) => {
+      const item = (JSON.parse(event.data) as { item: MarketEvent }).item;
+      if (!item) return;
+      const threshold = item.threshold ? `突破 ${item.threshold.toLocaleString("en-US", { maximumFractionDigits: 2 })}` : "出现异常波动";
+      const price = item.price.toLocaleString("en-US", { maximumFractionDigits: 2 });
+      const body = `${item.symbol} ${item.direction === "up" ? "向上" : "向下"}${threshold}，最新成交价 ${price}。`;
+      if (window.cryptoAgent) window.cryptoAgent.notify("CryptoAgent 市场异动", body);
+      else if (typeof Notification !== "undefined" && Notification.permission === "granted") new Notification("CryptoAgent 市场异动", { body });
+      appendAgentNotice(`市场异动：${body}`, "市场提醒");
+    };
+    stream.addEventListener("breaking", onBreaking);
+    return () => stream.close();
   }, []);
   useEffect(() => {
     document.documentElement.dataset.theme = theme;

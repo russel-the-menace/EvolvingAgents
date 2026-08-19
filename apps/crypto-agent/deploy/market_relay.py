@@ -16,6 +16,7 @@ import threading
 import time
 import urllib.parse
 import urllib.request
+from statistics import median, pstdev
 from contextlib import closing
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
@@ -40,6 +41,12 @@ WS_URL = "wss://dstream.binance.com/stream?streams=" + "/".join(
      f"{SYMBOL.lower()}@aggTrade", f"{SYMBOL.lower()}@depth@100ms", f"{SYMBOL.lower()}@markPrice@1s"]
 )
 FEATURE_DB = os.getenv("MARKET_FEATURE_DB_PATH", "/var/lib/custom-api-gateway/market-features.sqlite")
+THRESHOLDS = tuple(sorted({float(value) for value in os.getenv("MARKET_BREAKING_THRESHOLDS", "").split(",") if value.strip()}))
+THRESHOLD_COOLDOWN_MS = int(os.getenv("MARKET_THRESHOLD_COOLDOWN_MS", "300000"))
+ANOMALY_MIN_RETURN = float(os.getenv("MARKET_ANOMALY_MIN_RETURN", "0.01"))
+ANOMALY_SIGMA = float(os.getenv("MARKET_ANOMALY_SIGMA", "3"))
+ANOMALY_VOLUME_MULTIPLIER = float(os.getenv("MARKET_ANOMALY_VOLUME_MULTIPLIER", "2"))
+ANOMALY_COOLDOWN_MS = int(os.getenv("MARKET_ANOMALY_COOLDOWN_MS", "900000"))
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 
@@ -71,6 +78,10 @@ class Relay:
         self.route_lock = threading.Lock()
         self.feature_db = feature_db
         self.feature_samples = 0
+        self.last_trade_price: float | None = None
+        self.last_threshold_alert: dict[float, int] = {}
+        self.last_anomaly_bucket = 0
+        self.last_anomaly_at = 0
 
     def start(self) -> None:
         self._init_feature_db()
@@ -90,6 +101,67 @@ class Relay:
                 bid_depth_20 REAL NOT NULL, ask_depth_20 REAL NOT NULL, imbalance_20 REAL NOT NULL,
                 mark_price REAL NOT NULL, funding_rate REAL NOT NULL
             )""")
+            db.execute("""CREATE TABLE IF NOT EXISTS market_events (
+                id TEXT PRIMARY KEY, observed_at_ms INTEGER NOT NULL, symbol TEXT NOT NULL,
+                event_type TEXT NOT NULL, severity TEXT NOT NULL, direction TEXT NOT NULL,
+                threshold REAL NOT NULL, price REAL NOT NULL, previous_price REAL NOT NULL,
+                source TEXT NOT NULL, evidence_json TEXT NOT NULL
+            )""")
+            db.execute("CREATE INDEX IF NOT EXISTS market_events_observed_at ON market_events(observed_at_ms DESC)")
+
+    def _record_threshold_crossing(self, price: float, previous_price: float | None, timestamp_ms: int, trade_id: Any) -> None:
+        if previous_price is None: return
+        for threshold in THRESHOLDS:
+            if not previous_price < threshold <= price: continue
+            last_alert = self.last_threshold_alert.get(threshold)
+            if last_alert is not None and timestamp_ms - last_alert < THRESHOLD_COOLDOWN_MS: continue
+            event_id = f"{SYMBOL}:threshold_up:{threshold:g}:{timestamp_ms}"
+            evidence = json.dumps({"stream": "aggTrade", "tradeId": trade_id}, separators=(",", ":"))
+            with closing(sqlite3.connect(self.feature_db)) as db, db:
+                db.execute("INSERT OR IGNORE INTO market_events VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                           (event_id, timestamp_ms, SYMBOL, "price_threshold_crossed", "breaking", "up", threshold,
+                            price, previous_price, "binance_coinm_agg_trade", evidence))
+                db.execute("DELETE FROM market_events WHERE observed_at_ms < ?", (timestamp_ms - 90 * 24 * 60 * 60 * 1000,))
+            self.last_threshold_alert[threshold] = timestamp_ms
+
+    def _record_market_anomaly(self, timestamp_ms: int, trade_id: Any) -> None:
+        rows = self.klines.get("1m", [])
+        if len(rows) < 16: return
+        bucket = int(rows[-1][0])
+        if bucket == self.last_anomaly_bucket or timestamp_ms - self.last_anomaly_at < ANOMALY_COOLDOWN_MS: return
+        closes = [float(row[4]) for row in rows]
+        returns = [(closes[index] / closes[index - 1]) - 1 for index in range(1, len(closes))]
+        move = (closes[-1] / closes[-6]) - 1
+        baseline = returns[-15:-5]
+        if len(baseline) < 5: return
+        volatility = pstdev(baseline) or 0
+        current_volume = sum(float(row[5]) for row in rows[-5:])
+        baseline_volumes = [sum(float(row[5]) for row in rows[index - 5:index]) for index in range(6, len(rows) - 4)]
+        typical_volume = median(baseline_volumes) if baseline_volumes else 0
+        if abs(move) < max(ANOMALY_MIN_RETURN, ANOMALY_SIGMA * volatility): return
+        if typical_volume and current_volume < ANOMALY_VOLUME_MULTIPLIER * typical_volume: return
+        event_id = f"{SYMBOL}:market_anomaly:{bucket}"
+        evidence = json.dumps({"stream": "aggTrade", "tradeId": trade_id, "windowMs": 300000,
+                               "return": move, "baselineVolatility": volatility,
+                               "volume": current_volume, "typicalVolume": typical_volume}, separators=(",", ":"))
+        with closing(sqlite3.connect(self.feature_db)) as db, db:
+            db.execute("INSERT OR IGNORE INTO market_events VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                       (event_id, timestamp_ms, SYMBOL, "market_anomaly", "breaking", "up" if move > 0 else "down",
+                        0, closes[-1], closes[-6], "binance_coinm_agg_trade", evidence))
+        self.last_anomaly_bucket = bucket
+        self.last_anomaly_at = timestamp_ms
+
+    def events(self, limit: int = 30, before: int | None = None) -> list[dict[str, Any]]:
+        limit = min(max(limit, 1), 100)
+        query = "SELECT id, observed_at_ms, symbol, event_type, severity, direction, threshold, price, previous_price, source, evidence_json FROM market_events"
+        params: tuple[Any, ...] = ()
+        if before is not None:
+            query += " WHERE observed_at_ms < ?"; params = (before,)
+        query += " ORDER BY observed_at_ms DESC LIMIT ?"; params += (limit,)
+        with closing(sqlite3.connect(self.feature_db)) as db:
+            rows = db.execute(query, params).fetchall()
+        keys = ("id", "observedAt", "symbol", "eventType", "severity", "direction", "threshold", "price", "previousPrice", "source", "evidence")
+        return [{**dict(zip(keys[:-1], row[:-1])), "evidence": json.loads(row[-1])} for row in rows]
 
     def _feature_loop(self) -> None:
         while True:
@@ -238,6 +310,8 @@ class Relay:
                 elif event == "aggTrade":
                     price, quantity = float(payload["p"]), float(payload.get("q", 0))
                     timestamp = int(payload.get("T") or payload.get("E") or time.time() * 1000)
+                    previous_trade_price = self.last_trade_price
+                    self.last_trade_price = price
                     bucket = timestamp // 1_000 * 1_000
                     rows = self.klines["1s"]
                     if rows and int(rows[-1][0]) == bucket:
@@ -249,6 +323,8 @@ class Relay:
                     self.price = price
                     self.premium["markPrice"] = str(payload["p"])
                     self.revision += 1
+                    self._record_threshold_crossing(price, previous_trade_price, timestamp, payload.get("a"))
+                    self._record_market_anomaly(timestamp, payload.get("a"))
                 elif event == "markPriceUpdate":
                     self.premium = {**self.premium, **payload, "markPrice": payload.get("p", self.price),
                                     "indexPrice": payload.get("i", self.premium.get("indexPrice", "0")),
@@ -369,6 +445,14 @@ class Handler(BaseHTTPRequestHandler):
             except ValueError:
                 self.send_error(400, "invalid feature range"); return
             data = json.dumps(relay.snapshot(interval, feature_range=feature_range), separators=(",", ":")).encode()
+            self.send_response(200); self.send_header("Content-Type", "application/json"); self.send_header("Content-Length", str(len(data))); self.end_headers(); self.wfile.write(data)
+            return
+        if parsed.path == "/events":
+            try:
+                limit = int(query.get("limit", ["30"])[0]); before = query.get("before", [None])[0]
+                data = json.dumps({"items": relay.events(limit, int(before) if before else None)}, separators=(",", ":")).encode()
+            except ValueError:
+                self.send_error(400, "invalid event cursor"); return
             self.send_response(200); self.send_header("Content-Type", "application/json"); self.send_header("Content-Length", str(len(data))); self.end_headers(); self.wfile.write(data)
             return
         if parsed.path != "/stream":
