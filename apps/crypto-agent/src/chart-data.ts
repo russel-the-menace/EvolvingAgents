@@ -33,6 +33,10 @@ export function nearHistoryStart(total: number, offset: number, visible: number,
   return offset >= Math.max(0, total - visible - Math.max(visible, warmup));
 }
 
+export function panWindowOffset(total: number, offset: number, visible: number, steps: number) {
+  return Math.max(0, Math.min(Math.max(0, total - visible), offset + steps));
+}
+
 export function mergeKlineRows(current: KlineRow[], incoming: KlineRow[]) {
   // ponytail: History stays in memory; move pages to IndexedDB if multi-year minute browsing becomes a normal workflow.
   if (!current.length) return [...incoming].sort((a, b) => Number(a[0]) - Number(b[0]));

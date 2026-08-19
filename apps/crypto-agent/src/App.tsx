@@ -50,6 +50,7 @@ import {
   mergeKlineRows,
   mergeTradeIntoSecondRows,
   nearHistoryStart,
+  panWindowOffset,
   updateKlinePrice,
   zoomWindowOffset,
   type KlineRow,
@@ -1029,8 +1030,16 @@ function useChartNavigation({
   const prefetchRequested = useRef(false);
   const zoomSaveTimer = useRef<number | null>(null);
   const applyZoomRef = useRef<(next: number, anchor: number) => void>(() => {});
+  const onLoadOlderRef = useRef(onLoadOlder);
+  const timesLengthRef = useRef(times.length);
+  const stepRef = useRef(step);
+  const warmupPointsRef = useRef(warmupPoints);
   visibleCountRef.current = visibleCount;
   historyOffsetRef.current = historyOffset;
+  onLoadOlderRef.current = onLoadOlder;
+  timesLengthRef.current = times.length;
+  stepRef.current = step;
+  warmupPointsRef.current = warmupPoints;
   const updateOffset = (next: number) => {
     historyOffsetRef.current = next;
     setHistoryOffset(next);
@@ -1067,7 +1076,7 @@ function useChartNavigation({
   const requestOlder = () => {
     if (prefetchRequested.current) return;
     prefetchRequested.current = true;
-    void onLoadOlder().finally(() => {
+    void onLoadOlderRef.current().finally(() => {
       prefetchRequested.current = false;
     });
   };
@@ -1197,18 +1206,51 @@ function useChartNavigation({
   useLayoutEffect(() => {
     const svg = chartRef.current;
     if (!svg) return;
+    let wheelPan = 0;
     const wheel = (event: WheelEvent) => {
-      if (!event.ctrlKey || !event.deltaY) return;
+      if (event.ctrlKey && event.deltaY) {
+        event.preventDefault();
+        const bounds = svg.getBoundingClientRect();
+        const appliedSteps = event.deltaY < 0 ? -1 : 1;
+        applyZoomRef.current(
+          visibleCountRef.current + appliedSteps,
+          Math.min(
+            1,
+            Math.max(0, (event.clientX - bounds.left) / bounds.width),
+          ),
+        );
+        if (zoomSaveTimer.current !== null)
+          window.clearTimeout(zoomSaveTimer.current);
+        zoomSaveTimer.current = window.setTimeout(saveZoom, 180);
+        return;
+      }
+      const horizontal = event.deltaX || (event.shiftKey ? event.deltaY : 0);
+      if (!horizontal) return;
       event.preventDefault();
-      const bounds = svg.getBoundingClientRect();
-      const appliedSteps = event.deltaY < 0 ? -1 : 1;
-      applyZoomRef.current(
-        visibleCountRef.current + appliedSteps,
-        Math.min(1, Math.max(0, (event.clientX - bounds.left) / bounds.width)),
+      wheelPan += horizontal;
+      const chartStep = Math.max(stepRef.current, 1);
+      const appliedSteps = Math.trunc(wheelPan / chartStep);
+      if (!appliedSteps) return;
+      wheelPan -= appliedSteps * chartStep;
+      const count = visibleCountRef.current;
+      const total = timesLengthRef.current;
+      const nextOffset = panWindowOffset(
+        total,
+        historyOffsetRef.current,
+        count,
+        appliedSteps,
       );
-      if (zoomSaveTimer.current !== null)
-        window.clearTimeout(zoomSaveTimer.current);
-      zoomSaveTimer.current = window.setTimeout(saveZoom, 180);
+      updateOffset(nextOffset);
+      if (
+        appliedSteps > 0 &&
+        nearHistoryStart(
+          total,
+          nextOffset,
+          count,
+          warmupPointsRef.current,
+        )
+      )
+        requestOlder();
     };
     let startScale = 1;
     const start = (event: Event) => {
@@ -2039,24 +2081,6 @@ function CoinMWorkspace({
   const height = 330;
   const pad = 20;
   const plotRight = width - 100;
-  const currentMarketPrice =
-    market?.symbol === marketSymbol
-      ? Number(market.premium.markPrice || candles.at(-1)?.close || 0)
-      : 0;
-  if (currentMarketPrice > 0)
-    marketPriceCache.current.set(marketType, currentMarketPrice);
-  const livePrice =
-    currentMarketPrice || marketPriceCache.current.get(marketType) || 0;
-  const low = candles.length
-    ? Math.min(...candles.map((item) => item.low), livePrice || Infinity)
-    : 0;
-  const high = candles.length
-    ? Math.max(...candles.map((item) => item.high), livePrice || -Infinity)
-    : 1;
-  const range = high - low || 1;
-  const step = (plotRight - pad) / Math.max(candles.length, 1);
-  const y = (price: number) =>
-    pad + ((high - price) / range) * (height - pad * 2);
   const maValues = (period: number) =>
     candles.map((_, localIndex) => {
       const index = candleStartIndex + localIndex;
@@ -2069,6 +2093,27 @@ function CoinMWorkspace({
   const ma7 = maValues(7);
   const ma25 = maValues(25);
   const ma99 = maValues(99);
+  const currentMarketPrice =
+    market?.symbol === marketSymbol
+      ? Number(market.premium.markPrice || candles.at(-1)?.close || 0)
+      : 0;
+  if (currentMarketPrice > 0)
+    marketPriceCache.current.set(marketType, currentMarketPrice);
+  const livePrice =
+    currentMarketPrice || marketPriceCache.current.get(marketType) || 0;
+  const scaleValues = [
+    ...candles.flatMap((item) => [item.low, item.high]),
+    ...ma7,
+    ...ma25,
+    ...ma99,
+    livePrice || null,
+  ].filter((value): value is number => value !== null);
+  const low = scaleValues.length ? Math.min(...scaleValues) : 0;
+  const high = scaleValues.length ? Math.max(...scaleValues) : 1;
+  const range = high - low || 1;
+  const step = (plotRight - pad) / Math.max(candles.length, 1);
+  const y = (price: number) =>
+    pad + ((high - price) / range) * (height - pad * 2);
   const maPath = (values: Array<number | null>) =>
     values
       .map((value, index) =>
