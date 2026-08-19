@@ -237,7 +237,7 @@ button { cursor: pointer; }
 .coinm-full-intervals { border-bottom: 1px solid var(--border); padding: 5px 0; }
 .coinm-full-intervals button { padding-block: 5px; }
 .time-mode .coinm-chart { display: none; }
-.coinm-time-share { margin-top: 4px; margin-bottom: 8px; }
+.coinm-time-share { margin-top: 10px; margin-bottom: 8px; }
 .coinm-time-share .coinm-ma-legend { justify-content: flex-start; }
 .time-ma-legend { color: #a5adb9 !important; line-height: 1; }
 .time-area { fill: rgb(240 185 11 / 20%); }
