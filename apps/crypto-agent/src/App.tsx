@@ -2110,8 +2110,11 @@ function CoinMWorkspace({
     ...ma99,
     livePrice || null,
   ].filter((value): value is number => value !== null);
-  const low = scaleValues.length ? Math.min(...scaleValues) : 0;
-  const high = scaleValues.length ? Math.max(...scaleValues) : 1;
+  const scaleLow = scaleValues.length ? Math.min(...scaleValues) : 0;
+  const scaleHigh = scaleValues.length ? Math.max(...scaleValues) : 1;
+  const scalePadding = (scaleHigh - scaleLow || Math.abs(scaleHigh) * 0.0001 || 1) * 0.05;
+  const low = scaleLow - scalePadding;
+  const high = scaleHigh + scalePadding;
   const range = high - low || 1;
   const step = (plotRight - pad) / Math.max(candles.length, 1);
   const y = (price: number) =>
