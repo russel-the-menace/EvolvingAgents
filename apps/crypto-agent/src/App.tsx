@@ -2084,11 +2084,13 @@ function CoinMWorkspace({
   const maValues = (period: number) =>
     candles.map((_, localIndex) => {
       const index = candleStartIndex + localIndex;
-      return index < period - 1
-        ? null
-        : allCandles
-            .slice(index - period + 1, index + 1)
-            .reduce((sum, item) => sum + item.close, 0) / period;
+      const window = allCandles.slice(
+        Math.max(0, index - period + 1),
+        index + 1,
+      );
+      return window.length
+        ? window.reduce((sum, item) => sum + item.close, 0) / window.length
+        : null;
     });
   const ma7 = maValues(7);
   const ma25 = maValues(25);
