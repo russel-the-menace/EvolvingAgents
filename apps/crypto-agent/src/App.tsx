@@ -2296,7 +2296,12 @@ function CoinMWorkspace({
         );
         klineOffsetValue.current = nextOffset;
         setKlineOffset(nextOffset);
-        if (nextOffset >= maximum && allCandles.length) loadOlderKlines();
+        if (
+          delta > step &&
+          nextOffset >= Math.max(0, maximum - klineVisibleCountRef.current) &&
+          allCandles.length
+        )
+          loadOlderKlines();
       });
     };
     const up = () => {
