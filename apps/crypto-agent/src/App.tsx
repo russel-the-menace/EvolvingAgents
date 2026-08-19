@@ -1686,6 +1686,11 @@ function CoinMWorkspace({
       ),
     ),
   );
+  const marketCache = useRef(new Map<string, CoinMMarket>());
+  const klineViewCache = useRef(new Map<string, { offset: number }>());
+  const pendingScrollTop = useRef<number | null>(null);
+  const latestMarket = useRef<CoinMMarket | null>(market);
+  latestMarket.current = market;
   const klineVisibleCountRef = useRef(klineVisibleCount);
   const klineWheelRemainder = useRef(0);
   const klineOffsetValue = useRef(0);
@@ -1716,6 +1721,28 @@ function CoinMWorkspace({
       ? "wss://fstream.binance.com/ws"
       : "wss://dstream.binance.com/ws";
   const streamSymbol = marketSymbol.toLowerCase();
+  const marketCacheKey = `${marketType}:${interval}`;
+  const changeInterval = (next: string) => {
+    if (next === interval) return;
+    const content = document.querySelector<HTMLElement>(".asset-content");
+    pendingScrollTop.current = content?.scrollTop ?? null;
+    klineViewCache.current.set(marketCacheKey, {
+      offset: klineOffsetValue.current,
+    });
+    setInterval(next);
+    setSelectedIndex(null);
+  };
+  useLayoutEffect(() => {
+    if (pendingScrollTop.current === null) return;
+    const top = pendingScrollTop.current;
+    pendingScrollTop.current = null;
+    const content = document.querySelector<HTMLElement>(".asset-content");
+    if (content) content.scrollTop = top;
+    const frame = window.requestAnimationFrame(() => {
+      if (content) content.scrollTop = top;
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [interval, marketType]);
   useEffect(() => {
     const dismiss = (event: PointerEvent) => {
       if (!(event.target as Element).closest?.(".coinm-chart-canvas svg"))
@@ -1730,8 +1757,11 @@ function CoinMWorkspace({
       pendingSecondRows.current = [];
       setSecondRows([]);
     }
-    klineOffsetValue.current = 0;
-    setKlineOffset(0);
+    const cachedMarket = marketCache.current.get(marketCacheKey);
+    setMarket(cachedMarket || null);
+    const cachedView = klineViewCache.current.get(marketCacheKey);
+    klineOffsetValue.current = cachedView?.offset || 0;
+    setKlineOffset(klineOffsetValue.current);
     oldestReached.current = false;
     const sourceInterval =
       interval === "time" || interval === "1s" ? "1m" : interval;
@@ -1753,15 +1783,18 @@ function CoinMWorkspace({
                 ),
               ),
             };
-            setMarket((current) =>
-              current?.symbol === result.symbol &&
-              current.interval === result.interval
-                ? {
-                    ...result,
-                    klines: mergeKlineRows(current.klines, result.klines),
-                  }
-                : result,
-            );
+            setMarket((current) => {
+              const next =
+                current?.symbol === result.symbol &&
+                current.interval === result.interval
+                  ? {
+                      ...result,
+                      klines: mergeKlineRows(current.klines, result.klines),
+                    }
+                  : result;
+              marketCache.current.set(marketCacheKey, next);
+              return next;
+            });
             setError("");
           }
         })
@@ -1954,8 +1987,10 @@ function CoinMWorkspace({
       window.clearInterval(relayTimer);
       serverStream?.close();
       directSockets.forEach((socket) => socket.close());
+      if (latestMarket.current)
+        marketCache.current.set(marketCacheKey, latestMarket.current);
     };
-  }, [interval, marketType]);
+  }, [interval, marketType, marketCacheKey]);
   const chartRows =
     interval === "1s"
       ? marketType === "coinm"
@@ -2037,8 +2072,7 @@ function CoinMWorkspace({
     ? [
         ...new Set([
           0,
-          Math.floor((candles.length - 1) / 3),
-          Math.floor(((candles.length - 1) * 2) / 3),
+          Math.floor((candles.length - 1) / 2),
           candles.length - 1,
         ]),
       ]
@@ -2111,7 +2145,7 @@ function CoinMWorkspace({
   const first = candles[0]?.open || last;
   const change = first ? ((last - first) / first) * 100 : 0;
   const selected = selectedIndex === null ? null : candles[selectedIndex];
-  const axisValues = [0, 1, 2, 3, 4].map((line) => high - (line * range) / 4);
+  const axisValues = [0, 1, 2, 3, 4, 5].map((line) => high - (line * range) / 5);
   const zoomKline = (event: React.WheelEvent<SVGSVGElement>) => {
     if (!event.ctrlKey && !event.metaKey) return;
     event.preventDefault();
@@ -2514,10 +2548,7 @@ function CoinMWorkspace({
           <button
             className={interval === id ? "active" : ""}
             key={id}
-            onClick={() => {
-              setInterval(id);
-              setSelectedIndex(null);
-            }}
+            onClick={() => changeInterval(id)}
           >
             {label}
           </button>
@@ -2550,10 +2581,7 @@ function CoinMWorkspace({
             <button
               className={interval === id ? "active" : ""}
               key={id}
-              onClick={() => {
-                setInterval(id);
-                setSelectedIndex(null);
-              }}
+              onClick={() => changeInterval(id)}
             >
               {label}
             </button>
@@ -2590,13 +2618,13 @@ function CoinMWorkspace({
               onWheel={zoomKline}
             >
               <g className="chart-grid">
-                {[0, 1, 2, 3, 4].map((line) => (
+                {[0, 1, 2, 3, 4, 5].map((line) => (
                   <line
                     key={line}
                     x1={pad}
                     x2={width - pad}
-                    y1={pad + (line * (height - pad * 2)) / 4}
-                    y2={pad + (line * (height - pad * 2)) / 4}
+                    y1={pad + (line * (height - pad * 2)) / 5}
+                    y2={pad + (line * (height - pad * 2)) / 5}
                   />
                 ))}
                 {xAxisIndices.map((index) => (
@@ -2667,7 +2695,7 @@ function CoinMWorkspace({
             </svg>
             <div className="coinm-axis">
               {axisValues.map((value, index) => (
-                <span key={index} style={{ top: `${index * 25}%` }}>
+                <span key={index} style={{ top: `${index * 20}%` }}>
                   {value.toLocaleString(undefined, {
                     maximumFractionDigits: 1,
                   })}
