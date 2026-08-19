@@ -207,6 +207,7 @@ button { cursor: pointer; }
 .coinm-chart-canvas { position: relative; height: 260px; padding-right: 52px; }
 .coinm-chart > .chart-empty { height: 260px; }
 .coinm-chart svg, .coinm-time-share svg { display: block; width: 100%; height: 260px; cursor: grab; overflow: visible; touch-action: none; }.coinm-chart svg:active, .coinm-time-share svg:active { cursor: grabbing; }.chart-grid line { stroke: var(--border); stroke-width: 1; }.time-date-guide { stroke: var(--border); stroke-width: 1; }.candle-up line, .candle-up rect { stroke: #2fc58a; fill: #2fc58a; }.candle-down line, .candle-down rect { stroke: #f64d68; fill: #f64d68; }.ma { fill: none; stroke-width: 1.5; pointer-events: none; }.ma7 { stroke: #f0b90b; }.ma25 { stroke: #ed4ad3; }.ma99 { stroke: #8e6bd1; }
+.coinm-chart svg * { pointer-events: none; }
 .chart-crosshair line { stroke: #aeb4bf; stroke-width: 1; stroke-dasharray: 5 4; pointer-events: none; }.chart-crosshair circle { fill: #e8ebf0; stroke: var(--panel); stroke-width: 2; }
 .current-price-guide { stroke: var(--ink); stroke-width: 1; stroke-dasharray: 4 4; pointer-events: none; }.kline-date-guide { stroke: var(--border); stroke-width: 1; }
 .coinm-axis { position: absolute; top: 36px; right: 0; bottom: 36px; width: 50px; color: var(--muted); font-size: 9px; font-variant-numeric: tabular-nums; }.coinm-axis span { position: absolute; right: 0; transform: translateY(-50%); }
