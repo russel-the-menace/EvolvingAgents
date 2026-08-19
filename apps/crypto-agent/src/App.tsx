@@ -189,6 +189,8 @@ function TimeShareChart({ candles, selectedIndex, onSelect, onLoadOlder, onVisib
   const activePointers = useRef(new Map<number, number>());
   const prefetchRequested = useRef(false);
   const zoomSaveTimer = useRef<number | null>(null);
+  const chartRef = useRef<SVGSVGElement | null>(null);
+  const wheelZoomRemainder = useRef(0);
   useEffect(() => { visibleCountRef.current = visibleCount; }, [visibleCount]);
   const previousLastTime = useRef<number | null>(candleTimes.at(-1) ?? null);
   const timeAxis = useRef<{ anchorTime: number; spacing: number; candleSpacing: number } | null>(null);
@@ -224,6 +226,11 @@ function TimeShareChart({ candles, selectedIndex, onSelect, onLoadOlder, onVisib
   const applyPinch = (distance: number, centerFraction: number) => {
     if (pinchStartDistance.current === null) return;
     const currentCount = visibleCountRef.current; const nextCount = Math.min(MAX_TIME_SHARE_POINTS, Math.max(MIN_TIME_SHARE_POINTS, Math.round(pinchStartCount.current * pinchStartDistance.current / Math.max(1, distance))));
+    if (nextCount === currentCount) return;
+    visibleCountRef.current = nextCount; setVisibleCount(nextCount); setHistoryOffset((current) => zoomWindowOffset(candles.length, current, currentCount, nextCount, centerFraction));
+  };
+  const applyZoomScale = (scale: number, centerFraction: number) => {
+    const currentCount = visibleCountRef.current; const nextCount = Math.min(MAX_TIME_SHARE_POINTS, Math.max(MIN_TIME_SHARE_POINTS, Math.round(pinchStartCount.current / Math.max(.1, scale))));
     if (nextCount === currentCount) return;
     visibleCountRef.current = nextCount; setVisibleCount(nextCount); setHistoryOffset((current) => zoomWindowOffset(candles.length, current, currentCount, nextCount, centerFraction));
   };
@@ -267,23 +274,35 @@ function TimeShareChart({ candles, selectedIndex, onSelect, onLoadOlder, onVisib
     if (event.touches.length < 2 && pinchStartDistance.current !== null) { pinchStartDistance.current = null; window.localStorage.setItem(TIME_SHARE_ZOOM_KEY, String(visibleCountRef.current)); }
   };
   const handleWheel = (event: React.WheelEvent<SVGSVGElement>) => {
-    // macOS trackpad pinch is exposed by Chromium/Electron as a ctrl+wheel gesture.
-    if (!event.ctrlKey && event.deltaZ === 0) return;
+    // macOS browsers expose trackpad pinch inconsistently (ctrl+wheel, meta+wheel, or plain wheel).
     event.preventDefault();
     const bounds = event.currentTarget.getBoundingClientRect(); const anchor = Math.min(1, Math.max(0, (event.clientX - bounds.left) / bounds.width));
-    const currentCount = visibleCountRef.current; const scale = Math.max(.75, Math.min(1.35, 1 + event.deltaY / 300));
-    const nextCount = Math.min(MAX_TIME_SHARE_POINTS, Math.max(MIN_TIME_SHARE_POINTS, Math.round(currentCount * scale)));
+    const currentCount = visibleCountRef.current;
+    wheelZoomRemainder.current += event.deltaY / 90;
+    const wholeSteps = Math.trunc(wheelZoomRemainder.current);
+    if (!wholeSteps) return;
+    wheelZoomRemainder.current -= wholeSteps;
+    const nextCount = Math.min(MAX_TIME_SHARE_POINTS, Math.max(MIN_TIME_SHARE_POINTS, currentCount + wholeSteps * 6));
     if (nextCount === currentCount) return;
     visibleCountRef.current = nextCount; setVisibleCount(nextCount); setHistoryOffset((current) => zoomWindowOffset(candles.length, current, currentCount, nextCount, anchor));
     if (zoomSaveTimer.current !== null) window.clearTimeout(zoomSaveTimer.current);
     zoomSaveTimer.current = window.setTimeout(() => { window.localStorage.setItem(TIME_SHARE_ZOOM_KEY, String(visibleCountRef.current)); zoomSaveTimer.current = null; }, 180);
   };
+  useEffect(() => {
+    const svg = chartRef.current; if (!svg) return;
+    let gestureStartScale = 1;
+    const onGestureStart = (event: Event) => { const gesture = event as Event & { scale?: number }; gestureStartScale = gesture.scale || 1; pinchStartCount.current = visibleCountRef.current; pinchStartDistance.current = 1; pinchAnchor.current = .5; event.preventDefault(); };
+    const onGestureChange = (event: Event) => { const gesture = event as Event & { scale?: number }; applyZoomScale((gesture.scale || 1) / gestureStartScale, pinchAnchor.current); event.preventDefault(); };
+    const onGestureEnd = () => { pinchStartDistance.current = null; window.localStorage.setItem(TIME_SHARE_ZOOM_KEY, String(visibleCountRef.current)); };
+    svg.addEventListener('gesturestart', onGestureStart, { passive: false }); svg.addEventListener('gesturechange', onGestureChange, { passive: false }); svg.addEventListener('gestureend', onGestureEnd);
+    return () => { svg.removeEventListener('gesturestart', onGestureStart); svg.removeEventListener('gesturechange', onGestureChange); svg.removeEventListener('gestureend', onGestureEnd); };
+  }, [candles.length]);
   const handlePointerUp = (event: React.PointerEvent<SVGSVGElement>) => { if (dragFrame.current !== null) window.cancelAnimationFrame(dragFrame.current); dragFrame.current = null; pendingPointerX.current = null; activePointers.current.delete(event.pointerId); if (activePointers.current.size < 2 && pinchStartDistance.current !== null) { pinchStartDistance.current = null; window.localStorage.setItem(TIME_SHARE_ZOOM_KEY, String(visibleCount)); } dragStart.current = null; if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId); };
   const handleClick = (event: React.MouseEvent<SVGSVGElement>) => { if (dragged.current) { dragged.current = false; return; } const bounds = event.currentTarget.getBoundingClientRect(); const chartX = (event.clientX - bounds.left) / bounds.width * width; onSelect(start + Math.max(0, Math.min(visibleCandles.length - 1, Math.round((chartX - pad - step / 2) / step)))); };
   return <section className="coinm-time-share">
     <div className="coinm-ma-legend"><span className="time-ma-legend">MA(60): {average.at(-1)?.toLocaleString(undefined, { maximumFractionDigits: 1 }) || '-'}</span></div>
     <div className="coinm-chart-canvas">
-      <svg viewBox={`0 0 ${width} ${height}`} role="img" aria-label="BTCUSD coin-m time-sharing chart" onClick={handleClick} onPointerDown={handlePointerDown} onPointerMove={handlePointerMove} onPointerUp={handlePointerUp} onPointerCancel={handlePointerUp} onTouchStart={handleTouchStart} onTouchMove={handleTouchMove} onTouchEnd={handleTouchEnd} onTouchCancel={handleTouchEnd} onWheel={handleWheel}>
+      <svg ref={chartRef} viewBox={`0 0 ${width} ${height}`} role="img" aria-label="BTCUSD coin-m time-sharing chart" onClick={handleClick} onPointerDown={handlePointerDown} onPointerMove={handlePointerMove} onPointerUp={handlePointerUp} onPointerCancel={handlePointerUp} onTouchStart={handleTouchStart} onTouchMove={handleTouchMove} onTouchEnd={handleTouchEnd} onTouchCancel={handleTouchEnd} onWheel={handleWheel}>
         <g className="chart-grid">
           {axisPoints.map((line) => <line key={line} x1={pad} x2={width - pad} y1={pad + line * (height - pad * 2) / 5} y2={pad + line * (height - pad * 2) / 5} />)}
           {datePoints.map((item) => <line className="time-date-guide" key={item.time} x1={item.x} x2={item.x} y1={pad} y2={height - pad} />)}
