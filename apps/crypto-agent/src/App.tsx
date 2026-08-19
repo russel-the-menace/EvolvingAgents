@@ -214,7 +214,7 @@ function TimeShareChart({ candles, selectedIndex, onSelect, onLoadOlder, onVisib
   const selected = selectedIndex === null ? null : candles[selectedIndex]; const selectedLocalIndex = selectedIndex === null ? null : selectedIndex - start;
   const visibleLast = visibleCandles.at(-1)?.close ?? last;
   useEffect(() => { onVisibleChange(visibleCandles); }, [start, visibleEnd, visibleLast, candles.length]);
-  const lastX = pad + Math.max(visibleCandles.length - 1, 0) * step + step / 2; const lastY = y(visibleLast); const priceLabel = visibleLast.toLocaleString(undefined, { maximumFractionDigits: 1 });
+  const lastY = y(visibleLast); const priceLabel = visibleLast.toLocaleString(undefined, { maximumFractionDigits: 1 });
   const axisPoints = [0, 1, 2, 3, 4, 5];
   const axisIndices = visibleCandles.length ? [...new Set([0, Math.floor((visibleCandles.length - 1) / 2), visibleCandles.length - 1])] : [];
   const datePoints = axisIndices.map((localIndex) => ({ time: visibleCandles[localIndex].time, x: pad + localIndex * step + step / 2 }));
@@ -313,7 +313,7 @@ function TimeShareChart({ candles, selectedIndex, onSelect, onLoadOlder, onVisib
           <path className="time-area" d={areaPath} /><path className="time-line" d={linePath} /><path className="time-ma" d={pathFor(average)} />
           {selected && selectedLocalIndex !== null && selectedLocalIndex >= 0 && selectedLocalIndex < visibleCandles.length && <g className="chart-crosshair"><line x1={pad + selectedLocalIndex * step + step / 2} x2={pad + selectedLocalIndex * step + step / 2} y1={pad} y2={height - pad} /><line x1={pad} x2={width - pad} y1={y(selected.close)} y2={y(selected.close)} /><circle cx={pad + selectedLocalIndex * step + step / 2} cy={y(selected.close)} r="4" /></g>}
         </g>
-        <line className="time-price-guide" x1={lastX} x2={width - pad} y1={lastY} y2={lastY} />
+        <line className="time-price-guide" x1={pad} x2={width} y1={lastY} y2={lastY} />
       </svg>
       <div className="coinm-axis">{axisPoints.map((line) => <span key={line} style={{ top: `${line * 20}%` }}>{(high - line * range / 5).toLocaleString(undefined, { minimumFractionDigits: 1, maximumFractionDigits: 1 })}</span>)}</div>
       {visibleCandles.length > 0 && <div className="time-price-overlay" style={{ top: `${lastY / height * 100}%` }}>{priceLabel}</div>}
