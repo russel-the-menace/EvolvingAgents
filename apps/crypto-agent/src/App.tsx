@@ -313,123 +313,52 @@ function recentNewsWelcome(items: NewsItem[]) {
   return sentence.length > 120 ? `${sentence.slice(0, 117)}...` : sentence;
 }
 
-function NewsPanel({
-  items,
-  onRefresh,
-  onLoadMore,
-  loading,
-  hasMore,
-}: {
-  items: NewsItem[];
-  onRefresh: () => void;
-  onLoadMore: () => void;
-  loading: boolean;
-  hasMore: boolean;
-}) {
-  const list = useRef<HTMLDivElement>(null);
-  const pullStart = useRef<number | null>(null);
-  const known = useRef<Set<string> | null>(null);
-  const [pullDistance, setPullDistance] = useState(0);
-  const pullThreshold = 44;
-  useLayoutEffect(() => {
-    if (!known.current) known.current = new Set(items.map((item) => item.id));
-    else for (const item of items) known.current.add(item.id);
-  }, [items]);
-  const finishPull = (clientY: number) => {
-    const distance =
-      pullStart.current === null ? 0 : clientY - pullStart.current;
-    if (distance >= pullThreshold && !loading) onRefresh();
-    pullStart.current = null;
-    setPullDistance(0);
-  };
+function MarketPanel({ items }: { items: MarketEvent[] }) {
   return (
-    <section className="news-panel" aria-label="市场新闻">
+    <section className="market-panel" aria-label="市场动态">
       <div className="section-title">
-        <span>News</span>
+        <span>Market</span>
       </div>
-      <div
-        className="news-list"
-        ref={list}
-        onScroll={(event) => {
-          const target = event.currentTarget;
-          if (
-            target.scrollHeight - target.scrollTop - target.clientHeight < 80 &&
-            hasMore &&
-            !loading
-          )
-            onLoadMore();
-        }}
-        onPointerDown={(event) => {
-          if (list.current?.scrollTop === 0 && !loading) {
-            pullStart.current = event.clientY;
-            event.currentTarget.setPointerCapture(event.pointerId);
-          }
-        }}
-        onPointerMove={(event) => {
-          if (pullStart.current !== null)
-            setPullDistance(
-              Math.min(76, Math.max(0, event.clientY - pullStart.current)),
-            );
-        }}
-        onPointerUp={(event) => {
-          finishPull(event.clientY);
-          if (event.currentTarget.hasPointerCapture(event.pointerId))
-            event.currentTarget.releasePointerCapture(event.pointerId);
-        }}
-        onPointerCancel={() => {
-          pullStart.current = null;
-          setPullDistance(0);
-        }}
-      >
-        <div
-          className={`news-pull-indicator${loading ? " loading" : ""}`}
-          style={{
-            height: loading ? 28 : pullDistance,
-            opacity: loading || pullDistance > 0 ? 1 : 0,
-          }}
-        >
-          {loading ? (
-            <>
-              <RefreshCw size={13} className="spin" />
-              加载中
-            </>
-          ) : pullDistance >= pullThreshold ? (
-            "释放加载"
-          ) : (
-            "下拉加载"
-          )}
-        </div>
+      <div className="market-event-list">
         {items.length ? (
           items.map((item) => (
             <article
-              className={`news-item${item.urgency === "breaking" ? " breaking" : ""}${known.current && !known.current.has(item.id) ? " entering" : ""}`}
+              className={`market-event${item.severity === "breaking" ? " breaking" : ""}`}
               key={item.id}
             >
               <div>
-                <span>{item.source}</span>
+                <span>{item.symbol}</span>
                 <time>
-                  {new Date(item.publishedAt).toLocaleTimeString([], {
+                  {new Date(item.observedAt).toLocaleTimeString([], {
                     hour: "2-digit",
                     minute: "2-digit",
                   })}
                 </time>
               </div>
-              <a href={item.url} target="_blank" rel="noreferrer">
-                {item.title}
-              </a>
+              <strong>
+                {item.direction === "up" ? "向上" : "向下"}
+                {item.threshold
+                  ? `突破 ${item.threshold.toLocaleString("en-US")}`
+                  : "异常波动"}
+              </strong>
+              <p>
+                {item.price.toLocaleString("en-US", {
+                  maximumFractionDigits: 2,
+                })}
+                {item.previousPrice > 0 && (
+                  <b
+                    className={
+                      item.direction === "up" ? "positive" : "negative"
+                    }
+                  >
+                    {`${item.direction === "up" ? "+" : ""}${(((item.price - item.previousPrice) / item.previousPrice) * 100).toFixed(2)}%`}
+                  </b>
+                )}
+              </p>
             </article>
           ))
         ) : (
-          <p className="news-empty">新闻正在同步</p>
-        )}
-        {loading && items.length > 0 && (
-          <div className="news-page-loading">
-            <RefreshCw size={12} className="spin" />
-            加载更多
-          </div>
-        )}
-        {!hasMore && items.length > 0 && (
-          <div className="news-page-end">已到最早新闻</div>
+          <p className="market-empty">等待市场事件</p>
         )}
       </div>
     </section>
@@ -3176,9 +3105,7 @@ export function App() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [news, setNews] = useState<NewsItem[]>([]);
-  const [newsLoading, setNewsLoading] = useState(false);
-  const newsCursor = useRef<string | null>(null);
-  const [newsHasMore, setNewsHasMore] = useState(true);
+  const [marketEvents, setMarketEvents] = useState<MarketEvent[]>([]);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [leftWidth, setLeftWidth] = useState(() =>
     Math.min(
@@ -3227,53 +3154,6 @@ export function App() {
       setError(caught instanceof Error ? caught.message : "Unable to connect.");
     }
   }
-  async function refreshNews() {
-    if (newsLoading) return;
-    setNewsLoading(true);
-    try {
-      await new Promise<void>((resolve) =>
-        window.requestAnimationFrame(() => resolve()),
-      );
-      const result = await api<{
-        items: NewsItem[];
-        nextCursor: string | null;
-      }>("/news?limit=30");
-      setNews((current) => [
-        ...result.items,
-        ...current.filter(
-          (item) => !result.items.some((next) => next.id === item.id),
-        ),
-      ]);
-      newsCursor.current = result.nextCursor;
-      setNewsHasMore(Boolean(result.nextCursor));
-    } catch {
-      /* The next pull can retry the refresh. */
-    } finally {
-      setNewsLoading(false);
-    }
-  }
-  async function loadMoreNews() {
-    if (newsLoading || !newsCursor.current) return;
-    setNewsLoading(true);
-    try {
-      const result = await api<{
-        items: NewsItem[];
-        nextCursor: string | null;
-      }>(`/news?limit=30&before=${encodeURIComponent(newsCursor.current)}`);
-      setNews((current) => [
-        ...current,
-        ...result.items.filter(
-          (item) => !current.some((existing) => existing.id === item.id),
-        ),
-      ]);
-      newsCursor.current = result.nextCursor;
-      setNewsHasMore(Boolean(result.nextCursor));
-    } catch {
-      /* The next scroll can retry the page. */
-    } finally {
-      setNewsLoading(false);
-    }
-  }
   useEffect(() => {
     void refresh();
   }, []);
@@ -3313,8 +3193,6 @@ export function App() {
       .then((result) => {
         if (!active) return;
         setNews(result.items);
-        newsCursor.current = result.nextCursor;
-        setNewsHasMore(Boolean(result.nextCursor));
         if (result.items.length)
           notify(
             "CryptoAgent 今日新闻",
@@ -3389,9 +3267,27 @@ export function App() {
   }, []);
   useEffect(() => {
     const stream = new EventSource("/api/market-events/stream");
+    const addMarketEvents = (incoming: MarketEvent[]) =>
+      setMarketEvents((current) =>
+        [...incoming, ...current]
+          .filter(
+            (item, index, rows) =>
+              rows.findIndex((candidate) => candidate.id === item.id) === index,
+          )
+          .sort((left, right) => right.observedAt - left.observedAt)
+          .slice(0, 100),
+      );
+    const add = (event: MessageEvent<string>) => {
+      const payload = JSON.parse(event.data) as {
+        item?: MarketEvent;
+        items?: MarketEvent[];
+      };
+      addMarketEvents(payload.item ? [payload.item] : payload.items || []);
+    };
     const onBreaking = (event: MessageEvent<string>) => {
       const item = (JSON.parse(event.data) as { item: MarketEvent }).item;
       if (!item) return;
+      addMarketEvents([item]);
       const threshold = item.threshold ? `突破 ${item.threshold.toLocaleString("en-US", { maximumFractionDigits: 2 })}` : "出现异常波动";
       const price = item.price.toLocaleString("en-US", { maximumFractionDigits: 2 });
       const body = `${item.symbol} ${item.direction === "up" ? "向上" : "向下"}${threshold}，最新成交价 ${price}。`;
@@ -3399,6 +3295,8 @@ export function App() {
       else if (typeof Notification !== "undefined" && Notification.permission === "granted") new Notification("CryptoAgent 市场异动", { body });
       appendAgentNotice(`市场异动：${body}`, "市场提醒");
     };
+    stream.addEventListener("ready", add);
+    stream.addEventListener("item", add);
     stream.addEventListener("breaking", onBreaking);
     return () => stream.close();
   }, []);
@@ -3637,13 +3535,7 @@ export function App() {
               )}
             </div>
           </nav>
-          <NewsPanel
-            items={news}
-            onRefresh={() => void refreshNews()}
-            onLoadMore={() => void loadMoreNews()}
-            loading={newsLoading}
-            hasMore={newsHasMore}
-          />
+          <MarketPanel items={marketEvents} />
         </div>
         <button
           className="settings-entry"
