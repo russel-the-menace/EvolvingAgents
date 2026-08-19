@@ -50,6 +50,7 @@ import {
   mergeKlineRows,
   mergeTradeIntoSecondRows,
   nearHistoryStart,
+  updateKlinePrice,
   zoomWindowOffset,
   type KlineRow,
 } from "./chart-data";
@@ -1945,6 +1946,9 @@ function CoinMWorkspace({
         current
           ? {
               ...current,
+              ...(price !== null && interval !== "1s"
+                ? { klines: updateKlinePrice(current.klines, price) }
+                : {}),
               ...(depth ? { depth } : {}),
               ...(price !== null
                 ? { premium: { ...current.premium, markPrice: String(price) } }
@@ -1971,7 +1975,10 @@ function CoinMWorkspace({
         return {
           ...next,
           orderBook24h: next.orderBook24h || current.orderBook24h,
-          klines: mergeKlineRows(klines, next.klines),
+          klines: updateKlinePrice(
+            mergeKlineRows(klines, next.klines),
+            Number(next.premium.markPrice),
+          ),
         };
       });
     }, 300);

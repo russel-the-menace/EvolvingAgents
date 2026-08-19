@@ -1,12 +1,18 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { anchoredTickIndices, appendedPointCount, fillSecondRows, klineWindow, mergeKlineRows, mergeTradeIntoSecondRows, nearHistoryStart, zoomWindowOffset } from '../src/chart-data.ts';
+import { anchoredTickIndices, appendedPointCount, fillSecondRows, klineWindow, mergeKlineRows, mergeTradeIntoSecondRows, nearHistoryStart, updateKlinePrice, zoomWindowOffset } from '../src/chart-data.ts';
 
 test('merges older pages and live candles without sorting or duplicates', () => {
   const current = [[3, 'old-3'], [4, 'old-4']];
   assert.deepEqual(mergeKlineRows(current, [[1, 'one'], [2, 'two'], [3, 'new-3']]), [[1, 'one'], [2, 'two'], [3, 'new-3'], [4, 'old-4']]);
   assert.deepEqual(mergeKlineRows(current, [[4, 'new-4']]), [[3, 'old-3'], [4, 'new-4']]);
   assert.deepEqual(mergeKlineRows(current, [[5, 'five']]), [[3, 'old-3'], [4, 'old-4'], [5, 'five']]);
+});
+
+test('updates the active candle from a live trade price', () => {
+  const rows = [[1_000, 100, 105, 95, 102, 2, 1_999, 204]];
+  assert.deepEqual(updateKlinePrice(rows, 108), [[1_000, 100, 108, 95, 108, 2, 1_999, 204]]);
+  assert.deepEqual(updateKlinePrice(rows, 92), [[1_000, 100, 105, 92, 92, 2, 1_999, 204]]);
 });
 
 test('aggregates trades into bounded one-second OHLCV rows', () => {

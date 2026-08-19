@@ -52,6 +52,16 @@ export function mergeKlineRows(current: KlineRow[], incoming: KlineRow[]) {
   return next;
 }
 
+export function updateKlinePrice(rows: KlineRow[], price: number) {
+  if (!rows.length || !Number.isFinite(price)) return rows;
+  const last = rows.at(-1)!;
+  const next = [...last];
+  next[2] = Math.max(Number(last[2]), price);
+  next[3] = Math.min(Number(last[3]), price);
+  next[4] = price;
+  return [...rows.slice(0, -1), next];
+}
+
 export function fillSecondRows(rows: KlineRow[], limit = 240) {
   const filled: KlineRow[] = [];
   for (const row of rows) {
