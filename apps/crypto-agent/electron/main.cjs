@@ -67,6 +67,8 @@ function createWindow() {
     backgroundColor: nativeTheme.shouldUseDarkColors ? '#101214' : '#f4f5f6',
     webPreferences: { contextIsolation: true, nodeIntegration: false, preload: join(__dirname, 'preload.cjs') },
   });
+  // Keep macOS trackpad pinch inside the chart instead of zooming the whole Electron page.
+  mainWindow.webContents.setVisualZoomLevelLimits(1, 1);
   mainWindow.loadURL('http://127.0.0.1:5450');
   mainWindow.on('closed', () => { mainWindow = null; });
   mainWindow.on('close', (event) => {
@@ -78,6 +80,7 @@ function createWindow() {
 
 function createWidget() {
   widgetWindow = new BrowserWindow({ width: 380, height: 245, resizable: false, show: false, alwaysOnTop: true, title: 'CryptoAgent K 线', webPreferences: { contextIsolation: true, nodeIntegration: false, preload: join(__dirname, 'preload.cjs') } });
+  widgetWindow.webContents.setVisualZoomLevelLimits(1, 1);
   widgetWindow.loadURL('http://127.0.0.1:5450/?widget=1');
   widgetWindow.on('closed', () => { widgetWindow = null; });
 }
