@@ -5,6 +5,8 @@ import {
   useRef,
   useState,
   type CSSProperties,
+  type Dispatch,
+  type SetStateAction,
 } from "react";
 import {
   ArrowDownLeft,
@@ -981,6 +983,277 @@ type CoinMCandle = {
   quoteVolume: number;
 };
 
+function useChartNavigation({
+  times,
+  visibleCount,
+  setVisibleCount,
+  historyOffset,
+  setHistoryOffset,
+  step,
+  minPoints,
+  maxPoints,
+  warmupPoints = visibleCount,
+  storageKey,
+  onLoadOlder,
+  onDrag,
+}: {
+  times: number[];
+  visibleCount: number;
+  setVisibleCount: Dispatch<SetStateAction<number>>;
+  historyOffset: number;
+  setHistoryOffset: Dispatch<SetStateAction<number>>;
+  step: number;
+  minPoints: number;
+  maxPoints: number;
+  warmupPoints?: number;
+  storageKey: string;
+  onLoadOlder: () => Promise<void>;
+  onDrag?: () => void;
+}) {
+  const chartRef = useRef<SVGSVGElement | null>(null);
+  const visibleCountRef = useRef(visibleCount);
+  const historyOffsetRef = useRef(historyOffset);
+  const dragStart = useRef<number | null>(null);
+  const dragAnchor = useRef(0);
+  const pendingPointerX = useRef<number | null>(null);
+  const dragFrame = useRef<number | null>(null);
+  const dragged = useRef(false);
+  const activePointers = useRef(new Map<number, number>());
+  const pinchStartDistance = useRef<number | null>(null);
+  const pinchStartCount = useRef(visibleCount);
+  const pinchAnchor = useRef(0.5);
+  const prefetchRequested = useRef(false);
+  const wheelZoomRemainder = useRef(0);
+  const wheelHandlerRef = useRef<((event: WheelEvent) => void) | null>(null);
+  const zoomSaveTimer = useRef<number | null>(null);
+  visibleCountRef.current = visibleCount;
+  historyOffsetRef.current = historyOffset;
+  const updateOffset = (next: number) => {
+    historyOffsetRef.current = next;
+    setHistoryOffset(next);
+  };
+  const previousLastTime = useRef<number | null>(times.at(-1) ?? null);
+  useEffect(() => {
+    const appended = appendedPointCount(times, previousLastTime.current);
+    if (appended > 0 && historyOffsetRef.current > 0) {
+      updateOffset(historyOffsetRef.current + appended);
+      if (dragStart.current !== null) dragAnchor.current += appended;
+    }
+    prefetchRequested.current = false;
+    previousLastTime.current = times.at(-1) ?? null;
+  }, [times.length, times.at(-1)]);
+  const applyZoom = (nextCount: number, centerFraction: number) => {
+    const currentCount = visibleCountRef.current;
+    const next = Math.min(maxPoints, Math.max(minPoints, nextCount));
+    if (next === currentCount) return;
+    visibleCountRef.current = next;
+    setVisibleCount(next);
+    updateOffset(
+      zoomWindowOffset(
+        times.length,
+        historyOffsetRef.current,
+        currentCount,
+        next,
+        centerFraction,
+      ),
+    );
+  };
+  const saveZoom = () =>
+    window.localStorage.setItem(storageKey, String(visibleCountRef.current));
+  const requestOlder = () => {
+    if (prefetchRequested.current) return;
+    prefetchRequested.current = true;
+    void onLoadOlder().finally(() => {
+      prefetchRequested.current = false;
+    });
+  };
+  const handlePointerDown = (event: React.PointerEvent<SVGSVGElement>) => {
+    activePointers.current.set(event.pointerId, event.clientX);
+    event.currentTarget.setPointerCapture(event.pointerId);
+    if (activePointers.current.size >= 2) {
+      const xs = [...activePointers.current.values()];
+      pinchStartDistance.current = Math.abs(xs[1] - xs[0]) || 1;
+      pinchStartCount.current = visibleCountRef.current;
+      const bounds = event.currentTarget.getBoundingClientRect();
+      pinchAnchor.current = Math.min(
+        1,
+        Math.max(0, ((xs[0] + xs[1]) / 2 - bounds.left) / bounds.width),
+      );
+      dragStart.current = null;
+      return;
+    }
+    dragStart.current = event.clientX;
+    dragAnchor.current = historyOffsetRef.current;
+    dragged.current = false;
+  };
+  const handlePointerMove = (event: React.PointerEvent<SVGSVGElement>) => {
+    if (activePointers.current.has(event.pointerId))
+      activePointers.current.set(event.pointerId, event.clientX);
+    if (
+      activePointers.current.size >= 2 &&
+      pinchStartDistance.current !== null
+    ) {
+      const xs = [...activePointers.current.values()];
+      applyZoom(
+        Math.round(
+          (pinchStartCount.current * pinchStartDistance.current) /
+            Math.max(1, Math.abs(xs[1] - xs[0])),
+        ),
+        pinchAnchor.current,
+      );
+      return;
+    }
+    pendingPointerX.current = event.clientX;
+    if (dragFrame.current !== null) return;
+    dragFrame.current = window.requestAnimationFrame(() => {
+      dragFrame.current = null;
+      if (dragStart.current === null || pendingPointerX.current === null)
+        return;
+      const delta = pendingPointerX.current - dragStart.current;
+      if (Math.abs(delta) > 3) {
+        dragged.current = true;
+        onDrag?.();
+      }
+      const count = visibleCountRef.current;
+      const maximum = Math.max(0, times.length - count);
+      const nextOffset = Math.max(
+        0,
+        Math.min(
+          maximum,
+          dragAnchor.current + Math.round(delta / Math.max(step, 1)),
+        ),
+      );
+      updateOffset(nextOffset);
+      if (
+        delta > step &&
+        times.length &&
+        nearHistoryStart(times.length, nextOffset, count, warmupPoints)
+      )
+        requestOlder();
+    });
+  };
+  const handlePointerUp = (event: React.PointerEvent<SVGSVGElement>) => {
+    if (dragFrame.current !== null)
+      window.cancelAnimationFrame(dragFrame.current);
+    dragFrame.current = null;
+    pendingPointerX.current = null;
+    activePointers.current.delete(event.pointerId);
+    if (activePointers.current.size < 2 && pinchStartDistance.current !== null) {
+      pinchStartDistance.current = null;
+      saveZoom();
+    }
+    dragStart.current = null;
+    if (event.currentTarget.hasPointerCapture(event.pointerId))
+      event.currentTarget.releasePointerCapture(event.pointerId);
+  };
+  const handleTouchStart = (event: React.TouchEvent<SVGSVGElement>) => {
+    if (event.touches.length < 2) return;
+    event.preventDefault();
+    const [first, second] = [event.touches[0], event.touches[1]];
+    pinchStartDistance.current =
+      Math.hypot(
+        second.clientX - first.clientX,
+        second.clientY - first.clientY,
+      ) || 1;
+    pinchStartCount.current = visibleCountRef.current;
+    const bounds = event.currentTarget.getBoundingClientRect();
+    pinchAnchor.current = Math.min(
+      1,
+      Math.max(
+        0,
+        ((first.clientX + second.clientX) / 2 - bounds.left) / bounds.width,
+      ),
+    );
+    dragStart.current = null;
+  };
+  const handleTouchMove = (event: React.TouchEvent<SVGSVGElement>) => {
+    if (event.touches.length < 2 || pinchStartDistance.current === null) return;
+    event.preventDefault();
+    const [first, second] = [event.touches[0], event.touches[1]];
+    applyZoom(
+      Math.round(
+        (pinchStartCount.current * pinchStartDistance.current) /
+          Math.max(
+            1,
+            Math.hypot(
+              second.clientX - first.clientX,
+              second.clientY - first.clientY,
+            ),
+          ),
+      ),
+      pinchAnchor.current,
+    );
+  };
+  const handleTouchEnd = (event: React.TouchEvent<SVGSVGElement>) => {
+    if (event.touches.length < 2 && pinchStartDistance.current !== null) {
+      pinchStartDistance.current = null;
+      saveZoom();
+    }
+  };
+  wheelHandlerRef.current = (event) => {
+    if (!event.ctrlKey && !event.metaKey) return;
+    const svg = chartRef.current;
+    if (!svg || !svg.contains(event.target as Node)) return;
+    event.preventDefault();
+    const bounds = svg.getBoundingClientRect();
+    wheelZoomRemainder.current += event.deltaY / 36;
+    const steps = Math.trunc(wheelZoomRemainder.current);
+    if (!steps) return;
+    wheelZoomRemainder.current -= steps;
+    applyZoom(
+      visibleCountRef.current + steps,
+      Math.min(1, Math.max(0, (event.clientX - bounds.left) / bounds.width)),
+    );
+    if (zoomSaveTimer.current !== null)
+      window.clearTimeout(zoomSaveTimer.current);
+    zoomSaveTimer.current = window.setTimeout(saveZoom, 180);
+  };
+  useEffect(() => {
+    const wheel = (event: WheelEvent) => wheelHandlerRef.current?.(event);
+    window.addEventListener("wheel", wheel, { capture: true, passive: false });
+    return () => window.removeEventListener("wheel", wheel, true);
+  }, []);
+  useEffect(() => {
+    const svg = chartRef.current;
+    if (!svg) return;
+    let startScale = 1;
+    const start = (event: Event) => {
+      startScale = (event as Event & { scale?: number }).scale || 1;
+      pinchStartCount.current = visibleCountRef.current;
+      event.preventDefault();
+    };
+    const change = (event: Event) => {
+      const scale = (event as Event & { scale?: number }).scale || 1;
+      applyZoom(
+        Math.round(pinchStartCount.current / (scale / startScale)),
+        0.5,
+      );
+      event.preventDefault();
+    };
+    const end = () => saveZoom();
+    svg.addEventListener("gesturestart", start, { passive: false });
+    svg.addEventListener("gesturechange", change, { passive: false });
+    svg.addEventListener("gestureend", end);
+    return () => {
+      svg.removeEventListener("gesturestart", start);
+      svg.removeEventListener("gesturechange", change);
+      svg.removeEventListener("gestureend", end);
+    };
+  }, [times.length]);
+  return {
+    chartRef,
+    dragged,
+    visibleCountRef,
+    historyOffsetRef,
+    handlePointerDown,
+    handlePointerMove,
+    handlePointerUp,
+    handleTouchStart,
+    handleTouchMove,
+    handleTouchEnd,
+  };
+}
+
 function TimeShareChart({
   candles,
   selectedIndex,
@@ -992,7 +1265,7 @@ function TimeShareChart({
   candles: CoinMCandle[];
   selectedIndex: number | null;
   onSelect: (index: number) => void;
-  onLoadOlder: () => void;
+  onLoadOlder: () => Promise<void>;
   onVisibleChange: (candles: CoinMCandle[]) => void;
   last: number;
 }) {
@@ -1006,38 +1279,10 @@ function TimeShareChart({
         )
       : 120;
   });
-  const visibleCountRef = useRef(visibleCount);
   const candleTimes = useMemo(
     () => candles.map((item) => item.time),
     [candles],
   );
-  const dragStart = useRef<number | null>(null);
-  const dragAnchor = useRef(0);
-  const pendingPointerX = useRef<number | null>(null);
-  const dragFrame = useRef<number | null>(null);
-  const dragged = useRef(false);
-  const pinchStartDistance = useRef<number | null>(null);
-  const pinchStartCount = useRef(visibleCount);
-  const pinchAnchor = useRef(0.5);
-  const activePointers = useRef(new Map<number, number>());
-  const prefetchRequested = useRef(false);
-  const zoomSaveTimer = useRef<number | null>(null);
-  const chartRef = useRef<SVGSVGElement | null>(null);
-  const wheelZoomRemainder = useRef(0);
-  const wheelHandlerRef = useRef<((event: WheelEvent) => void) | null>(null);
-  useEffect(() => {
-    visibleCountRef.current = visibleCount;
-  }, [visibleCount]);
-  const previousLastTime = useRef<number | null>(candleTimes.at(-1) ?? null);
-  useEffect(() => {
-    const appended = appendedPointCount(candleTimes, previousLastTime.current);
-    if (appended > 0) {
-      setHistoryOffset((current) => (current > 0 ? current + appended : 0));
-      if (dragStart.current !== null) dragAnchor.current += appended;
-      prefetchRequested.current = false;
-    }
-    previousLastTime.current = candleTimes.at(-1) ?? null;
-  }, [candles.length, candleTimes.at(-1)]);
   const width = 900;
   const height = 330;
   const pad = 20;
@@ -1052,6 +1297,18 @@ function TimeShareChart({
     : 1;
   const range = high - low || 1;
   const step = (width - pad * 2) / Math.max(visibleCandles.length, 1);
+  const navigation = useChartNavigation({
+    times: candleTimes,
+    visibleCount,
+    setVisibleCount,
+    historyOffset,
+    setHistoryOffset,
+    step,
+    minPoints: MIN_TIME_SHARE_POINTS,
+    maxPoints: MAX_TIME_SHARE_POINTS,
+    storageKey: TIME_SHARE_ZOOM_KEY,
+    onLoadOlder,
+  });
   const y = (price: number) =>
     pad + ((high - price) / range) * (height - pad * 2);
   const closes = visibleCandles.map((item) => item.close);
@@ -1106,264 +1363,9 @@ function TimeShareChart({
       hour: "2-digit",
       minute: "2-digit",
     });
-  const applyPinch = (distance: number, centerFraction: number) => {
-    if (pinchStartDistance.current === null) return;
-    const currentCount = visibleCountRef.current;
-    const nextCount = Math.min(
-      MAX_TIME_SHARE_POINTS,
-      Math.max(
-        MIN_TIME_SHARE_POINTS,
-        Math.round(
-          (pinchStartCount.current * pinchStartDistance.current) /
-            Math.max(1, distance),
-        ),
-      ),
-    );
-    if (nextCount === currentCount) return;
-    visibleCountRef.current = nextCount;
-    setVisibleCount(nextCount);
-    setHistoryOffset((current) =>
-      zoomWindowOffset(
-        candles.length,
-        current,
-        currentCount,
-        nextCount,
-        centerFraction,
-      ),
-    );
-  };
-  const applyZoomScale = (scale: number, centerFraction: number) => {
-    const currentCount = visibleCountRef.current;
-    const nextCount = Math.min(
-      MAX_TIME_SHARE_POINTS,
-      Math.max(
-        MIN_TIME_SHARE_POINTS,
-        Math.round(pinchStartCount.current / Math.max(0.1, scale)),
-      ),
-    );
-    if (nextCount === currentCount) return;
-    visibleCountRef.current = nextCount;
-    setVisibleCount(nextCount);
-    setHistoryOffset((current) =>
-      zoomWindowOffset(
-        candles.length,
-        current,
-        currentCount,
-        nextCount,
-        centerFraction,
-      ),
-    );
-  };
-  const handlePointerDown = (event: React.PointerEvent<SVGSVGElement>) => {
-    activePointers.current.set(event.pointerId, event.clientX);
-    event.currentTarget.setPointerCapture(event.pointerId);
-    if (activePointers.current.size >= 2) {
-      const xs = [...activePointers.current.values()];
-      pinchStartDistance.current = Math.abs(xs[1] - xs[0]) || 1;
-      pinchStartCount.current = visibleCount;
-      const bounds = event.currentTarget.getBoundingClientRect();
-      pinchAnchor.current = Math.min(
-        1,
-        Math.max(0, ((xs[0] + xs[1]) / 2 - bounds.left) / bounds.width),
-      );
-      dragStart.current = null;
-      return;
-    }
-    dragStart.current = event.clientX;
-    dragAnchor.current = historyOffset;
-    dragged.current = false;
-  };
-  const handlePointerMove = (event: React.PointerEvent<SVGSVGElement>) => {
-    if (activePointers.current.has(event.pointerId))
-      activePointers.current.set(event.pointerId, event.clientX);
-    if (
-      activePointers.current.size >= 2 &&
-      pinchStartDistance.current !== null
-    ) {
-      const xs = [...activePointers.current.values()];
-      const distance = Math.abs(xs[1] - xs[0]) || 1;
-      applyPinch(distance, pinchAnchor.current);
-      return;
-    }
-    pendingPointerX.current = event.clientX;
-    if (dragFrame.current !== null) return;
-    dragFrame.current = window.requestAnimationFrame(() => {
-      dragFrame.current = null;
-      if (dragStart.current === null || pendingPointerX.current === null)
-        return;
-      const delta = pendingPointerX.current - dragStart.current;
-      if (Math.abs(delta) > 3) dragged.current = true;
-      const maximum = Math.max(0, candles.length - visibleCount);
-      const nextOffset = Math.max(
-        0,
-        Math.min(
-          maximum,
-          dragAnchor.current + Math.round(delta / Math.max(step, 1)),
-        ),
-      );
-      setHistoryOffset(nextOffset);
-      if (
-        delta > step &&
-        nearHistoryStart(candles.length, nextOffset, visibleCount) &&
-        candles.length &&
-        !prefetchRequested.current
-      ) {
-        prefetchRequested.current = true;
-        onLoadOlder();
-      }
-    });
-  };
-  const handleTouchStart = (event: React.TouchEvent<SVGSVGElement>) => {
-    if (event.touches.length < 2) return;
-    event.preventDefault();
-    const first = event.touches[0];
-    const second = event.touches[1];
-    pinchStartDistance.current =
-      Math.hypot(
-        second.clientX - first.clientX,
-        second.clientY - first.clientY,
-      ) || 1;
-    pinchStartCount.current = visibleCountRef.current;
-    const bounds = event.currentTarget.getBoundingClientRect();
-    pinchAnchor.current = Math.min(
-      1,
-      Math.max(
-        0,
-        ((first.clientX + second.clientX) / 2 - bounds.left) / bounds.width,
-      ),
-    );
-    dragStart.current = null;
-  };
-  const handleTouchMove = (event: React.TouchEvent<SVGSVGElement>) => {
-    if (event.touches.length < 2 || pinchStartDistance.current === null) return;
-    event.preventDefault();
-    const first = event.touches[0];
-    const second = event.touches[1];
-    applyPinch(
-      Math.hypot(
-        second.clientX - first.clientX,
-        second.clientY - first.clientY,
-      ),
-      pinchAnchor.current,
-    );
-  };
-  const handleTouchEnd = (event: React.TouchEvent<SVGSVGElement>) => {
-    if (event.touches.length < 2 && pinchStartDistance.current !== null) {
-      pinchStartDistance.current = null;
-      window.localStorage.setItem(
-        TIME_SHARE_ZOOM_KEY,
-        String(visibleCountRef.current),
-      );
-    }
-  };
-  const applyWheelZoom = (deltaY: number, clientX: number, bounds: DOMRect) => {
-    const anchor = Math.min(
-      1,
-      Math.max(0, (clientX - bounds.left) / bounds.width),
-    );
-    const currentCount = visibleCountRef.current;
-    wheelZoomRemainder.current += deltaY / 36;
-    const wholeSteps = Math.trunc(wheelZoomRemainder.current);
-    if (!wholeSteps) return;
-    wheelZoomRemainder.current -= wholeSteps;
-    const nextCount = Math.min(
-      MAX_TIME_SHARE_POINTS,
-      Math.max(MIN_TIME_SHARE_POINTS, currentCount + wholeSteps),
-    );
-    if (nextCount === currentCount) return;
-    visibleCountRef.current = nextCount;
-    setVisibleCount(nextCount);
-    setHistoryOffset((current) =>
-      zoomWindowOffset(
-        candles.length,
-        current,
-        currentCount,
-        nextCount,
-        anchor,
-      ),
-    );
-    if (zoomSaveTimer.current !== null)
-      window.clearTimeout(zoomSaveTimer.current);
-    zoomSaveTimer.current = window.setTimeout(() => {
-      window.localStorage.setItem(
-        TIME_SHARE_ZOOM_KEY,
-        String(visibleCountRef.current),
-      );
-      zoomSaveTimer.current = null;
-    }, 180);
-  };
-  wheelHandlerRef.current = (event) => {
-    if (!event.ctrlKey && !event.metaKey) return;
-    const svg = chartRef.current;
-    if (!svg || !svg.contains(event.target as Node)) return;
-    event.preventDefault();
-    applyWheelZoom(event.deltaY, event.clientX, svg.getBoundingClientRect());
-  };
-  useEffect(() => {
-    const onWheelCapture = (event: WheelEvent) =>
-      wheelHandlerRef.current?.(event);
-    window.addEventListener("wheel", onWheelCapture, {
-      capture: true,
-      passive: false,
-    });
-    return () => window.removeEventListener("wheel", onWheelCapture, true);
-  }, []);
-  useEffect(() => {
-    const svg = chartRef.current;
-    if (!svg) return;
-    let gestureStartScale = 1;
-    const onGestureStart = (event: Event) => {
-      const gesture = event as Event & { scale?: number };
-      gestureStartScale = gesture.scale || 1;
-      pinchStartCount.current = visibleCountRef.current;
-      pinchStartDistance.current = 1;
-      pinchAnchor.current = 0.5;
-      event.preventDefault();
-    };
-    const onGestureChange = (event: Event) => {
-      const gesture = event as Event & { scale?: number };
-      applyZoomScale(
-        (gesture.scale || 1) / gestureStartScale,
-        pinchAnchor.current,
-      );
-      event.preventDefault();
-    };
-    const onGestureEnd = () => {
-      pinchStartDistance.current = null;
-      window.localStorage.setItem(
-        TIME_SHARE_ZOOM_KEY,
-        String(visibleCountRef.current),
-      );
-    };
-    svg.addEventListener("gesturestart", onGestureStart, { passive: false });
-    svg.addEventListener("gesturechange", onGestureChange, { passive: false });
-    svg.addEventListener("gestureend", onGestureEnd);
-    return () => {
-      svg.removeEventListener("gesturestart", onGestureStart);
-      svg.removeEventListener("gesturechange", onGestureChange);
-      svg.removeEventListener("gestureend", onGestureEnd);
-    };
-  }, [candles.length]);
-  const handlePointerUp = (event: React.PointerEvent<SVGSVGElement>) => {
-    if (dragFrame.current !== null)
-      window.cancelAnimationFrame(dragFrame.current);
-    dragFrame.current = null;
-    pendingPointerX.current = null;
-    activePointers.current.delete(event.pointerId);
-    if (
-      activePointers.current.size < 2 &&
-      pinchStartDistance.current !== null
-    ) {
-      pinchStartDistance.current = null;
-      window.localStorage.setItem(TIME_SHARE_ZOOM_KEY, String(visibleCount));
-    }
-    dragStart.current = null;
-    if (event.currentTarget.hasPointerCapture(event.pointerId))
-      event.currentTarget.releasePointerCapture(event.pointerId);
-  };
   const handleClick = (event: React.MouseEvent<SVGSVGElement>) => {
-    if (dragged.current) {
-      dragged.current = false;
+    if (navigation.dragged.current) {
+      navigation.dragged.current = false;
       return;
     }
     const bounds = event.currentTarget.getBoundingClientRect();
@@ -1391,20 +1393,20 @@ function TimeShareChart({
       </div>
       <div className="coinm-chart-canvas">
         <svg
-          ref={chartRef}
+          ref={navigation.chartRef}
           viewBox={`0 0 ${width} ${height}`}
           preserveAspectRatio="none"
           role="img"
           aria-label="BTCUSD coin-m time-sharing chart"
           onClick={handleClick}
-          onPointerDown={handlePointerDown}
-          onPointerMove={handlePointerMove}
-          onPointerUp={handlePointerUp}
-          onPointerCancel={handlePointerUp}
-          onTouchStart={handleTouchStart}
-          onTouchMove={handleTouchMove}
-          onTouchEnd={handleTouchEnd}
-          onTouchCancel={handleTouchEnd}
+          onPointerDown={navigation.handlePointerDown}
+          onPointerMove={navigation.handlePointerMove}
+          onPointerUp={navigation.handlePointerUp}
+          onPointerCancel={navigation.handlePointerUp}
+          onTouchStart={navigation.handleTouchStart}
+          onTouchMove={navigation.handleTouchMove}
+          onTouchEnd={navigation.handleTouchEnd}
+          onTouchCancel={navigation.handleTouchEnd}
         >
           <g className="chart-grid">
             {axisPoints.map((line) => (
@@ -1692,9 +1694,6 @@ function CoinMWorkspace({
   const pendingScrollTop = useRef<number | null>(null);
   const latestMarket = useRef<CoinMMarket | null>(market);
   latestMarket.current = market;
-  const klineVisibleCountRef = useRef(klineVisibleCount);
-  const klineWheelRemainder = useRef(0);
-  const klineOffsetValue = useRef(0);
   const previousPrice = useRef(0);
   const pendingPrice = useRef<number | null>(null);
   const pendingDepth = useRef<{ bids: string[][]; asks: string[][] } | null>(
@@ -1702,18 +1701,6 @@ function CoinMWorkspace({
   );
   const pendingRelay = useRef<CoinMMarket | null>(null);
   const pendingSecondRows = useRef<KlineRow[]>([]);
-  const klineDragStart = useRef<number | null>(null);
-  const klineDragAnchor = useRef(0);
-  const klinePointerX = useRef<number | null>(null);
-  const klineDragFrame = useRef<number | null>(null);
-  const klineDragged = useRef(false);
-  const klineChartRef = useRef<SVGSVGElement | null>(null);
-  const klineActivePointers = useRef(new Map<number, number>());
-  const klinePinchDistance = useRef<number | null>(null);
-  const klinePinchCount = useRef(klineVisibleCount);
-  const klinePinchAnchor = useRef(0.5);
-  const klinePrefetchRequested = useRef(false);
-  const previousKlineLength = useRef(0);
   const loadingOlder = useRef(false);
   const oldestReached = useRef(false);
   const timeVisibleCandles = useRef<CoinMCandle[]>([]);
@@ -1738,7 +1725,7 @@ function CoinMWorkspace({
     const content = document.querySelector<HTMLElement>(".asset-content");
     pendingScrollTop.current = content?.scrollTop ?? null;
     klineViewCache.current.set(marketCacheKey, {
-      offset: klineOffsetValue.current,
+      offset: klineOffset,
     });
     setInterval(next);
     setSelectedIndex(null);
@@ -1771,8 +1758,7 @@ function CoinMWorkspace({
     const cachedMarket = marketCache.current.get(marketCacheKey);
     setMarket(cachedMarket || null);
     const cachedView = klineViewCache.current.get(marketCacheKey);
-    klineOffsetValue.current = cachedView?.offset || 0;
-    setKlineOffset(klineOffsetValue.current);
+    setKlineOffset(cachedView?.offset || 0);
     oldestReached.current = false;
     const sourceInterval =
       interval === "time" || interval === "1s" ? "1m" : interval;
@@ -2026,19 +2012,10 @@ function CoinMWorkspace({
       ]),
     ).values(),
   ];
-  useEffect(() => {
-    klineVisibleCountRef.current = klineVisibleCount;
-  }, [klineVisibleCount]);
-  useEffect(() => {
-    const added = allCandles.length - previousKlineLength.current;
-    if (added > 0 && klineOffsetValue.current > 0) {
-      klineOffsetValue.current += added;
-      setKlineOffset(klineOffsetValue.current);
-      if (klineDragStart.current !== null) klineDragAnchor.current += added;
-    }
-    if (added > 0) klinePrefetchRequested.current = false;
-    previousKlineLength.current = allCandles.length;
-  }, [allCandles.length]);
+  const candleTimes = useMemo(
+    () => allCandles.map((item) => item.time),
+    [allCandles],
+  );
   const candles = klineWindow(allCandles, klineOffset, klineVisibleCount);
   const candleStartIndex = candles.length
     ? allCandles.findIndex((item) => item.time === candles[0].time)
@@ -2180,41 +2157,9 @@ function CoinMWorkspace({
   const change = first ? ((last - first) / first) * 100 : 0;
   const selected = selectedIndex === null ? null : candles[selectedIndex];
   const axisValues = [0, 1, 2, 3, 4, 5].map((line) => high - (line * range) / 5);
-  const applyKlineZoom = (next: number, anchor: number) => {
-    const current = klineVisibleCountRef.current;
-    if (next === current) return;
-    const nextOffset = zoomWindowOffset(
-      allCandles.length,
-      klineOffsetValue.current,
-      current,
-      next,
-      anchor,
-    );
-    klineVisibleCountRef.current = next;
-    setKlineVisibleCount(next);
-    klineOffsetValue.current = nextOffset;
-    setKlineOffset(nextOffset);
-    window.localStorage.setItem(
-      "crypto-agent-kline-visible-points",
-      String(next),
-    );
-  };
-  const zoomKline = (event: React.WheelEvent<SVGSVGElement>) => {
-    if (!event.ctrlKey && !event.metaKey) return;
-    event.preventDefault();
-    klineWheelRemainder.current += event.deltaY / 36;
-    const steps = Math.trunc(klineWheelRemainder.current);
-    if (!steps) return;
-    klineWheelRemainder.current -= steps;
-    const bounds = event.currentTarget.getBoundingClientRect();
-    applyKlineZoom(
-      Math.min(145, Math.max(9, klineVisibleCountRef.current + steps)),
-      Math.min(1, Math.max(0, (event.clientX - bounds.left) / bounds.width)),
-    );
-  };
   const selectCandle = (event: React.MouseEvent<SVGSVGElement>) => {
-    if (klineDragged.current) {
-      klineDragged.current = false;
+    if (klineNavigation.dragged.current) {
+      klineNavigation.dragged.current = false;
       return;
     }
     const bounds = event.currentTarget.getBoundingClientRect();
@@ -2232,9 +2177,10 @@ function CoinMWorkspace({
   const selectTimeShare = (index: number) => setSelectedIndex(index);
   const loadOlderTimeShare = () => {
     const before = allCandles[0]?.time;
-    if (!before || loadingOlder.current || oldestReached.current) return;
+    if (!before || loadingOlder.current || oldestReached.current)
+      return Promise.resolve();
     loadingOlder.current = true;
-    void api<CoinMMarket>(
+    return api<CoinMMarket>(
       `/${marketPath}?symbol=${marketSymbol}&interval=1m&endTime=${before - 1}`,
     )
       .then((result) => {
@@ -2263,9 +2209,9 @@ function CoinMWorkspace({
       loadingOlder.current ||
       oldestReached.current
     )
-      return;
+      return Promise.resolve();
     loadingOlder.current = true;
-    void api<CoinMMarket>(
+    return api<CoinMMarket>(
       `/${marketPath}?symbol=${marketSymbol}&interval=${interval}&endTime=${before - 1}`,
     )
       .then((result) => {
@@ -2282,132 +2228,22 @@ function CoinMWorkspace({
       .catch(() => setError("历史 K 线暂时不可用"))
       .finally(() => {
         loadingOlder.current = false;
-        klinePrefetchRequested.current = false;
       });
   };
-  const moveKline = (clientX: number) => {
-    klinePointerX.current = clientX;
-    if (klineDragFrame.current !== null) return;
-    klineDragFrame.current = window.requestAnimationFrame(() => {
-      klineDragFrame.current = null;
-      if (klineDragStart.current === null || klinePointerX.current === null)
-        return;
-      const delta = klinePointerX.current - klineDragStart.current;
-      if (Math.abs(delta) > 3) {
-        klineDragged.current = true;
-        setSelectedIndex(null);
-      }
-      const count = klineVisibleCountRef.current;
-      const maximum = Math.max(0, allCandles.length - count);
-      const nextOffset = Math.max(
-        0,
-        Math.min(
-          maximum,
-          klineDragAnchor.current + Math.round(delta / Math.max(step, 1)),
-        ),
-      );
-      klineOffsetValue.current = nextOffset;
-      setKlineOffset(nextOffset);
-      if (
-        delta > step &&
-        nearHistoryStart(allCandles.length, nextOffset, count, 99) &&
-        allCandles.length &&
-        !klinePrefetchRequested.current
-      ) {
-        klinePrefetchRequested.current = true;
-        loadOlderKlines();
-      }
-    });
-  };
-  const handleKlinePointerDown = (
-    event: React.PointerEvent<SVGSVGElement>,
-  ) => {
-    klineActivePointers.current.set(event.pointerId, event.clientX);
-    event.currentTarget.setPointerCapture(event.pointerId);
-    if (klineActivePointers.current.size >= 2) {
-      const xs = [...klineActivePointers.current.values()];
-      klinePinchDistance.current = Math.abs(xs[1] - xs[0]) || 1;
-      klinePinchCount.current = klineVisibleCountRef.current;
-      const bounds = event.currentTarget.getBoundingClientRect();
-      klinePinchAnchor.current = Math.min(
-        1,
-        Math.max(0, ((xs[0] + xs[1]) / 2 - bounds.left) / bounds.width),
-      );
-      klineDragStart.current = null;
-      return;
-    }
-    klineDragStart.current = event.clientX;
-    klineDragAnchor.current = klineOffsetValue.current;
-    klineDragged.current = false;
-  };
-  const handleKlinePointerMove = (
-    event: React.PointerEvent<SVGSVGElement>,
-  ) => {
-    if (klineActivePointers.current.has(event.pointerId))
-      klineActivePointers.current.set(event.pointerId, event.clientX);
-    if (
-      klineActivePointers.current.size >= 2 &&
-      klinePinchDistance.current !== null
-    ) {
-      const xs = [...klineActivePointers.current.values()];
-      applyKlineZoom(
-        Math.min(
-          145,
-          Math.max(
-            9,
-            Math.round(
-              (klinePinchCount.current * klinePinchDistance.current) /
-                Math.max(1, Math.abs(xs[1] - xs[0])),
-            ),
-          ),
-        ),
-        klinePinchAnchor.current,
-      );
-      return;
-    }
-    moveKline(event.clientX);
-  };
-  const handleKlinePointerUp = (
-    event: React.PointerEvent<SVGSVGElement>,
-  ) => {
-    if (klineDragFrame.current !== null)
-      window.cancelAnimationFrame(klineDragFrame.current);
-    klineDragFrame.current = null;
-    klinePointerX.current = null;
-    klineActivePointers.current.delete(event.pointerId);
-    if (klineActivePointers.current.size < 2)
-      klinePinchDistance.current = null;
-    klineDragStart.current = null;
-    if (event.currentTarget.hasPointerCapture(event.pointerId))
-      event.currentTarget.releasePointerCapture(event.pointerId);
-  };
-  useEffect(() => {
-    const svg = klineChartRef.current;
-    if (!svg) return;
-    let startScale = 1;
-    const start = (event: Event) => {
-      startScale = (event as Event & { scale?: number }).scale || 1;
-      klinePinchCount.current = klineVisibleCountRef.current;
-      event.preventDefault();
-    };
-    const change = (event: Event) => {
-      const scale = (event as Event & { scale?: number }).scale || 1;
-      applyKlineZoom(
-        Math.min(
-          145,
-          Math.max(9, Math.round(klinePinchCount.current / (scale / startScale))),
-        ),
-        0.5,
-      );
-      event.preventDefault();
-    };
-    svg.addEventListener("gesturestart", start, { passive: false });
-    svg.addEventListener("gesturechange", change, { passive: false });
-    return () => {
-      svg.removeEventListener("gesturestart", start);
-      svg.removeEventListener("gesturechange", change);
-    };
-  }, [allCandles.length]);
+  const klineNavigation = useChartNavigation({
+    times: candleTimes,
+    visibleCount: klineVisibleCount,
+    setVisibleCount: setKlineVisibleCount,
+    historyOffset: klineOffset,
+    setHistoryOffset: setKlineOffset,
+    step,
+    minPoints: 9,
+    maxPoints: 145,
+    warmupPoints: 99,
+    storageKey: "crypto-agent-kline-visible-points",
+    onLoadOlder: loadOlderKlines,
+    onDrag: () => setSelectedIndex(null),
+  });
   const contextDepth = (levels: string[][]) =>
     levels
       .slice(0, 20)
@@ -2703,17 +2539,20 @@ function CoinMWorkspace({
         {candles.length ? (
           <div className="coinm-chart-canvas">
             <svg
-              ref={klineChartRef}
+              ref={klineNavigation.chartRef}
               viewBox={`0 0 ${width} ${height}`}
               preserveAspectRatio="none"
               role="img"
               aria-label="BTCUSD coin-m candlestick chart"
               onClick={selectCandle}
-              onWheel={zoomKline}
-              onPointerDown={handleKlinePointerDown}
-              onPointerMove={handleKlinePointerMove}
-              onPointerUp={handleKlinePointerUp}
-              onPointerCancel={handleKlinePointerUp}
+              onPointerDown={klineNavigation.handlePointerDown}
+              onPointerMove={klineNavigation.handlePointerMove}
+              onPointerUp={klineNavigation.handlePointerUp}
+              onPointerCancel={klineNavigation.handlePointerUp}
+              onTouchStart={klineNavigation.handleTouchStart}
+              onTouchMove={klineNavigation.handleTouchMove}
+              onTouchEnd={klineNavigation.handleTouchEnd}
+              onTouchCancel={klineNavigation.handleTouchEnd}
             >
               <g className="chart-grid">
                 {[0, 1, 2, 3, 4, 5].map((line) => (
