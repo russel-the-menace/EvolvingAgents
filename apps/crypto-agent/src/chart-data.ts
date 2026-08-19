@@ -64,7 +64,7 @@ export function updateKlinePrice(rows: KlineRow[], price: number) {
 
 export function fillSecondRows(rows: KlineRow[], limit = 240) {
   const filled: KlineRow[] = [];
-  for (const row of rows) {
+  for (let row of rows) {
     const time = Number(row[0]);
     const previous = filled.at(-1);
     if (previous && time <= Number(previous[0])) {
@@ -75,6 +75,14 @@ export function fillSecondRows(rows: KlineRow[], limit = 240) {
       const close = Number(previous[4]);
       for (let missing = Number(previous[0]) + 1_000; missing < time; missing += 1_000)
         filled.push([missing, close, close, close, close, 0, missing + 999, 0]);
+      row = [
+        row[0],
+        close,
+        Math.max(close, Number(row[2])),
+        Math.min(close, Number(row[3])),
+        row[4],
+        ...row.slice(5),
+      ];
     }
     filled.push(row);
   }
@@ -85,8 +93,10 @@ export function mergeTradeIntoSecondRows(current: KlineRow[], timestamp: number,
   const time = Math.floor(timestamp / 1_000) * 1_000;
   const last = current.at(-1);
   if (last && Number(last[0]) > time) return current;
-  if (!last || Number(last[0]) !== time)
-    return fillSecondRows([...current, [time, price, price, price, price, quantity, time + 999, price * quantity]], limit);
+  if (!last || Number(last[0]) !== time) {
+    const open = last ? Number(last[4]) : price;
+    return fillSecondRows([...current, [time, open, Math.max(open, price), Math.min(open, price), price, quantity, time + 999, price * quantity]], limit);
+  }
   const next = [...current];
   next[next.length - 1] = [time, last[1], Math.max(Number(last[2]), price), Math.min(Number(last[3]), price), price, Number(last[5]) + quantity, time + 999, Number(last[7]) + price * quantity];
   return next;

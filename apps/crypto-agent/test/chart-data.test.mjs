@@ -19,7 +19,7 @@ test('aggregates trades into bounded one-second OHLCV rows', () => {
   let rows = mergeTradeIntoSecondRows([], 1_100, 100, 2);
   rows = mergeTradeIntoSecondRows(rows, 1_900, 105, 3);
   rows = mergeTradeIntoSecondRows(rows, 2_100, 103, 1);
-  assert.deepEqual(rows, [[1_000, 100, 105, 100, 105, 5, 1_999, 515], [2_000, 103, 103, 103, 103, 1, 2_999, 103]]);
+  assert.deepEqual(rows, [[1_000, 100, 105, 100, 105, 5, 1_999, 515], [2_000, 105, 105, 103, 103, 1, 2_999, 103]]);
   assert.equal(mergeTradeIntoSecondRows(rows, 900, 99, 1), rows);
 });
 
@@ -30,6 +30,7 @@ test('fills quiet seconds with the previous close', () => {
   ]);
   assert.deepEqual(rows.map((row) => row[0]), [1_000, 2_000, 3_000, 4_000]);
   assert.deepEqual(rows[1], [2_000, 100, 100, 100, 100, 0, 2_999, 0]);
+  assert.deepEqual(rows[3], [4_000, 100, 104, 100, 103, 1, 4_999, 103]);
   assert.deepEqual(fillSecondRows(rows, 2).map((row) => row[0]), [3_000, 4_000]);
 });
 

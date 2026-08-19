@@ -2603,7 +2603,6 @@ function CoinMWorkspace({
                     className={rising ? "candle-up" : "candle-down"}
                     key={item.time}
                   >
-                    <line x1={x} x2={x} y1={y(item.high)} y2={y(item.low)} />
                     <rect
                       x={x - step / 2}
                       y={Math.min(y(item.open), y(item.close))}
@@ -2613,6 +2612,7 @@ function CoinMWorkspace({
                         Math.abs(y(item.open) - y(item.close)),
                       )}
                     />
+                    <line x1={x} x2={x} y1={y(item.high)} y2={y(item.low)} />
                   </g>
                 );
               })}
