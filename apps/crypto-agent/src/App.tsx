@@ -1282,6 +1282,7 @@ function TimeShareChart({
   const width = 900;
   const height = 330;
   const pad = 20;
+  const plotRight = width - 100;
   const visibleEnd = Math.max(0, candles.length - 1 - historyOffset);
   const start = Math.max(0, visibleEnd - visibleCount + 1);
   const visibleCandles = candles.slice(start, visibleEnd + 1);
@@ -1292,7 +1293,7 @@ function TimeShareChart({
     ? Math.max(...visibleCandles.map((item) => item.high))
     : 1;
   const range = high - low || 1;
-  const step = (width - pad * 2) / Math.max(visibleCandles.length, 1);
+  const step = (plotRight - pad) / Math.max(visibleCandles.length, 1);
   const navigation = useChartNavigation({
     times: candleTimes,
     visibleCount,
@@ -1409,7 +1410,7 @@ function TimeShareChart({
               <line
                 key={line}
                 x1={pad}
-                x2={width - pad}
+                x2={width}
                 y1={pad + (line * (height - pad * 2)) / 5}
                 y2={pad + (line * (height - pad * 2)) / 5}
               />
@@ -1440,7 +1441,7 @@ function TimeShareChart({
                   />
                   <line
                     x1={pad}
-                    x2={width - pad}
+                    x2={width}
                     y1={y(selected.close)}
                     y2={y(selected.close)}
                   />
@@ -1462,7 +1463,12 @@ function TimeShareChart({
         </svg>
         <div className="coinm-axis">
           {axisPoints.map((line) => (
-            <span key={line} style={{ top: `${line * 20}%` }}>
+            <span
+              key={line}
+              style={{
+                top: `${((pad + (line * (height - pad * 2)) / 5) / height) * 100}%`,
+              }}
+            >
               {(high - (line * range) / 5).toLocaleString(undefined, {
                 minimumFractionDigits: 1,
                 maximumFractionDigits: 1,
@@ -2032,6 +2038,7 @@ function CoinMWorkspace({
   const width = 900;
   const height = 330;
   const pad = 20;
+  const plotRight = width - 100;
   const currentMarketPrice =
     market?.symbol === marketSymbol
       ? Number(market.premium.markPrice || candles.at(-1)?.close || 0)
@@ -2047,7 +2054,7 @@ function CoinMWorkspace({
     ? Math.max(...candles.map((item) => item.high), livePrice || -Infinity)
     : 1;
   const range = high - low || 1;
-  const step = (width - pad * 2) / Math.max(candles.length, 1);
+  const step = (plotRight - pad) / Math.max(candles.length, 1);
   const y = (price: number) =>
     pad + ((high - price) / range) * (height - pad * 2);
   const maValues = (period: number) =>
@@ -2589,7 +2596,7 @@ function CoinMWorkspace({
                   <line
                     key={line}
                     x1={pad}
-                    x2={width - pad}
+                    x2={width}
                     y1={pad + (line * (height - pad * 2)) / 5}
                     y2={pad + (line * (height - pad * 2)) / 5}
                   />
@@ -2641,7 +2648,7 @@ function CoinMWorkspace({
                 <line
                   className="current-price-guide"
                   x1={pad}
-                  x2={width - pad}
+                  x2={width}
                   y1={y(last)}
                   y2={y(last)}
                 />
@@ -2656,7 +2663,7 @@ function CoinMWorkspace({
                   />
                   <line
                     x1={pad}
-                    x2={width - pad}
+                    x2={width}
                     y1={y(selected.close)}
                     y2={y(selected.close)}
                   />
@@ -2670,7 +2677,12 @@ function CoinMWorkspace({
             </svg>
             <div className="coinm-axis">
               {axisValues.map((value, index) => (
-                <span key={index} style={{ top: `${index * 20}%` }}>
+                <span
+                  key={index}
+                  style={{
+                    top: `${((pad + (index * (height - pad * 2)) / 5) / height) * 100}%`,
+                  }}
+                >
                   {value.toLocaleString(undefined, {
                     maximumFractionDigits: 1,
                   })}
