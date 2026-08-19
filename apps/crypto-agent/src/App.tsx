@@ -1797,18 +1797,20 @@ function CoinMWorkspace({
         });
     void load();
     const timer = window.setInterval(load, 60_000);
+    const loadSeconds = () =>
+      api<CoinMMarket>(`/${marketType}-1s?symbol=${marketSymbol}`)
+        .then((result) => {
+          if (!active) return;
+          pendingSecondRows.current = mergeKlineRows(
+            pendingSecondRows.current,
+            result.klines,
+          );
+          setSecondRows(pendingSecondRows.current);
+        })
+        .catch(() => {});
+    if (interval === "1s") void loadSeconds();
     const secondTimer =
-      interval === "1s" && marketType === "usdm"
-        ? window.setInterval(() => {
-            void api<CoinMMarket>(`/usdm-1s?symbol=${marketSymbol}`)
-              .then((result) => {
-                if (!active) return;
-                pendingSecondRows.current = result.klines.map((row) => row);
-                setSecondRows(pendingSecondRows.current);
-              })
-              .catch(() => {});
-          }, 1_000)
-        : null;
+      interval === "1s" ? window.setInterval(loadSeconds, 1_000) : null;
     let fallbackStarted = false;
     let directSockets: WebSocket[] = [];
     const connectDirect = () => {
@@ -1908,7 +1910,7 @@ function CoinMWorkspace({
     const serverStream =
       marketType === "coinm"
         ? new EventSource(
-            `/api/coinm-stream?interval=${interval === "time" ? "1m" : interval}`,
+            `/api/coinm-stream?interval=${interval === "time" || interval === "1s" ? "1m" : interval}`,
           )
         : null;
     if (serverStream) {
@@ -1982,14 +1984,7 @@ function CoinMWorkspace({
         marketCache.current.set(marketCacheKey, latestMarket.current);
     };
   }, [interval, marketType, marketCacheKey]);
-  const chartRows =
-    interval === "1s"
-      ? marketType === "coinm"
-        ? market?.interval === "1s"
-          ? market.klines
-          : []
-        : secondRows
-      : market?.klines || [];
+  const chartRows = interval === "1s" ? secondRows : market?.klines || [];
   const allCandles = [
     ...new Map(
       chartRows.map((item) => [
@@ -2200,13 +2195,30 @@ function CoinMWorkspace({
     const before = allCandles[0]?.time;
     if (
       !before ||
-      interval === "1s" ||
       interval === "time" ||
       loadingOlder.current ||
       oldestReached.current
     )
       return Promise.resolve();
     loadingOlder.current = true;
+    if (interval === "1s")
+      return api<CoinMMarket>(
+        `/${marketType}-1s?symbol=${marketSymbol}&endTime=${before - 1}`,
+      )
+        .then((result) => {
+          const older = result.klines.filter((row) => Number(row[0]) < before);
+          oldestReached.current = older.length === 0;
+          if (!older.length) return;
+          pendingSecondRows.current = mergeKlineRows(
+            pendingSecondRows.current,
+            older,
+          );
+          setSecondRows(pendingSecondRows.current);
+        })
+        .catch(() => setError("历史 1 秒 K 线暂时不可用"))
+        .finally(() => {
+          loadingOlder.current = false;
+        });
     return api<CoinMMarket>(
       `/${marketPath}?symbol=${marketSymbol}&interval=${interval}&endTime=${before - 1}`,
     )
