@@ -103,8 +103,7 @@ test('historical crossing and private trades are compiled with a chart image', a
       historyRequested = true;
       return new Response(JSON.stringify({ klines: [{ time: 1, close: 64990 }, { time: 2, close: 65010 }] }), { status: 200 });
     }
-    if (path === '/fapi/v1/time') return new Response(JSON.stringify({ serverTime: Date.now() }), { status: 200 });
-    if (path === '/fapi/v1/userTrades') { tradesRequested = true; return new Response(JSON.stringify([{ id: 1, price: '65000', qty: '.1', commission: '1', realizedPnl: '5', time: 2 }]), { status: 200 }); }
+    if (value.includes('/v1/account/trades')) { tradesRequested = true; return new Response(JSON.stringify({ rows: [{ product: 'usdm', symbol: 'BTCUSDT', id: 1, price: 65000, qty: .1, commission: 1, realizedPnl: 5, time: 2 }] }), { status: 200 }); }
     if (path === '/v1/chat/completions') { gatewayRequest = JSON.parse(options.body); return new Response(JSON.stringify({ choices: [{ message: { content: '联合分析' } }] }), { status: 200 }); }
     return new Response('{}', { status: 200 });
   };

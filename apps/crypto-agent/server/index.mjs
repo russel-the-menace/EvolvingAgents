@@ -224,10 +224,18 @@ async function remoteMarketHistory(startTime, endTime) {
   return (await response.json()).klines || [];
 }
 
+async function remoteAccountTrades({ product = '', symbol = '', startTime = Date.now() - 7 * 24 * 60 * 60_000, endTime = Date.now(), limit = 500 } = {}) {
+  if (!marketDataBase || !marketDataKey) return [];
+  const query = new URLSearchParams({ limit: String(limit), startTime: String(startTime), endTime: String(endTime), ...(product ? { product } : {}), ...(symbol ? { symbol } : {}) });
+  const response = await fetch(`${marketDataBase}/v1/account/trades?${query}`, { headers: { Authorization: `Bearer ${marketDataKey}` }, signal: AbortSignal.timeout(10_000) });
+  if (!response.ok) return [];
+  return (await response.json()).rows || [];
+}
+
 async function tradeContext(message) {
-  if (!/(交易历史|历史交易|我的交易|成交记录|交易记录|盈亏|胜率)/u.test(String(message || '')) || !configured) return null;
+  if (!/(交易历史|历史交易|我的交易|成交记录|交易记录|盈亏|胜率)/u.test(String(message || ''))) return null;
   try {
-    const rows = await futures.userTrades('BTCUSDT', 100);
+    const rows = await remoteAccountTrades({ limit: 1000 });
     const pnl = rows.reduce((sum, row) => sum + Number(row.realizedPnl || 0), 0);
     const commission = rows.reduce((sum, row) => sum + Number(row.commission || 0), 0);
     const cutoff = Date.now() - 7 * 24 * 60 * 60_000;
@@ -235,7 +243,8 @@ async function tradeContext(message) {
     const candles = recent.length ? await remoteMarketHistory(Math.min(...recent.map((row) => Number(row.time))) - 30 * 60_000, Math.max(...recent.map((row) => Number(row.time))) + 30 * 60_000) : [];
     const byMinute = new Map(candles.map((row) => [Math.floor(row.time / 60_000), row]));
     const trades = rows.map((row) => ({ ...row, marketAtTrade: byMinute.get(Math.floor(Number(row.time) / 60_000)) || null }));
-    return { product: 'USD-M Futures', symbol: 'BTCUSDT', marketProxy: 'Binance COIN-M BTCUSD_PERP 1m', count: rows.length, realizedPnl: pnl, commission, trades };
+    const products = Object.fromEntries(['spot', 'margin', 'usdm'].map((product) => [product, rows.filter((row) => row.product === product).length]));
+    return { products, marketProxy: 'Binance COIN-M BTCUSD_PERP 1m', count: rows.length, realizedPnl: pnl, commission, trades };
   } catch { return null; }
 }
 
@@ -443,10 +452,18 @@ export function createCryptoServer() {
         return sendJson(response, 200, await usdMMarket(symbol, interval, endTime ? Number(endTime) : undefined));
       }
       if (request.method === 'GET' && request.url?.startsWith('/api/usdm-history?')) {
-        if (!configured) return sendJson(response, 200, { rows: [] });
         const symbol = new URL(request.url, 'http://localhost').searchParams.get('symbol')?.toUpperCase() || 'BTCUSDT';
         if (symbol !== 'BTCUSDT') return sendJson(response, 400, { error: 'Only BTCUSDT is available in this first USD-M view.' });
-        try { return sendJson(response, 200, { rows: await futures.userTrades(symbol, 50) }); } catch { return sendJson(response, 200, { rows: [] }); }
+        try { return sendJson(response, 200, { rows: await remoteAccountTrades({ product: 'usdm', symbol, limit: 50 }) }); } catch { return sendJson(response, 200, { rows: [] }); }
+      }
+      if (request.method === 'GET' && request.url?.startsWith('/api/trades')) {
+        const query = new URL(request.url, 'http://localhost').searchParams;
+        const product = query.get('product') || ''; const symbol = query.get('symbol')?.toUpperCase() || '';
+        if (product && !['spot', 'margin', 'usdm'].includes(product)) return sendJson(response, 400, { error: 'Product is not allowed.' });
+        const limit = Math.min(1000, Math.max(1, Number(query.get('limit') || 500)));
+        const startTime = Number(query.get('startTime') || Date.now() - 7 * 24 * 60 * 60_000); const endTime = Number(query.get('endTime') || Date.now());
+        if (![limit, startTime, endTime].every(Number.isFinite) || startTime < 0 || endTime <= startTime) return sendJson(response, 400, { error: 'Trade query is not valid.' });
+        return sendJson(response, 200, { rows: await remoteAccountTrades({ product, symbol, startTime, endTime, limit }) });
       }
       if (request.method === 'GET' && request.url?.startsWith('/api/usdm-1s?')) {
         const query = new URL(request.url, 'http://localhost').searchParams;
