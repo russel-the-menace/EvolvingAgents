@@ -46,6 +46,7 @@ import {
   klineWindow,
   mergeKlineRows,
   mergeTradeIntoSecondRows,
+  nearHistoryStart,
   zoomWindowOffset,
   type KlineRow,
 } from "./chart-data";
@@ -1203,7 +1204,7 @@ function TimeShareChart({
       setHistoryOffset(nextOffset);
       if (
         delta > step &&
-        nextOffset >= Math.max(0, maximum - visibleCount) &&
+        nearHistoryStart(candles.length, nextOffset, visibleCount) &&
         candles.length &&
         !prefetchRequested.current
       ) {
@@ -1706,6 +1707,12 @@ function CoinMWorkspace({
   const klinePointerX = useRef<number | null>(null);
   const klineDragFrame = useRef<number | null>(null);
   const klineDragged = useRef(false);
+  const klineChartRef = useRef<SVGSVGElement | null>(null);
+  const klineActivePointers = useRef(new Map<number, number>());
+  const klinePinchDistance = useRef<number | null>(null);
+  const klinePinchCount = useRef(klineVisibleCount);
+  const klinePinchAnchor = useRef(0.5);
+  const klinePrefetchRequested = useRef(false);
   const previousKlineLength = useRef(0);
   const loadingOlder = useRef(false);
   const oldestReached = useRef(false);
@@ -2029,6 +2036,7 @@ function CoinMWorkspace({
       setKlineOffset(klineOffsetValue.current);
       if (klineDragStart.current !== null) klineDragAnchor.current += added;
     }
+    if (added > 0) klinePrefetchRequested.current = false;
     previousKlineLength.current = allCandles.length;
   }, [allCandles.length]);
   const candles = klineWindow(allCandles, klineOffset, klineVisibleCount);
@@ -2172,36 +2180,15 @@ function CoinMWorkspace({
   const change = first ? ((last - first) / first) * 100 : 0;
   const selected = selectedIndex === null ? null : candles[selectedIndex];
   const axisValues = [0, 1, 2, 3, 4, 5].map((line) => high - (line * range) / 5);
-  const zoomKline = (event: React.WheelEvent<SVGSVGElement>) => {
-    if (!event.ctrlKey && !event.metaKey) return;
-    event.preventDefault();
-    klineWheelRemainder.current += event.deltaY / 36;
-    const steps = Math.trunc(klineWheelRemainder.current);
-    if (!steps) return;
-    klineWheelRemainder.current -= steps;
+  const applyKlineZoom = (next: number, anchor: number) => {
     const current = klineVisibleCountRef.current;
-    const next = Math.min(145, Math.max(9, current + steps));
     if (next === current) return;
-    const bounds = event.currentTarget.getBoundingClientRect();
-    const anchor = Math.min(
-      1,
-      Math.max(0, (event.clientX - bounds.left) / bounds.width),
-    );
-    const oldEnd =
-      allCandles.length -
-      1 -
-      Math.min(
-        Math.max(0, allCandles.length - current),
-        Math.max(0, klineOffset),
-      );
-    const oldStart = Math.max(0, oldEnd - current + 1);
-    const anchorIndex = oldStart + anchor * Math.max(0, current - 1);
-    const nextEnd = Math.round(
-      anchorIndex + (1 - anchor) * Math.max(0, next - 1),
-    );
-    const nextOffset = Math.min(
-      Math.max(0, allCandles.length - next),
-      Math.max(0, allCandles.length - 1 - nextEnd),
+    const nextOffset = zoomWindowOffset(
+      allCandles.length,
+      klineOffsetValue.current,
+      current,
+      next,
+      anchor,
     );
     klineVisibleCountRef.current = next;
     setKlineVisibleCount(next);
@@ -2210,6 +2197,19 @@ function CoinMWorkspace({
     window.localStorage.setItem(
       "crypto-agent-kline-visible-points",
       String(next),
+    );
+  };
+  const zoomKline = (event: React.WheelEvent<SVGSVGElement>) => {
+    if (!event.ctrlKey && !event.metaKey) return;
+    event.preventDefault();
+    klineWheelRemainder.current += event.deltaY / 36;
+    const steps = Math.trunc(klineWheelRemainder.current);
+    if (!steps) return;
+    klineWheelRemainder.current -= steps;
+    const bounds = event.currentTarget.getBoundingClientRect();
+    applyKlineZoom(
+      Math.min(145, Math.max(9, klineVisibleCountRef.current + steps)),
+      Math.min(1, Math.max(0, (event.clientX - bounds.left) / bounds.width)),
     );
   };
   const selectCandle = (event: React.MouseEvent<SVGSVGElement>) => {
@@ -2282,70 +2282,132 @@ function CoinMWorkspace({
       .catch(() => setError("历史 K 线暂时不可用"))
       .finally(() => {
         loadingOlder.current = false;
+        klinePrefetchRequested.current = false;
       });
   };
-  useEffect(() => {
-    const down = (event: PointerEvent) => {
-      if (
-        !(event.target as Element).closest?.(
-          'svg[aria-label="BTCUSD coin-m candlestick chart"]',
-        )
-      )
-        return;
-      klineDragStart.current = event.clientX;
-      klineDragAnchor.current = klineOffsetValue.current;
-      klineDragged.current = false;
-    };
-    const move = (event: PointerEvent) => {
-      if (klineDragStart.current === null) return;
-      klinePointerX.current = event.clientX;
-      if (klineDragFrame.current !== null) return;
-      klineDragFrame.current = window.requestAnimationFrame(() => {
-        klineDragFrame.current = null;
-        if (klineDragStart.current === null || klinePointerX.current === null)
-          return;
-        const delta = klinePointerX.current - klineDragStart.current;
-        if (Math.abs(delta) > 3) {
-          klineDragged.current = true;
-          setSelectedIndex(null);
-        }
-        const maximum = Math.max(
-          0,
-          allCandles.length - klineVisibleCountRef.current,
-        );
-        const nextOffset = Math.max(
-          0,
-          Math.min(
-            maximum,
-            klineDragAnchor.current + Math.round(delta / Math.max(step, 1)),
-          ),
-        );
-        klineOffsetValue.current = nextOffset;
-        setKlineOffset(nextOffset);
-        if (
-          delta > step &&
-          nextOffset >= Math.max(0, maximum - klineVisibleCountRef.current) &&
-          allCandles.length
-        )
-          loadOlderKlines();
-      });
-    };
-    const up = () => {
-      if (klineDragFrame.current !== null)
-        window.cancelAnimationFrame(klineDragFrame.current);
+  const moveKline = (clientX: number) => {
+    klinePointerX.current = clientX;
+    if (klineDragFrame.current !== null) return;
+    klineDragFrame.current = window.requestAnimationFrame(() => {
       klineDragFrame.current = null;
-      klinePointerX.current = null;
+      if (klineDragStart.current === null || klinePointerX.current === null)
+        return;
+      const delta = klinePointerX.current - klineDragStart.current;
+      if (Math.abs(delta) > 3) {
+        klineDragged.current = true;
+        setSelectedIndex(null);
+      }
+      const count = klineVisibleCountRef.current;
+      const maximum = Math.max(0, allCandles.length - count);
+      const nextOffset = Math.max(
+        0,
+        Math.min(
+          maximum,
+          klineDragAnchor.current + Math.round(delta / Math.max(step, 1)),
+        ),
+      );
+      klineOffsetValue.current = nextOffset;
+      setKlineOffset(nextOffset);
+      if (
+        delta > step &&
+        nearHistoryStart(allCandles.length, nextOffset, count, 99) &&
+        allCandles.length &&
+        !klinePrefetchRequested.current
+      ) {
+        klinePrefetchRequested.current = true;
+        loadOlderKlines();
+      }
+    });
+  };
+  const handleKlinePointerDown = (
+    event: React.PointerEvent<SVGSVGElement>,
+  ) => {
+    klineActivePointers.current.set(event.pointerId, event.clientX);
+    event.currentTarget.setPointerCapture(event.pointerId);
+    if (klineActivePointers.current.size >= 2) {
+      const xs = [...klineActivePointers.current.values()];
+      klinePinchDistance.current = Math.abs(xs[1] - xs[0]) || 1;
+      klinePinchCount.current = klineVisibleCountRef.current;
+      const bounds = event.currentTarget.getBoundingClientRect();
+      klinePinchAnchor.current = Math.min(
+        1,
+        Math.max(0, ((xs[0] + xs[1]) / 2 - bounds.left) / bounds.width),
+      );
       klineDragStart.current = null;
+      return;
+    }
+    klineDragStart.current = event.clientX;
+    klineDragAnchor.current = klineOffsetValue.current;
+    klineDragged.current = false;
+  };
+  const handleKlinePointerMove = (
+    event: React.PointerEvent<SVGSVGElement>,
+  ) => {
+    if (klineActivePointers.current.has(event.pointerId))
+      klineActivePointers.current.set(event.pointerId, event.clientX);
+    if (
+      klineActivePointers.current.size >= 2 &&
+      klinePinchDistance.current !== null
+    ) {
+      const xs = [...klineActivePointers.current.values()];
+      applyKlineZoom(
+        Math.min(
+          145,
+          Math.max(
+            9,
+            Math.round(
+              (klinePinchCount.current * klinePinchDistance.current) /
+                Math.max(1, Math.abs(xs[1] - xs[0])),
+            ),
+          ),
+        ),
+        klinePinchAnchor.current,
+      );
+      return;
+    }
+    moveKline(event.clientX);
+  };
+  const handleKlinePointerUp = (
+    event: React.PointerEvent<SVGSVGElement>,
+  ) => {
+    if (klineDragFrame.current !== null)
+      window.cancelAnimationFrame(klineDragFrame.current);
+    klineDragFrame.current = null;
+    klinePointerX.current = null;
+    klineActivePointers.current.delete(event.pointerId);
+    if (klineActivePointers.current.size < 2)
+      klinePinchDistance.current = null;
+    klineDragStart.current = null;
+    if (event.currentTarget.hasPointerCapture(event.pointerId))
+      event.currentTarget.releasePointerCapture(event.pointerId);
+  };
+  useEffect(() => {
+    const svg = klineChartRef.current;
+    if (!svg) return;
+    let startScale = 1;
+    const start = (event: Event) => {
+      startScale = (event as Event & { scale?: number }).scale || 1;
+      klinePinchCount.current = klineVisibleCountRef.current;
+      event.preventDefault();
     };
-    document.addEventListener("pointerdown", down);
-    window.addEventListener("pointermove", move);
-    window.addEventListener("pointerup", up);
+    const change = (event: Event) => {
+      const scale = (event as Event & { scale?: number }).scale || 1;
+      applyKlineZoom(
+        Math.min(
+          145,
+          Math.max(9, Math.round(klinePinchCount.current / (scale / startScale))),
+        ),
+        0.5,
+      );
+      event.preventDefault();
+    };
+    svg.addEventListener("gesturestart", start, { passive: false });
+    svg.addEventListener("gesturechange", change, { passive: false });
     return () => {
-      document.removeEventListener("pointerdown", down);
-      window.removeEventListener("pointermove", move);
-      window.removeEventListener("pointerup", up);
+      svg.removeEventListener("gesturestart", start);
+      svg.removeEventListener("gesturechange", change);
     };
-  }, [interval, marketType, allCandles.length, step]);
+  }, [allCandles.length]);
   const contextDepth = (levels: string[][]) =>
     levels
       .slice(0, 20)
@@ -2641,12 +2703,17 @@ function CoinMWorkspace({
         {candles.length ? (
           <div className="coinm-chart-canvas">
             <svg
+              ref={klineChartRef}
               viewBox={`0 0 ${width} ${height}`}
               preserveAspectRatio="none"
               role="img"
               aria-label="BTCUSD coin-m candlestick chart"
               onClick={selectCandle}
               onWheel={zoomKline}
+              onPointerDown={handleKlinePointerDown}
+              onPointerMove={handleKlinePointerMove}
+              onPointerUp={handleKlinePointerUp}
+              onPointerCancel={handleKlinePointerUp}
             >
               <g className="chart-grid">
                 {[0, 1, 2, 3, 4, 5].map((line) => (

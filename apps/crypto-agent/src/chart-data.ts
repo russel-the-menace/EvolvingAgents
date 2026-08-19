@@ -29,6 +29,10 @@ export function zoomWindowOffset(total: number, offset: number, oldCount: number
   return Math.min(Math.max(0, total - nextVisible), Math.max(0, total - 1 - nextEnd));
 }
 
+export function nearHistoryStart(total: number, offset: number, visible: number, warmup = visible) {
+  return offset >= Math.max(0, total - visible - Math.max(visible, warmup));
+}
+
 export function mergeKlineRows(current: KlineRow[], incoming: KlineRow[]) {
   // ponytail: History stays in memory; move pages to IndexedDB if multi-year minute browsing becomes a normal workflow.
   if (!current.length) return [...incoming].sort((a, b) => Number(a[0]) - Number(b[0]));

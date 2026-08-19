@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { anchoredTickIndices, appendedPointCount, klineWindow, mergeKlineRows, mergeTradeIntoSecondRows, zoomWindowOffset } from '../src/chart-data.ts';
+import { anchoredTickIndices, appendedPointCount, klineWindow, mergeKlineRows, mergeTradeIntoSecondRows, nearHistoryStart, zoomWindowOffset } from '../src/chart-data.ts';
 
 test('merges older pages and live candles without sorting or duplicates', () => {
   const current = [[3, 'old-3'], [4, 'old-4']];
@@ -39,4 +39,10 @@ test('zooms around the gesture center without crossing history bounds', () => {
   assert.equal(zoomWindowOffset(240, 60, 120, 60), 90);
   assert.equal(zoomWindowOffset(240, 0, 120, 145), 0);
   assert.equal(zoomWindowOffset(240, 120, 120, 145), 95);
+});
+
+test('prefetches enough history to keep long moving averages continuous', () => {
+  assert.equal(nearHistoryStart(240, 20, 20, 99), false);
+  assert.equal(nearHistoryStart(240, 121, 20, 99), true);
+  assert.equal(nearHistoryStart(240, 100, 120), true);
 });
