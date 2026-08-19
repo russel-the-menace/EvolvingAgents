@@ -1224,10 +1224,10 @@ function useChartNavigation({
         zoomSaveTimer.current = window.setTimeout(saveZoom, 180);
         return;
       }
-      const horizontal = event.deltaX || (event.shiftKey ? event.deltaY : 0);
-      if (!horizontal) return;
+      if (!event.deltaX || Math.abs(event.deltaX) <= Math.abs(event.deltaY))
+        return;
       event.preventDefault();
-      wheelPan += horizontal;
+      wheelPan -= event.deltaX;
       const chartStep = Math.max(stepRef.current, 1);
       const appliedSteps = Math.trunc(wheelPan / chartStep);
       if (!appliedSteps) return;
