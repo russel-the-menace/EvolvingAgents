@@ -5,8 +5,6 @@ import { parseModelJson } from '@evolving-agents/learning-engine';
 import { BinanceApiError, createBinanceMarginClient, createBinanceSpotClient, createBinanceUsdMClient } from '../src/binance.mjs';
 import { auditBinancePermissions } from '../src/permissions.mjs';
 import { fallbackIntent, inferProduct, multiProductTradePrompt, normalizeOrderIntent, tradePrompt, validateOrder } from '../src/trading.mjs';
-import { NewsService } from '../src/news.mjs';
-import { MarketEventService } from '../src/market.mjs';
 import { EmergencyPolicy } from '../src/emergency-policy.mjs';
 import { analysisMessages, isTradeCommand, validImageDataUrl } from './market-context.mjs';
 import { requestedOrderBookRange } from './order-book-context.mjs';
@@ -19,10 +17,10 @@ const allowedSymbols = symbolConfig === '*' ? null : symbolConfig.split(',').map
 const maxOrderUsdt = Number(process.env.MAX_ORDER_USDT || 100);
 const configured = Boolean(process.env.BINANCE_API_KEY && process.env.BINANCE_SECRET_KEY);
 const gatewayProvider = process.env.GATEWAY_PROVIDER || 'openai';
-const gatewayBaseUrl = (process.env.GATEWAY_BASE_URL || process.env.NEWS_ARCHIVE_BASE_URL || '').replace(/\/$/, '');
-const gatewayApiKey = process.env.GATEWAY_API_KEY || process.env.NEWS_ARCHIVE_API_KEY || '';
-const marketDataBase = (process.env.MARKET_DATA_BASE_URL || process.env.GATEWAY_BASE_URL || process.env.NEWS_ARCHIVE_BASE_URL || '').replace(/\/$/, '');
-const marketDataKey = process.env.MARKET_DATA_API_KEY || process.env.GATEWAY_API_KEY || process.env.NEWS_ARCHIVE_API_KEY || '';
+const gatewayBaseUrl = (process.env.GATEWAY_BASE_URL || '').replace(/\/$/, '');
+const gatewayApiKey = process.env.GATEWAY_API_KEY || '';
+const marketDataBase = (process.env.MARKET_DATA_BASE_URL || gatewayBaseUrl).replace(/\/$/, '');
+const marketDataKey = process.env.MARKET_DATA_API_KEY || gatewayApiKey;
 const modelOptions = ['gpt-5.6-luna', 'gpt-5.6-sol', 'gpt-5.6-terra'];
 const reasoningOptions = ['low', 'medium', 'high', 'xhigh', 'max'];
 const defaultModel = modelOptions.includes(process.env.GATEWAY_MODEL) ? process.env.GATEWAY_MODEL : 'gpt-5.6-luna';
@@ -38,32 +36,7 @@ const futuresDrafts = new Map();
 const marginDrafts = new Map();
 const marginActionDrafts = new Map();
 const symbolAllowed = (symbol) => !allowedSymbols || allowedSymbols.includes(symbol);
-const news = new NewsService({ baseUrl: process.env.NEWS_ARCHIVE_BASE_URL || gatewayBaseUrl, apiKey: process.env.NEWS_ARCHIVE_API_KEY || gatewayApiKey, pollMs: 15_000 });
-const newsClients = new Set();
-const marketEvents = new MarketEventService({ baseUrl: marketDataBase, apiKey: marketDataKey, pollMs: 3_000 });
-const marketEventClients = new Set();
 const emergency = new EmergencyPolicy({ budgetFraction: Number(process.env.EMERGENCY_BUDGET_FRACTION || 0.2), grantMs: Number(process.env.EMERGENCY_GRANT_MS || 30 * 60_000), cooldownMs: Number(process.env.EMERGENCY_COOLDOWN_MS || 15 * 60_000) });
-void news.load().then(() => news.start());
-void marketEvents.load().then(() => marketEvents.start());
-news.subscribe((event) => {
-  for (const response of newsClients) response.write(`event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`);
-  if (event.type === 'breaking' && configured) void accountSnapshot().then(({ balances }) => {
-    const equity = Number(balances.find((balance) => balance.asset === 'USDT')?.free || 0);
-    if (!(equity > 0)) return;
-    const pending = emergency.trigger({ item: event.item, equity });
-    for (const response of newsClients) response.write(`event: emergency\ndata: ${JSON.stringify(pending)}\n\n`);
-  }).catch(() => {});
-});
-async function summarizeNewsDigest(items) {
-  const evidence = items.slice(0, 30).map((item, index) => `[${index + 1}] ${item.source || 'unknown'} | ${item.title}${item.summary ? ` | ${item.summary}` : ''}`).join('\n');
-  if (!gateway) return `过去两小时新增 ${items.length} 条新闻。重点：${items.slice(0, 3).map((item) => item.title).join('；')}`;
-  try {
-    return await gateway.complete([{ role: 'system', content: '你是加密市场资讯助理。只依据给出的新闻做一段不超过 180 字的中文汇总；不要预测价格、不要给交易建议、不要补充外部事实。按重要性归纳，并在每个事实后保留对应的 [编号]。' }, { role: 'user', content: evidence }], { model: defaultModel, reasoningEffort: 'low' });
-  } catch { return `过去两小时新增 ${items.length} 条新闻。重点：${items.slice(0, 3).map((item) => item.title).join('；')}`; }
-}
-const digestTimer = setInterval(async () => { const items = await news.twoHourDigest(); if (!items.length) return; const event = { type: 'digest', items, summary: await summarizeNewsDigest(items) }; for (const response of newsClients) response.write(`event: digest\ndata: ${JSON.stringify(event)}\n\n`); }, 2 * 60 * 60 * 1000);
-digestTimer.unref?.();
-marketEvents.subscribe((event) => { for (const response of marketEventClients) response.write(`event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`); });
 
 function sendJson(response, status, body) { response.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8' }); response.end(JSON.stringify(body)); }
 async function body(request, maxLength = 50_000) {
@@ -311,21 +284,7 @@ export function createCryptoServer() {
   return createServer(async (request, response) => {
     try {
       if (request.method === 'GET' && request.url === '/api/status') {
-        return sendJson(response, 200, { configured, environment, liveTradingEnabled, allowedSymbols, maxOrderUsdt, futures: { configured, maxLeverage: 125, confirmationRequired: true }, margin: { configured, confirmationRequired: true, borrowRepayEnabled: false }, news: { configured: news.configured, source: 'custom-api-gateway', pollMs: news.pollMs }, model: { provider: gatewayProvider, models: modelOptions, reasoning: reasoningOptions, defaultModel, defaultReasoning } });
-      }
-      if (request.method === 'GET' && (request.url?.startsWith('/api/news?') || request.url === '/api/news')) {
-        const query = new URL(request.url, 'http://localhost').searchParams;
-        return sendJson(response, 200, await news.history({ limit: Math.min(100, Math.max(1, Number(query.get('limit') || 30))), before: query.get('before') || '' }));
-      }
-      if (request.method === 'GET' && request.url === '/api/news/stream') {
-        response.writeHead(200, { 'Content-Type': 'text/event-stream; charset=utf-8', 'Cache-Control': 'no-cache', Connection: 'keep-alive' });
-        response.write(`event: ready\ndata: ${JSON.stringify({ items: news.recent(10) })}\n\n`); newsClients.add(response);
-        request.on('close', () => newsClients.delete(response)); return;
-      }
-      if (request.method === 'GET' && request.url === '/api/market-events/stream') {
-        response.writeHead(200, { 'Content-Type': 'text/event-stream; charset=utf-8', 'Cache-Control': 'no-cache', Connection: 'keep-alive' });
-        response.write(`event: ready\ndata: ${JSON.stringify({ items: marketEvents.recent(10) })}\n\n`); marketEventClients.add(response);
-        request.on('close', () => marketEventClients.delete(response)); return;
+        return sendJson(response, 200, { configured, environment, liveTradingEnabled, allowedSymbols, maxOrderUsdt, futures: { configured, maxLeverage: 125, confirmationRequired: true }, margin: { configured, confirmationRequired: true, borrowRepayEnabled: false }, model: { provider: gatewayProvider, models: modelOptions, reasoning: reasoningOptions, defaultModel, defaultReasoning } });
       }
       if (request.method === 'GET' && request.url === '/api/emergency/status') return sendJson(response, 200, emergency.status());
       if (request.method === 'POST' && request.url === '/api/emergency/confirm') {

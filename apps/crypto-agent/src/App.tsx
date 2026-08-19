@@ -124,17 +124,6 @@ type NewsItem = {
   publishedAt: string;
   urgency: "normal" | "breaking";
 };
-type MarketEvent = {
-  id: string;
-  observedAt: number;
-  symbol: string;
-  eventType: string;
-  severity: "normal" | "breaking";
-  direction: "up" | "down";
-  threshold: number;
-  price: number;
-  previousPrice: number;
-};
 type EmergencyState = {
   pending?: { id: string; title: string; budget: number };
   grant?: { id: string; remaining: number; expiresAt: number } | null;
@@ -299,18 +288,6 @@ function formatNumber(value: number | string) {
 function modelLabel(model: ModelId, prefix = "GPT-") {
   const family = model.replace("gpt-", "").replace("-", " ");
   return `${prefix}${family[0].toUpperCase()}${family.slice(1)}`;
-}
-
-function recentNewsWelcome(items: NewsItem[]) {
-  const text = (
-    items[0]?.summary ||
-    items[0]?.title ||
-    "市场新闻正在同步，随时可以开始对话"
-  )
-    .replace(/\s+/g, " ")
-    .trim();
-  const sentence = text.split(/(?<=[。！？.!?])\s*/)[0];
-  return sentence.length > 120 ? `${sentence.slice(0, 117)}...` : sentence;
 }
 
 function MarketPanel({ items }: { items: NewsItem[] }) {
@@ -3087,7 +3064,7 @@ export function App() {
   }, [input]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  const [news, setNews] = useState<NewsItem[]>([]);
+  const news: NewsItem[] = [];
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [leftWidth, setLeftWidth] = useState(() =>
     Math.min(
@@ -3142,126 +3119,6 @@ export function App() {
   useEffect(() => {
     activeSessionIdRef.current = activeSessionId;
   }, [activeSessionId]);
-  function appendAgentNotice(content: string, title: string) {
-    const message: Message = { id: crypto.randomUUID(), role: "assistant", content };
-    const sessionId = activeSessionIdRef.current || "market-alerts";
-    if (!activeSessionIdRef.current) {
-      activeSessionIdRef.current = sessionId;
-      setActiveSessionId(sessionId);
-    }
-    setMessages((current) => [...current, message]);
-    setSessions((existing) => {
-      const session = existing.find((item) => item.id === sessionId);
-      const nextMessages = [...(session?.messages || []), message];
-      return [
-        { id: sessionId, title: session?.title || title, messages: nextMessages, updatedAt: Date.now() },
-        ...existing.filter((item) => item.id !== sessionId),
-      ];
-    });
-  }
-  useEffect(() => {
-    let active = true;
-    const notify = (title: string, body: string) => {
-      if (window.cryptoAgent) window.cryptoAgent.notify(title, body);
-      else if (
-        typeof Notification !== "undefined" &&
-        Notification.permission === "granted"
-      )
-        new Notification(title, { body });
-    };
-    void api<{ items: NewsItem[]; nextCursor: string | null }>(
-      "/news?mode=startup&limit=30",
-    )
-      .then((result) => {
-        if (!active) return;
-        setNews(result.items);
-        if (result.items.length)
-          notify(
-            "CryptoAgent 今日新闻",
-            `${result.items.length} 条重要新闻已准备好`,
-          );
-      })
-      .catch(() => {});
-    const stream = new EventSource("/api/news/stream");
-    const add = (event: MessageEvent<string>) => {
-      const payload = JSON.parse(event.data) as {
-        item?: NewsItem;
-        items?: NewsItem[];
-      };
-      const incoming = payload.item ? [payload.item] : payload.items || [];
-      if (!incoming.length) return;
-      setNews((current) => [
-        ...incoming,
-        ...current.filter(
-          (item) => !incoming.some((next) => next.id === item.id),
-        ),
-      ]);
-    };
-    stream.addEventListener("item", add);
-    stream.addEventListener("breaking", add);
-    stream.addEventListener("digest", (event) => {
-      add(event);
-      const payload = JSON.parse(event.data) as { items?: NewsItem[]; summary?: string };
-      if (payload.items?.length) {
-        notify("CryptoAgent 两小时新闻", `${payload.items.length} 条新新闻`);
-        appendAgentNotice(`新闻汇总：${payload.summary || `过去两小时新增 ${payload.items.length} 条新闻。`}`, "市场提醒");
-      }
-    });
-    stream.addEventListener("ready", add);
-    stream.addEventListener("emergency", (event) => {
-      const next = JSON.parse(event.data) as EmergencyState;
-      notify(
-        "CryptoAgent 紧急授权待确认",
-        next.pending?.title || "检测到爆炸性新闻",
-      );
-    });
-    const onBreaking = (event: MessageEvent<string>) => {
-      const item = (JSON.parse(event.data) as { item: NewsItem }).item;
-      notify("CryptoAgent 爆炸性新闻", item.title);
-    };
-    stream.addEventListener("breaking", onBreaking);
-    const latestTimer = window.setInterval(() => {
-      void api<{ items: NewsItem[]; nextCursor: string | null }>(
-        "/news?limit=30",
-      )
-        .then((result) => {
-          if (!active || !result.items.length) return;
-          setNews((current) => [
-            ...result.items,
-            ...current.filter(
-              (item) => !result.items.some((next) => next.id === item.id),
-            ),
-          ]);
-        })
-        .catch(() => {});
-    }, 15_000);
-    if (
-      !window.cryptoAgent &&
-      typeof Notification !== "undefined" &&
-      Notification.permission === "default"
-    )
-      void Notification.requestPermission().catch(() => {});
-    return () => {
-      active = false;
-      window.clearInterval(latestTimer);
-      stream.close();
-    };
-  }, []);
-  useEffect(() => {
-    const stream = new EventSource("/api/market-events/stream");
-    const onBreaking = (event: MessageEvent<string>) => {
-      const item = (JSON.parse(event.data) as { item: MarketEvent }).item;
-      if (!item) return;
-      const threshold = item.threshold ? `突破 ${item.threshold.toLocaleString("en-US", { maximumFractionDigits: 2 })}` : "出现异常波动";
-      const price = item.price.toLocaleString("en-US", { maximumFractionDigits: 2 });
-      const body = `${item.symbol} ${item.direction === "up" ? "向上" : "向下"}${threshold}，最新成交价 ${price}。`;
-      if (window.cryptoAgent) window.cryptoAgent.notify("CryptoAgent 市场异动", body);
-      else if (typeof Notification !== "undefined" && Notification.permission === "granted") new Notification("CryptoAgent 市场异动", { body });
-      appendAgentNotice(`市场异动：${body}`, "市场提醒");
-    };
-    stream.addEventListener("breaking", onBreaking);
-    return () => stream.close();
-  }, []);
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
     window.localStorage.setItem("crypto-agent-theme", theme);
@@ -3545,7 +3402,7 @@ export function App() {
           {!messages.length && (
             <div className="empty">
               <Bot size={32} />
-              <h1>{recentNewsWelcome(news)}</h1>
+              <h1>随时可以开始对话</h1>
             </div>
           )}
           {messages.map((message) => (
