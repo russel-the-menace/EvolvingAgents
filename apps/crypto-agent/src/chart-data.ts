@@ -5,13 +5,18 @@ export function klineWindow<T>(rows: T[], offset: number, limit = 120) {
   return rows.slice(Math.max(0, end - limit), end);
 }
 
-export function anchoredTickIndices(times: number[], start: number, end: number, anchorTime: number, spacing: number) {
-  if (!times.length || spacing <= 0 || end < start) return [];
-  const anchor = times.indexOf(anchorTime);
-  if (anchor < 0) return [];
-  const first = Math.ceil((start - anchor) / spacing);
-  const last = Math.floor((end - anchor) / spacing);
-  return Array.from({ length: last - first + 1 }, (_, index) => anchor + (first + index) * spacing);
+export function chartTickSpacing(visible: number) {
+  const target = Math.min(64, Math.max(4, (visible - 1) / 2));
+  return 2 ** Math.round(Math.log2(target));
+}
+
+export function fixedTimeTickIndices(buckets: number[], spacing: number) {
+  if (spacing <= 0) return [];
+  return buckets.flatMap((bucket, index) =>
+    Number.isInteger(bucket) && ((bucket % spacing) + spacing) % spacing === 0
+      ? [index]
+      : [],
+  );
 }
 
 export function appendedPointCount(times: number[], previousLastTime: number | null) {

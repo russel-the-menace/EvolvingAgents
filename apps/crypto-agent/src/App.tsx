@@ -45,7 +45,9 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import {
   appendedPointCount,
+  chartTickSpacing,
   fillSecondRows,
+  fixedTimeTickIndices,
   klineWindow,
   mergeKlineRows,
   mergeTradeIntoSecondRows,
@@ -242,6 +244,22 @@ const MIN_TIME_SHARE_POINTS = 9;
 const MAX_TIME_SHARE_POINTS = 145;
 const MIN_KLINE_POINTS = 9;
 const MAX_KLINE_POINTS = 129;
+const KLINE_INTERVAL_MS: Record<string, number> = {
+  "1s": 1_000,
+  "1m": 60_000,
+  "3m": 3 * 60_000,
+  "5m": 5 * 60_000,
+  "15m": 15 * 60_000,
+  "30m": 30 * 60_000,
+  "1h": 60 * 60_000,
+  "2h": 2 * 60 * 60_000,
+  "4h": 4 * 60 * 60_000,
+  "6h": 6 * 60 * 60_000,
+  "8h": 8 * 60 * 60_000,
+  "12h": 12 * 60 * 60_000,
+  "1d": 24 * 60 * 60_000,
+  "1w": 7 * 24 * 60 * 60_000,
+};
 
 declare global {
   interface Window {
@@ -1382,15 +1400,10 @@ function TimeShareChart({
     maximumFractionDigits: 1,
   });
   const axisPoints = [0, 1, 2, 3, 4, 5];
-  const axisIndices = visibleCandles.length
-    ? [
-        ...new Set([
-          0,
-          Math.floor((visibleCandles.length - 1) / 2),
-          visibleCandles.length - 1,
-        ]),
-      ]
-    : [];
+  const axisIndices = fixedTimeTickIndices(
+    visibleCandles.map((item) => Math.floor(item.time / 60_000)),
+    chartTickSpacing(visibleCount),
+  );
   const datePoints = axisIndices.map((localIndex) => ({
     time: visibleCandles[localIndex].time,
     x: pad + localIndex * step + step / 2,
@@ -2128,15 +2141,15 @@ function CoinMWorkspace({
       )
       .join(" ");
   const last = livePrice;
-  const xAxisIndices = candles.length
-    ? [
-        ...new Set(
-          Array.from({ length: 3 }, (_, index) =>
-            Math.floor(((candles.length - 1) * index) / 2),
-          ),
-        ),
-      ]
-    : [];
+  const xAxisIndices = fixedTimeTickIndices(
+    candles.map((item) => {
+      if (interval !== "1M")
+        return Math.floor(item.time / (KLINE_INTERVAL_MS[interval] || 60_000));
+      const date = new Date(item.time);
+      return date.getUTCFullYear() * 12 + date.getUTCMonth();
+    }),
+    chartTickSpacing(klineVisibleCount),
+  );
   const axisTime = (time: number) =>
     new Date(time).toLocaleString(
       "zh-CN",

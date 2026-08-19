@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { anchoredTickIndices, appendedPointCount, fillSecondRows, klineWindow, mergeKlineRows, mergeTradeIntoSecondRows, nearHistoryStart, panWindowOffset, updateKlinePrice, zoomWindowOffset } from '../src/chart-data.ts';
+import { appendedPointCount, chartTickSpacing, fillSecondRows, fixedTimeTickIndices, klineWindow, mergeKlineRows, mergeTradeIntoSecondRows, nearHistoryStart, panWindowOffset, updateKlinePrice, zoomWindowOffset } from '../src/chart-data.ts';
 
 test('merges older pages and live candles without sorting or duplicates', () => {
   const current = [[3, 'old-3'], [4, 'old-4']];
@@ -44,10 +44,11 @@ test('moves the visible K-line window left and right without crossing its bounds
   assert.equal(panWindowOffset(240, 115, 120, 20), 120);
 });
 
-test('keeps time-axis ticks anchored while the visible window moves', () => {
-  const times = [1_000, 2_000, 4_000, 5_000, 6_000, 8_000, 9_000];
-  assert.deepEqual(anchoredTickIndices(times, 1, 6, 4_000, 2), [2, 4, 6]);
-  assert.deepEqual(anchoredTickIndices([0, ...times], 0, 5, 4_000, 2), [1, 3, 5]);
+test('keeps time-axis ticks anchored to absolute time while the window moves', () => {
+  assert.equal(chartTickSpacing(9), 4);
+  assert.equal(chartTickSpacing(129), 64);
+  assert.deepEqual(fixedTimeTickIndices([1, 2, 3, 4, 5, 6, 7, 8], 4), [3, 7]);
+  assert.deepEqual(fixedTimeTickIndices([3, 4, 5, 6, 7, 8, 9], 4), [1, 5]);
 });
 
 test('distinguishes older history prepends from live appends', () => {
