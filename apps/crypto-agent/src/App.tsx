@@ -1025,6 +1025,7 @@ function useChartNavigation({
   const prefetchRequested = useRef(false);
   const wheelZoomRemainder = useRef(0);
   const zoomSaveTimer = useRef<number | null>(null);
+  const applyZoomRef = useRef<(next: number, anchor: number) => void>(() => {});
   visibleCountRef.current = visibleCount;
   historyOffsetRef.current = historyOffset;
   const updateOffset = (next: number) => {
@@ -1057,6 +1058,7 @@ function useChartNavigation({
       ),
     );
   };
+  applyZoomRef.current = applyZoom;
   const saveZoom = () =>
     window.localStorage.setItem(storageKey, String(visibleCountRef.current));
   const requestOlder = () => {
@@ -1200,7 +1202,7 @@ function useChartNavigation({
       const steps = Math.trunc(wheelZoomRemainder.current);
       if (!steps) return;
       wheelZoomRemainder.current -= steps;
-      applyZoom(
+      applyZoomRef.current(
         visibleCountRef.current + steps,
         Math.min(1, Math.max(0, (event.clientX - bounds.left) / bounds.width)),
       );
@@ -1216,7 +1218,7 @@ function useChartNavigation({
     };
     const change = (event: Event) => {
       const scale = (event as Event & { scale?: number }).scale || 1;
-      applyZoom(
+      applyZoomRef.current(
         Math.round(pinchStartCount.current / (scale / startScale)),
         0.5,
       );
@@ -1233,7 +1235,7 @@ function useChartNavigation({
       svg.removeEventListener("gesturechange", change);
       svg.removeEventListener("gestureend", end);
     };
-  });
+  }, [Boolean(times.length)]);
   return {
     chartRef,
     dragged,
