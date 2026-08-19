@@ -45,6 +45,7 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import {
   appendedPointCount,
+  fillSecondRows,
   klineWindow,
   mergeKlineRows,
   mergeTradeIntoSecondRows,
@@ -237,6 +238,8 @@ const LEFT_SIDEBAR_MIN = 160;
 const TIME_SHARE_ZOOM_KEY = "crypto-agent-time-share-visible-points";
 const MIN_TIME_SHARE_POINTS = 9;
 const MAX_TIME_SHARE_POINTS = 145;
+const MIN_KLINE_POINTS = 9;
+const MAX_KLINE_POINTS = 129;
 
 declare global {
   interface Window {
@@ -1672,9 +1675,9 @@ function CoinMWorkspace({
   const [klineOffset, setKlineOffset] = useState(0);
   const [klineVisibleCount, setKlineVisibleCount] = useState(() =>
     Math.min(
-      145,
+      MAX_KLINE_POINTS,
       Math.max(
-        9,
+        MIN_KLINE_POINTS,
         Number(
           window.localStorage.getItem("crypto-agent-kline-visible-points"),
         ) || 120,
@@ -1803,7 +1806,7 @@ function CoinMWorkspace({
           if (!active) return;
           pendingSecondRows.current = mergeKlineRows(
             pendingSecondRows.current,
-            result.klines,
+            fillSecondRows(result.klines),
           );
           setSecondRows(pendingSecondRows.current);
         })
@@ -2206,7 +2209,9 @@ function CoinMWorkspace({
         `/${marketType}-1s?symbol=${marketSymbol}&endTime=${before - 1}`,
       )
         .then((result) => {
-          const older = result.klines.filter((row) => Number(row[0]) < before);
+          const older = fillSecondRows(result.klines).filter(
+            (row) => Number(row[0]) < before,
+          );
           oldestReached.current = older.length === 0;
           if (!older.length) return;
           pendingSecondRows.current = mergeKlineRows(
@@ -2245,8 +2250,8 @@ function CoinMWorkspace({
     historyOffset: klineOffset,
     setHistoryOffset: setKlineOffset,
     step,
-    minPoints: 9,
-    maxPoints: 145,
+    minPoints: MIN_KLINE_POINTS,
+    maxPoints: MAX_KLINE_POINTS,
     warmupPoints: 99,
     storageKey: "crypto-agent-kline-visible-points",
     onLoadOlder: loadOlderKlines,

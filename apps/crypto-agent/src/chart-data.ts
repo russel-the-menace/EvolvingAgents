@@ -52,11 +52,31 @@ export function mergeKlineRows(current: KlineRow[], incoming: KlineRow[]) {
   return next;
 }
 
+export function fillSecondRows(rows: KlineRow[], limit = 240) {
+  const filled: KlineRow[] = [];
+  for (const row of rows) {
+    const time = Number(row[0]);
+    const previous = filled.at(-1);
+    if (previous && time <= Number(previous[0])) {
+      if (time === Number(previous[0])) filled[filled.length - 1] = row;
+      continue;
+    }
+    if (previous) {
+      const close = Number(previous[4]);
+      for (let missing = Number(previous[0]) + 1_000; missing < time; missing += 1_000)
+        filled.push([missing, close, close, close, close, 0, missing + 999, 0]);
+    }
+    filled.push(row);
+  }
+  return filled.slice(-limit);
+}
+
 export function mergeTradeIntoSecondRows(current: KlineRow[], timestamp: number, price: number, quantity: number, limit = 240) {
   const time = Math.floor(timestamp / 1_000) * 1_000;
   const last = current.at(-1);
   if (last && Number(last[0]) > time) return current;
-  if (!last || Number(last[0]) !== time) return [...current, [time, price, price, price, price, quantity, time + 999, price * quantity]].slice(-limit);
+  if (!last || Number(last[0]) !== time)
+    return fillSecondRows([...current, [time, price, price, price, price, quantity, time + 999, price * quantity]], limit);
   const next = [...current];
   next[next.length - 1] = [time, last[1], Math.max(Number(last[2]), price), Math.min(Number(last[3]), price), price, Number(last[5]) + quantity, time + 999, Number(last[7]) + price * quantity];
   return next;

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { anchoredTickIndices, appendedPointCount, klineWindow, mergeKlineRows, mergeTradeIntoSecondRows, nearHistoryStart, zoomWindowOffset } from '../src/chart-data.ts';
+import { anchoredTickIndices, appendedPointCount, fillSecondRows, klineWindow, mergeKlineRows, mergeTradeIntoSecondRows, nearHistoryStart, zoomWindowOffset } from '../src/chart-data.ts';
 
 test('merges older pages and live candles without sorting or duplicates', () => {
   const current = [[3, 'old-3'], [4, 'old-4']];
@@ -15,6 +15,16 @@ test('aggregates trades into bounded one-second OHLCV rows', () => {
   rows = mergeTradeIntoSecondRows(rows, 2_100, 103, 1);
   assert.deepEqual(rows, [[1_000, 100, 105, 100, 105, 5, 1_999, 515], [2_000, 103, 103, 103, 103, 1, 2_999, 103]]);
   assert.equal(mergeTradeIntoSecondRows(rows, 900, 99, 1), rows);
+});
+
+test('fills quiet seconds with the previous close', () => {
+  const rows = fillSecondRows([
+    [1_000, 100, 101, 99, 100, 2, 1_999, 200],
+    [4_000, 103, 104, 102, 103, 1, 4_999, 103],
+  ]);
+  assert.deepEqual(rows.map((row) => row[0]), [1_000, 2_000, 3_000, 4_000]);
+  assert.deepEqual(rows[1], [2_000, 100, 100, 100, 100, 0, 2_999, 0]);
+  assert.deepEqual(fillSecondRows(rows, 2).map((row) => row[0]), [3_000, 4_000]);
 });
 
 test('moves the visible K-line window left and right without crossing its bounds', () => {
