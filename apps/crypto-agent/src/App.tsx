@@ -1197,9 +1197,9 @@ function useChartNavigation({
     const svg = chartRef.current;
     if (!svg) return;
     const wheel = (event: WheelEvent) => {
+      if (!event.ctrlKey || !event.deltaY) return;
       event.preventDefault();
       const bounds = svg.getBoundingClientRect();
-      if (!event.deltaY) return;
       const appliedSteps = event.deltaY < 0 ? -1 : 1;
       applyZoomRef.current(
         visibleCountRef.current + appliedSteps,
