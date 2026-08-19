@@ -1806,8 +1806,8 @@ function CoinMWorkspace({
         .then((result) => {
           if (!active) return;
           pendingSecondRows.current = mergeKlineRows(
-            pendingSecondRows.current,
             fillSecondRows(result.klines),
+            pendingSecondRows.current,
           );
           setSecondRows(pendingSecondRows.current);
         })
@@ -1964,6 +1964,16 @@ function CoinMWorkspace({
       const next = pendingRelay.current;
       if (!next || !active) return;
       pendingRelay.current = null;
+      const relayPrice = Number(next.premium.markPrice);
+      if (interval === "1s" && relayPrice > 0) {
+        pendingSecondRows.current = mergeTradeIntoSecondRows(
+          pendingSecondRows.current,
+          Date.now(),
+          relayPrice,
+          0,
+        );
+        setSecondRows(pendingSecondRows.current);
+      }
       setMarket((current) => {
         if (!next.partial || !current || !next.klines[0]) return next;
         const klines = [...current.klines];
@@ -2597,7 +2607,10 @@ function CoinMWorkspace({
               </g>
               {candles.map((item, index) => {
                 const x = pad + index * step + step / 2;
-                const rising = item.close >= item.open;
+                const displayOpen = candles[index - 1]?.close ?? item.open;
+                const displayHigh = Math.max(item.high, displayOpen);
+                const displayLow = Math.min(item.low, displayOpen);
+                const rising = item.close >= displayOpen;
                 return (
                   <g
                     className={rising ? "candle-up" : "candle-down"}
@@ -2605,14 +2618,19 @@ function CoinMWorkspace({
                   >
                     <rect
                       x={x - step / 2}
-                      y={Math.min(y(item.open), y(item.close))}
+                      y={Math.min(y(displayOpen), y(item.close))}
                       width={step}
                       height={Math.max(
                         1,
-                        Math.abs(y(item.open) - y(item.close)),
+                        Math.abs(y(displayOpen) - y(item.close)),
                       )}
                     />
-                    <line x1={x} x2={x} y1={y(item.high)} y2={y(item.low)} />
+                    <line
+                      x1={x}
+                      x2={x}
+                      y1={y(displayHigh)}
+                      y2={y(displayLow)}
+                    />
                   </g>
                 );
               })}
