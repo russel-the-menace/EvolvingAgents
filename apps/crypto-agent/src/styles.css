@@ -81,9 +81,8 @@ button { cursor: pointer; }
 .market-event { border-top: 1px solid var(--border); padding: 9px 0; }
 .market-event.breaking { border-left: 3px solid var(--red); padding-left: 8px; }
 .market-event > div { display: flex; justify-content: space-between; color: var(--muted); font-size: 9px; }
-.market-event strong { display: block; margin-top: 4px; color: var(--ink); font-size: 11px; line-height: 1.35; }
-.market-event p { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; margin: 4px 0 0; color: var(--muted); font-size: 10px; font-variant-numeric: tabular-nums; }
-.market-event p b { font-size: 10px; }
+.market-event a { display: -webkit-box; overflow: hidden; margin-top: 4px; color: var(--ink); font-size: 11px; line-height: 1.4; text-decoration: none; -webkit-box-orient: vertical; -webkit-line-clamp: 3; }
+.market-event a:hover { text-decoration: underline; }
 .market-empty { margin: 10px 0; color: var(--muted); font-size: 11px; }
 .news-item.entering { animation: news-enter .34s cubic-bezier(.22, 1, .36, 1) both; }
 @keyframes news-enter { from { opacity: 0; transform: translateY(-8px); } to { opacity: 1; transform: translateY(0); } }

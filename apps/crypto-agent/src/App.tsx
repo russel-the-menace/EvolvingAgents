@@ -313,7 +313,7 @@ function recentNewsWelcome(items: NewsItem[]) {
   return sentence.length > 120 ? `${sentence.slice(0, 117)}...` : sentence;
 }
 
-function MarketPanel({ items }: { items: MarketEvent[] }) {
+function MarketPanel({ items }: { items: NewsItem[] }) {
   return (
     <section className="market-panel" aria-label="市场动态">
       <div className="section-title">
@@ -323,48 +323,25 @@ function MarketPanel({ items }: { items: MarketEvent[] }) {
         {items.length ? (
           items.map((item) => (
             <article
-              className={`market-event${item.severity === "breaking" ? " breaking" : ""}`}
+              className={`market-event${item.urgency === "breaking" ? " breaking" : ""}`}
               key={item.id}
             >
               <div>
-                <span>{item.symbol}</span>
+                <span>{item.source}</span>
                 <time>
-                  {new Date(item.observedAt).toLocaleTimeString([], {
+                  {new Date(item.publishedAt).toLocaleTimeString([], {
                     hour: "2-digit",
                     minute: "2-digit",
                   })}
                 </time>
               </div>
-              <strong>
-                {item.eventType === "market_update"
-                  ? "5 分钟行情"
-                  : item.direction === "up"
-                    ? "向上"
-                    : "向下"}
-                {item.eventType !== "market_update" && item.threshold
-                  ? `突破 ${item.threshold.toLocaleString("en-US")}`
-                  : item.eventType !== "market_update"
-                    ? "异常波动"
-                    : ""}
-              </strong>
-              <p>
-                {item.price.toLocaleString("en-US", {
-                  maximumFractionDigits: 2,
-                })}
-                {item.previousPrice > 0 && (
-                  <b
-                    className={
-                      item.direction === "up" ? "positive" : "negative"
-                    }
-                  >
-                    {`${item.direction === "up" ? "+" : ""}${(((item.price - item.previousPrice) / item.previousPrice) * 100).toFixed(2)}%`}
-                  </b>
-                )}
-              </p>
+              <a href={item.url} target="_blank" rel="noreferrer">
+                {item.title}
+              </a>
             </article>
           ))
         ) : (
-          <p className="market-empty">等待市场事件</p>
+          <p className="market-empty">市场消息正在同步</p>
         )}
       </div>
     </section>
@@ -3111,7 +3088,6 @@ export function App() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [news, setNews] = useState<NewsItem[]>([]);
-  const [marketEvents, setMarketEvents] = useState<MarketEvent[]>([]);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [leftWidth, setLeftWidth] = useState(() =>
     Math.min(
@@ -3273,27 +3249,9 @@ export function App() {
   }, []);
   useEffect(() => {
     const stream = new EventSource("/api/market-events/stream");
-    const addMarketEvents = (incoming: MarketEvent[]) =>
-      setMarketEvents((current) =>
-        [...incoming, ...current]
-          .filter(
-            (item, index, rows) =>
-              rows.findIndex((candidate) => candidate.id === item.id) === index,
-          )
-          .sort((left, right) => right.observedAt - left.observedAt)
-          .slice(0, 100),
-      );
-    const add = (event: MessageEvent<string>) => {
-      const payload = JSON.parse(event.data) as {
-        item?: MarketEvent;
-        items?: MarketEvent[];
-      };
-      addMarketEvents(payload.item ? [payload.item] : payload.items || []);
-    };
     const onBreaking = (event: MessageEvent<string>) => {
       const item = (JSON.parse(event.data) as { item: MarketEvent }).item;
       if (!item) return;
-      addMarketEvents([item]);
       const threshold = item.threshold ? `突破 ${item.threshold.toLocaleString("en-US", { maximumFractionDigits: 2 })}` : "出现异常波动";
       const price = item.price.toLocaleString("en-US", { maximumFractionDigits: 2 });
       const body = `${item.symbol} ${item.direction === "up" ? "向上" : "向下"}${threshold}，最新成交价 ${price}。`;
@@ -3301,8 +3259,6 @@ export function App() {
       else if (typeof Notification !== "undefined" && Notification.permission === "granted") new Notification("CryptoAgent 市场异动", { body });
       appendAgentNotice(`市场异动：${body}`, "市场提醒");
     };
-    stream.addEventListener("ready", add);
-    stream.addEventListener("item", add);
     stream.addEventListener("breaking", onBreaking);
     return () => stream.close();
   }, []);
@@ -3541,7 +3497,7 @@ export function App() {
               )}
             </div>
           </nav>
-          <MarketPanel items={marketEvents} />
+          <MarketPanel items={news} />
         </div>
         <button
           className="settings-entry"

@@ -100,19 +100,5 @@ class DepthSequenceTest(unittest.TestCase):
             self.assertEqual(len(rows), 1)
             self.assertEqual(rows[0]["close"], 101)
 
-    def test_backfills_regular_five_minute_market_updates(self) -> None:
-        with tempfile.TemporaryDirectory() as directory:
-            relay = Relay(f"{directory}/features.sqlite")
-            relay._init_feature_db()
-            now = int(time.time() * 1000) // 60_000 * 60_000
-            with closing(sqlite3.connect(relay.feature_db)) as db, db:
-                db.executemany("INSERT INTO market_candles VALUES (?, '1m', ?, ?, ?, ?, ?, ?, ?, ?)",
-                               [("BTCUSD_PERP", now - (5 - index) * 60_000, 100, 102, 99, 100 + index, 10, now, 1000) for index in range(5)])
-            relay._backfill_market_updates()
-            event = relay.events()[0]
-            self.assertEqual(event["eventType"], "market_update")
-            self.assertEqual(event["severity"], "normal")
-
-
 if __name__ == "__main__":
     unittest.main()
