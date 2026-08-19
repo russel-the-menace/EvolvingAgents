@@ -243,7 +243,7 @@ async function tradeContext(message) {
     const candles = recent.length ? await remoteMarketHistory(Math.min(...recent.map((row) => Number(row.time))) - 30 * 60_000, Math.max(...recent.map((row) => Number(row.time))) + 30 * 60_000) : [];
     const byMinute = new Map(candles.map((row) => [Math.floor(row.time / 60_000), row]));
     const trades = rows.map((row) => ({ ...row, marketAtTrade: byMinute.get(Math.floor(Number(row.time) / 60_000)) || null }));
-    const products = Object.fromEntries(['spot', 'margin', 'usdm'].map((product) => [product, rows.filter((row) => row.product === product).length]));
+    const products = Object.fromEntries(['spot', 'margin', 'usdm', 'coinm'].map((product) => [product, rows.filter((row) => row.product === product).length]));
     return { products, marketProxy: 'Binance COIN-M BTCUSD_PERP 1m', count: rows.length, realizedPnl: pnl, commission, trades };
   } catch { return null; }
 }
@@ -459,7 +459,7 @@ export function createCryptoServer() {
       if (request.method === 'GET' && request.url?.startsWith('/api/trades')) {
         const query = new URL(request.url, 'http://localhost').searchParams;
         const product = query.get('product') || ''; const symbol = query.get('symbol')?.toUpperCase() || '';
-        if (product && !['spot', 'margin', 'usdm'].includes(product)) return sendJson(response, 400, { error: 'Product is not allowed.' });
+        if (product && !['spot', 'margin', 'usdm', 'coinm'].includes(product)) return sendJson(response, 400, { error: 'Product is not allowed.' });
         const limit = Math.min(1000, Math.max(1, Number(query.get('limit') || 500)));
         const startTime = Number(query.get('startTime') || Date.now() - 7 * 24 * 60 * 60_000); const endTime = Number(query.get('endTime') || Date.now());
         if (![limit, startTime, endTime].every(Number.isFinite) || startTime < 0 || endTime <= startTime) return sendJson(response, 400, { error: 'Trade query is not valid.' });
