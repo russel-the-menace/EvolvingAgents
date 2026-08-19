@@ -297,7 +297,7 @@ function NewsPanel({
   const known = useRef<Set<string> | null>(null);
   const [pullDistance, setPullDistance] = useState(0);
   const pullThreshold = 44;
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!known.current) known.current = new Set(items.map((item) => item.id));
     else for (const item of items) known.current.add(item.id);
   }, [items]);
@@ -1024,7 +1024,6 @@ function useChartNavigation({
   const pinchAnchor = useRef(0.5);
   const prefetchRequested = useRef(false);
   const wheelZoomRemainder = useRef(0);
-  const wheelHandlerRef = useRef<((event: WheelEvent) => void) | null>(null);
   const zoomSaveTimer = useRef<number | null>(null);
   visibleCountRef.current = visibleCount;
   historyOffsetRef.current = historyOffset;
@@ -1190,32 +1189,25 @@ function useChartNavigation({
       saveZoom();
     }
   };
-  wheelHandlerRef.current = (event) => {
-    if (!event.ctrlKey && !event.metaKey) return;
-    const svg = chartRef.current;
-    if (!svg || !svg.contains(event.target as Node)) return;
-    event.preventDefault();
-    const bounds = svg.getBoundingClientRect();
-    wheelZoomRemainder.current += event.deltaY / 36;
-    const steps = Math.trunc(wheelZoomRemainder.current);
-    if (!steps) return;
-    wheelZoomRemainder.current -= steps;
-    applyZoom(
-      visibleCountRef.current + steps,
-      Math.min(1, Math.max(0, (event.clientX - bounds.left) / bounds.width)),
-    );
-    if (zoomSaveTimer.current !== null)
-      window.clearTimeout(zoomSaveTimer.current);
-    zoomSaveTimer.current = window.setTimeout(saveZoom, 180);
-  };
-  useEffect(() => {
-    const wheel = (event: WheelEvent) => wheelHandlerRef.current?.(event);
-    window.addEventListener("wheel", wheel, { capture: true, passive: false });
-    return () => window.removeEventListener("wheel", wheel, true);
-  }, []);
-  useEffect(() => {
+  useLayoutEffect(() => {
     const svg = chartRef.current;
     if (!svg) return;
+    const wheel = (event: WheelEvent) => {
+      if (!event.ctrlKey && !event.metaKey) return;
+      event.preventDefault();
+      const bounds = svg.getBoundingClientRect();
+      wheelZoomRemainder.current += event.deltaY / 36;
+      const steps = Math.trunc(wheelZoomRemainder.current);
+      if (!steps) return;
+      wheelZoomRemainder.current -= steps;
+      applyZoom(
+        visibleCountRef.current + steps,
+        Math.min(1, Math.max(0, (event.clientX - bounds.left) / bounds.width)),
+      );
+      if (zoomSaveTimer.current !== null)
+        window.clearTimeout(zoomSaveTimer.current);
+      zoomSaveTimer.current = window.setTimeout(saveZoom, 180);
+    };
     let startScale = 1;
     const start = (event: Event) => {
       startScale = (event as Event & { scale?: number }).scale || 1;
@@ -1231,15 +1223,17 @@ function useChartNavigation({
       event.preventDefault();
     };
     const end = () => saveZoom();
+    svg.addEventListener("wheel", wheel, { passive: false });
     svg.addEventListener("gesturestart", start, { passive: false });
     svg.addEventListener("gesturechange", change, { passive: false });
     svg.addEventListener("gestureend", end);
     return () => {
+      svg.removeEventListener("wheel", wheel);
       svg.removeEventListener("gesturestart", start);
       svg.removeEventListener("gesturechange", change);
       svg.removeEventListener("gestureend", end);
     };
-  }, [times.length]);
+  });
   return {
     chartRef,
     dragged,
@@ -1810,7 +1804,9 @@ function CoinMWorkspace({
         ? window.setInterval(() => {
             void api<CoinMMarket>(`/usdm-1s?symbol=${marketSymbol}`)
               .then((result) => {
-                if (active) setSecondRows(result.klines.map((row) => row));
+                if (!active) return;
+                pendingSecondRows.current = result.klines.map((row) => row);
+                setSecondRows(pendingSecondRows.current);
               })
               .catch(() => {});
           }, 1_000)
@@ -2064,11 +2060,11 @@ function CoinMWorkspace({
   const last = livePrice;
   const xAxisIndices = candles.length
     ? [
-        ...new Set([
-          0,
-          Math.floor((candles.length - 1) / 2),
-          candles.length - 1,
-        ]),
+        ...new Set(
+          Array.from({ length: 3 }, (_, index) =>
+            Math.floor(((candles.length - 1) * index) / 2),
+          ),
+        ),
       ]
     : [];
   const axisTime = (time: number) =>
@@ -2076,6 +2072,8 @@ function CoinMWorkspace({
       "zh-CN",
       interval === "1s"
         ? {
+            month: "2-digit",
+            day: "2-digit",
             hour: "2-digit",
             minute: "2-digit",
             second: "2-digit",
