@@ -1023,7 +1023,6 @@ function useChartNavigation({
   const pinchStartCount = useRef(visibleCount);
   const pinchAnchor = useRef(0.5);
   const prefetchRequested = useRef(false);
-  const wheelZoomRemainder = useRef(0);
   const zoomSaveTimer = useRef<number | null>(null);
   const applyZoomRef = useRef<(next: number, anchor: number) => void>(() => {});
   visibleCountRef.current = visibleCount;
@@ -1195,15 +1194,12 @@ function useChartNavigation({
     const svg = chartRef.current;
     if (!svg) return;
     const wheel = (event: WheelEvent) => {
-      if (!event.ctrlKey && !event.metaKey) return;
       event.preventDefault();
       const bounds = svg.getBoundingClientRect();
-      wheelZoomRemainder.current += event.deltaY / 36;
-      const steps = Math.trunc(wheelZoomRemainder.current);
-      if (!steps) return;
-      wheelZoomRemainder.current -= steps;
+      if (!event.deltaY) return;
+      const appliedSteps = event.deltaY < 0 ? -1 : 1;
       applyZoomRef.current(
-        visibleCountRef.current + steps,
+        visibleCountRef.current + appliedSteps,
         Math.min(1, Math.max(0, (event.clientX - bounds.left) / bounds.width)),
       );
       if (zoomSaveTimer.current !== null)
