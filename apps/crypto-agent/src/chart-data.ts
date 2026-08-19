@@ -20,6 +20,15 @@ export function appendedPointCount(times: number[], previousLastTime: number | n
   return previousLast < 0 ? 0 : times.length - previousLast - 1;
 }
 
+export function zoomWindowOffset(total: number, offset: number, oldCount: number, newCount: number, anchorFraction = .5) {
+  const oldVisible = Math.min(total, oldCount); const nextVisible = Math.min(total, newCount); const anchor = Math.min(1, Math.max(0, anchorFraction));
+  const oldEnd = total - 1 - Math.min(Math.max(0, total - oldVisible), Math.max(0, offset));
+  const oldStart = Math.max(0, oldEnd - oldVisible + 1);
+  const anchorIndex = oldStart + anchor * Math.max(0, oldVisible - 1);
+  const nextEnd = Math.round(anchorIndex + (1 - anchor) * Math.max(0, nextVisible - 1));
+  return Math.min(Math.max(0, total - nextVisible), Math.max(0, total - 1 - nextEnd));
+}
+
 export function mergeKlineRows(current: KlineRow[], incoming: KlineRow[]) {
   // ponytail: History stays in memory; move pages to IndexedDB if multi-year minute browsing becomes a normal workflow.
   if (!current.length) return [...incoming].sort((a, b) => Number(a[0]) - Number(b[0]));

@@ -1,8 +1,8 @@
-import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { ArrowDownLeft, ArrowLeft, ArrowLeftRight, ArrowUpRight, Bot, Check, ChevronDown, ChevronRight, CircleDollarSign, Eye, FileText, History, Home, LineChart, MessageSquare, Monitor, Moon, MoreHorizontal, PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen, Plus, RefreshCw, Search, SendHorizontal, Settings2, ShieldCheck, Sun, WalletCards, X } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { anchoredTickIndices, appendedPointCount, klineWindow, mergeKlineRows, mergeTradeIntoSecondRows, type KlineRow } from './chart-data';
+import { anchoredTickIndices, appendedPointCount, klineWindow, mergeKlineRows, mergeTradeIntoSecondRows, zoomWindowOffset, type KlineRow } from './chart-data';
 import { aggregateAssetBalances } from './asset-summary';
 
 type ModelId = 'gpt-5.6-luna' | 'gpt-5.6-sol' | 'gpt-5.6-terra';
@@ -25,6 +25,9 @@ type MarketContext = { symbol: string; interval: string; candles: CoinMCandle[];
 type ImageAttachment = { dataUrl: string; name: string; type: string };
 type FuturesTrade = { id: number; orderId: number; symbol: string; side: string; positionSide?: string; price: string; qty: string; commission: string; commissionAsset: string; realizedPnl: string; time: number; maker?: boolean };
 const LEFT_SIDEBAR_MIN = 160;
+const TIME_SHARE_ZOOM_KEY = 'crypto-agent-time-share-visible-points';
+const MIN_TIME_SHARE_POINTS = 9;
+const MAX_TIME_SHARE_POINTS = 145;
 
 declare global { interface Window { cryptoAgent?: { notify: (title: string, body: string) => void } } }
 
@@ -169,12 +172,21 @@ type CoinMCandle = { time: number; open: number; high: number; low: number; clos
 
 function TimeShareChart({ candles, selectedIndex, onSelect, onLoadOlder, onVisibleChange, last }: { candles: CoinMCandle[]; selectedIndex: number | null; onSelect: (index: number) => void; onLoadOlder: () => void; onVisibleChange: (candles: CoinMCandle[]) => void; last: number }) {
   const [historyOffset, setHistoryOffset] = useState(0);
-  const candleTimes = candles.map((item) => item.time);
+  const [visibleCount, setVisibleCount] = useState(() => {
+    const saved = Number(window.localStorage.getItem(TIME_SHARE_ZOOM_KEY));
+    return Number.isFinite(saved) ? Math.min(MAX_TIME_SHARE_POINTS, Math.max(MIN_TIME_SHARE_POINTS, Math.round(saved))) : 120;
+  });
+  const candleTimes = useMemo(() => candles.map((item) => item.time), [candles]);
   const dragStart = useRef<number | null>(null);
   const dragAnchor = useRef(0);
   const pendingPointerX = useRef<number | null>(null);
   const dragFrame = useRef<number | null>(null);
   const dragged = useRef(false);
+  const pinchStartDistance = useRef<number | null>(null);
+  const pinchStartCount = useRef(visibleCount);
+  const pinchAnchor = useRef(.5);
+  const activePointers = useRef(new Map<number, number>());
+  const prefetchRequested = useRef(false);
   const previousLastTime = useRef<number | null>(candleTimes.at(-1) ?? null);
   const timeAxis = useRef<{ anchorTime: number; spacing: number; candleSpacing: number } | null>(null);
   useEffect(() => {
@@ -182,11 +194,12 @@ function TimeShareChart({ candles, selectedIndex, onSelect, onLoadOlder, onVisib
     if (appended > 0) {
       setHistoryOffset((current) => current > 0 ? current + appended : 0);
       if (dragStart.current !== null) dragAnchor.current += appended;
+      prefetchRequested.current = false;
     }
     previousLastTime.current = candleTimes.at(-1) ?? null;
   }, [candles.length, candleTimes.at(-1)]);
   const width = 900; const height = 330; const pad = 36;
-  const visibleEnd = Math.max(0, candles.length - 1 - historyOffset); const start = Math.max(0, visibleEnd - 119); const visibleCandles = candles.slice(start, visibleEnd + 1);
+  const visibleEnd = Math.max(0, candles.length - 1 - historyOffset); const start = Math.max(0, visibleEnd - visibleCount + 1); const visibleCandles = candles.slice(start, visibleEnd + 1);
   const low = visibleCandles.length ? Math.min(...visibleCandles.map((item) => item.low)) : 0; const high = visibleCandles.length ? Math.max(...visibleCandles.map((item) => item.high)) : 1; const range = high - low || 1; const step = (width - pad * 2) / Math.max(visibleCandles.length, 1);
   const y = (price: number) => pad + (high - price) / range * (height - pad * 2);
   const closes = visibleCandles.map((item) => item.close);
@@ -205,18 +218,33 @@ function TimeShareChart({ candles, selectedIndex, onSelect, onLoadOlder, onVisib
   }
   const datePoints = timeAxis.current ? anchoredTickIndices(candleTimes, start, visibleEnd, timeAxis.current.anchorTime, timeAxis.current.spacing).map((index) => ({ time: candles[index].time, x: pad + (index - start) * step + step / 2 })) : [];
   const formatTime = (time: number) => new Date(time).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
-  const handlePointerDown = (event: React.PointerEvent<SVGSVGElement>) => { dragStart.current = event.clientX; dragAnchor.current = historyOffset; dragged.current = false; event.currentTarget.setPointerCapture(event.pointerId); };
+  const handlePointerDown = (event: React.PointerEvent<SVGSVGElement>) => {
+    activePointers.current.set(event.pointerId, event.clientX); event.currentTarget.setPointerCapture(event.pointerId);
+    if (activePointers.current.size >= 2) {
+      const xs = [...activePointers.current.values()]; pinchStartDistance.current = Math.abs(xs[1] - xs[0]) || 1; pinchStartCount.current = visibleCount;
+      const bounds = event.currentTarget.getBoundingClientRect(); pinchAnchor.current = Math.min(1, Math.max(0, ((xs[0] + xs[1]) / 2 - bounds.left) / bounds.width));
+      dragStart.current = null; return;
+    }
+    dragStart.current = event.clientX; dragAnchor.current = historyOffset; dragged.current = false;
+  };
   const handlePointerMove = (event: React.PointerEvent<SVGSVGElement>) => {
+    if (activePointers.current.has(event.pointerId)) activePointers.current.set(event.pointerId, event.clientX);
+    if (activePointers.current.size >= 2 && pinchStartDistance.current !== null) {
+      const xs = [...activePointers.current.values()]; const distance = Math.abs(xs[1] - xs[0]) || 1;
+      const nextCount = Math.min(MAX_TIME_SHARE_POINTS, Math.max(MIN_TIME_SHARE_POINTS, Math.round(pinchStartCount.current * pinchStartDistance.current / distance)));
+      if (nextCount !== visibleCount) { setVisibleCount(nextCount); setHistoryOffset((current) => zoomWindowOffset(candles.length, current, visibleCount, nextCount, pinchAnchor.current)); }
+      return;
+    }
     pendingPointerX.current = event.clientX;
     if (dragFrame.current !== null) return;
     dragFrame.current = window.requestAnimationFrame(() => {
       dragFrame.current = null; if (dragStart.current === null || pendingPointerX.current === null) return;
       const delta = pendingPointerX.current - dragStart.current; if (Math.abs(delta) > 3) dragged.current = true;
-      const maximum = Math.max(0, candles.length - 120); const nextOffset = Math.max(0, Math.min(maximum, dragAnchor.current + Math.round(delta / Math.max(step, 1))));
-      setHistoryOffset(nextOffset); if (delta > step && nextOffset === maximum && candles.length) onLoadOlder();
+      const maximum = Math.max(0, candles.length - visibleCount); const nextOffset = Math.max(0, Math.min(maximum, dragAnchor.current + Math.round(delta / Math.max(step, 1))));
+      setHistoryOffset(nextOffset); if (delta > step && nextOffset >= Math.max(0, maximum - visibleCount) && candles.length && !prefetchRequested.current) { prefetchRequested.current = true; onLoadOlder(); }
     });
   };
-  const handlePointerUp = (event: React.PointerEvent<SVGSVGElement>) => { if (dragFrame.current !== null) window.cancelAnimationFrame(dragFrame.current); dragFrame.current = null; pendingPointerX.current = null; dragStart.current = null; event.currentTarget.releasePointerCapture(event.pointerId); };
+  const handlePointerUp = (event: React.PointerEvent<SVGSVGElement>) => { if (dragFrame.current !== null) window.cancelAnimationFrame(dragFrame.current); dragFrame.current = null; pendingPointerX.current = null; activePointers.current.delete(event.pointerId); if (activePointers.current.size < 2 && pinchStartDistance.current !== null) { pinchStartDistance.current = null; window.localStorage.setItem(TIME_SHARE_ZOOM_KEY, String(visibleCount)); } dragStart.current = null; if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId); };
   const handleClick = (event: React.MouseEvent<SVGSVGElement>) => { if (dragged.current) { dragged.current = false; return; } const bounds = event.currentTarget.getBoundingClientRect(); const chartX = (event.clientX - bounds.left) / bounds.width * width; onSelect(start + Math.max(0, Math.min(visibleCandles.length - 1, Math.round((chartX - pad - step / 2) / step)))); };
   return <section className="coinm-time-share">
     <div className="coinm-ma-legend"><span className="time-ma-legend">MA(60): {average.at(-1)?.toLocaleString(undefined, { maximumFractionDigits: 1 }) || '-'}</span></div>
